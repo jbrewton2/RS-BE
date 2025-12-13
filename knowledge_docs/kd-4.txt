@@ -1,0 +1,46 @@
+Audit & Logging Policy
+
+Purpose:
+Define audit logging requirements and monitoring expectations for ASCP in alignment with NIST SP 800-171 Rev 2 and organizational oversight obligations.
+
+Scope:
+Applies to all systems, components, services, administrators, and users within the ASCP CUI Processing Enclave and related support environments.
+
+Roles & Responsibilities:
+• ISSM – Owns audit policy, ensures compliance.
+• ISSO – Reviews logs, manages audit configurations.
+• SOC – Monitors alerts, analyzes security events.
+• DevSecOps – Ensures logging services and pipelines operate correctly.
+• CloudOps – Maintains AWS logging integrations.
+• Users – Must not disable or circumvent audit logging.
+
+Policy Statements:
+1. ASCP must generate audit logs for authentication, authorization, file uploads, CUI access, API calls, admin actions, privilege escalations, and system events.
+2. Audit logging must be enabled at:
+   • Application layer
+   • Kubernetes/EKS layer
+   • Cloud infrastructure (CloudTrail, VPC Flow Logs)
+   • Identity layer (Entra ID, Keycloak)
+   • Database and storage layers
+3. Logs must be forwarded to:
+   • CloudWatch
+   • Kinesis Firehose
+   • Security Lake (immutable S3)
+   • Enterprise SIEM (Splunk Cloud Gov)
+4. All logs must be timestamped via NTP-synchronized clocks and protected from tampering.
+5. Audit logs must be retained:
+   • 1 year hot storage
+   • 7 years immutable archive
+6. SOC must continuously monitor audit logs and escalate suspicious activity.
+7. ISSO must review audit events weekly and monthly, with documented results.
+8. Audit logging must not store CUI content unless absolutely required; CUI snippets must be redacted or tokenized.
+9. Logging pipeline failures must trigger immediate alerts and corrective action.
+10. Users and administrators must not clear, alter, or disable logs.
+
+Control Alignment:
+• NIST SP 800-171 Rev 2 – 3.3.1 through 3.3.8
+
+Enforcement:
+Unauthorized alteration or disabling of logging mechanisms may result in disciplinary action, access termination, and incident escalation.
+
+Version: 1.0

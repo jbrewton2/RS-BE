@@ -1,0 +1,83 @@
+Change Management Policy
+**Purpose**
+The purpose of this Change Management Policy is to establish standardized processes for planning, reviewing, approving, implementing, and documenting changes to the AegisSecure Cloud Platform (ASCP). This ensures all modifications are controlled, authorized, auditable, and do not introduce unacceptable risk to systems processing Controlled Unclassified Information (CUI) in AWS GovCloud (US-East).
+**Scope**
+This policy applies to:
+- All infrastructure, applications, services, databases, network components, and security configurations that make up ASCP.
+- All code changes, configuration updates, infrastructure-as-code (IaC) deployments, container updates, patching cycles, and dependency changes.
+- All personnel performing or approving changes including DevSecOps, Security, Cloud Engineering, System Owners, and contractors.
+**Roles & Responsibilities**
+- **System Owner:** Ensures changes align with system objectives and risk posture.
+- **Security Manager:** Reviews changes for security impact and compliance with NIST 800-171.
+- **DevSecOps Team:** Executes technical changes, maintains IaC repositories, and ensures rollback procedures are in place.
+- **Change Advisory Board (CAB):** Approves significant changes and reviews change documentation.
+- **Users:** Report system issues that may necessitate corrective changes.
+---
+### **Policy Statements**
+#### **1. Change Categorization**
+Changes to ASCP are classified as:
+- **Standard Changes:** Pre-approved, low-risk, routine operational tasks (e.g., rotating access keys, updating log retention).
+- **Normal Changes:** Require review, testing, and CAB approval (e.g., new deployments, infrastructure scaling).
+- **Emergency Changes:** Implemented to immediately resolve an outage or critical vulnerability; require post-implementation review.
+#### **2. Change Request Requirements**
+All non-standard changes must include:
+- Description of the change
+- Business justification
+- Security and compliance impact assessment
+- Implementation plan
+- Backout/rollback plan
+- Testing and validation steps
+- Deployment window and completion criteria
+Change requests must be submitted through the centralized change management system.
+#### **3. Review and Approval**
+- All Normal Changes must be reviewed by the Security Manager for NIST 800-171 impact.
+- CAB approval is required for significant infrastructure or application changes.
+- Emergency Changes may bypass pre-approval but must undergo retrospective CAB review within 48 hours.
+#### **4. Testing & Validation**
+- All changes must be tested in a non-production ASCP environment prior to deployment.
+- Automated CI/CD pipelines must enforce:
+  - SAST/DAST
+  - Dependency and container vulnerability scanning
+  - Infrastructure-as-code validation
+  - Secrets scanning and policy compliance checks
+#### **5. Deployment Controls**
+- Deployments must use controlled CI/CD pipelines with signed artifacts.
+- Production deployments require MFA and privileged elevation via Keycloak RBAC.
+- Changes affecting CUI environments must be executed during approved maintenance windows unless emergency conditions apply.
+#### **6. Configuration Control & Documentation**
+- All approved changes must be documented and linked to:
+  - Git repositories (commits, merge requests)
+  - Infrastructure-as-code manifests
+  - Configuration baselines
+  - Change tickets
+- Post-change validation must confirm:
+  - System functionality
+  - Logging and monitoring continuity
+  - Security control effectiveness
+#### **7. Monitoring & Auditability**
+- All change activity must be logged, including:
+  - Who initiated the change
+  - Who approved the change
+  - What was modified
+  - When deployment occurred
+- CloudTrail, CloudWatch, Git audit logs, and SIEM alerts must track configuration drift or unauthorized modifications.
+---
+### **Control Alignment (NIST SP 800-171 Rev 2)**
+- **3.4.1:** Baseline Configuration
+- **3.4.2:** Configuration Change Control
+- **3.4.3:** Security Impact Analysis
+- **3.4.4:** Access Restrictions for Changes
+- **3.4.5:** Configuration Settings Enforcement
+- **3.4.6:** Least Functionality
+- **3.4.8:** System Component Inventory Updates
+---
+### **Enforcement**
+Failure to comply with this policy may result in:
+- Termination of system access
+- Disciplinary action
+- Revocation of deployment permissions
+- Security incident investigation
+- Reporting to contracting authorities if CUI is impacted
+---
+### **Version**
+**Version 1.0 — 2025-11-24**

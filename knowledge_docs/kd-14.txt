@@ -1,0 +1,78 @@
+CUI Handling & Marking Policy
+**Purpose**
+The purpose of this Controlled Unclassified Information (CUI) Handling & Marking Policy is to establish standardized requirements for identifying, marking, handling, storing, transmitting, and safeguarding CUI within the AegisSecure Cloud Platform (ASCP). This policy ensures full compliance with NIST SP 800‑171 Rev 2, DoDI 5200.48, and applicable federal CUI program requirements.
+**Scope**
+This policy applies to:
+- All ASCP systems and environments processing or storing CUI
+- All personnel with authorized access to ASCP (employees, contractors, administrators, developers)
+- All data flows, documents, logs, backups, communication channels, and integrations that interact with CUI
+- All AWS GovCloud (US-East) infrastructure supporting ASCP, including S3, RDS PostgreSQL, ZTNA gateways, and Keycloak identity services
+**Roles & Responsibilities**
+- **System Owner:** Ensures CUI rules are implemented across the ASCP environment.
+- **Security Manager:** Oversees CUI handling procedures, markings, and training.
+- **DevSecOps Team:** Implements technical safeguards for CUI storage, transmission, and access restrictions.
+- **Users:** Must follow all CUI marking, storage, and handling requirements at all times.
+- **FSO/Security Officer:** Provides authoritative interpretations of CUI program requirements.
+---
+### **Policy Statements**
+#### **1. CUI Identification**
+- All information categorized as CUI under DoDI 5200.48 must be formally identified and protected.
+- ASCP must maintain a current CUI Register documenting CUI types within the system.
+- Data ingested into ASCP workflows must be evaluated for CUI status prior to processing.
+#### **2. CUI Marking Requirements**
+- All documents containing CUI must be marked according to CUI Registry guidance:
+  - Header/Footer: “CONTROLLED”
+  - Portion markings when required
+  - Banner markings when exporting from ASCP
+- Digitally displayed CUI must show clear indicators within the UI.
+- File exports from ASCP must automatically include CUI markings.
+#### **3. CUI Storage**
+- All CUI must reside exclusively within AWS GovCloud (US-East) ASCP‑authorized resources.
+- Storage locations must enforce:
+  - Encryption at rest (AWS KMS, FIPS 140‑2 validated)
+  - S3 Object Lock for immutability
+  - Versioning for all CUI objects
+  - IAM policies enforcing least privilege and deny‑by‑default
+- Local storage of CUI on user endpoints is strictly prohibited.
+#### **4. CUI Transmission**
+- CUI may only be transmitted over:
+  - Encrypted TLS 1.2+ channels
+  - ZTNA‑approved access paths
+  - Enclave-to-enclave encrypted links
+- Email transmission of CUI is prohibited unless using an approved GCC High or GovCloud encrypted channel.
+#### **5. CUI Access Controls**
+- Access must be based on:
+  - Need‑to‑know
+  - Role-Based Access Control through Keycloak
+  - Entra ID GCC High identity verification
+- Multi-factor authentication (MFA) is mandatory.
+#### **6. CUI Handling Procedures**
+- CUI must not be copied, screenshot, exported, or shared outside authorized workflows.
+- Printed CUI is prohibited unless explicitly approved by the Security Manager.
+- Users must lock screens when leaving any workstation with CUI visible.
+#### **7. CUI Metadata & Logging**
+- All access to CUI—including read, write, export, and modification—must be logged centrally.
+- CUI logs must be immutable and protected using CloudTrail, CloudWatch, and SIEM ingestion pipelines.
+#### **8. CUI Disposal & Sanitization**
+- Disposal must use NIST‑approved sanitization controls:
+  - Cryptographic erasure for cloud storage
+  - Secure wiping of block storage
+- Backups containing CUI must be sanitized using the same approved processes.
+---
+### **Control Alignment (NIST SP 800‑171 Rev 2)**
+- **3.1.1–3.1.22:** Access Control for CUI
+- **3.8.1–3.8.5:** Media Protection for CUI
+- **3.13.1–3.13.16:** Encryption & Communications Protection
+- **3.14:** Integrity checks ensuring CUI authenticity
+- **3.3:** Audit requirements for CUI access and modification
+---
+### **Enforcement**
+Violations of this policy may result in:
+- Revocation of access
+- Disciplinary action
+- Mandatory retraining
+- Notification to contracting officers
+- Potential legal or contractual penalties
+---
+### **Version**
+**Version 1.0 — 2025‑11‑24**

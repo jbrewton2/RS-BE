@@ -1,0 +1,77 @@
+Incident Response Policy
+
+Purpose:
+This Incident Response (IR) Policy establishes requirements for detecting, reporting, analyzing, containing, eradicating, and recovering from cybersecurity incidents affecting the AegisSecure Cloud Platform (ASCP). It aligns with NIST SP 800-171 Rev 2 and DFARS 252.204-7012.
+
+Scope:
+Applies to all systems, networks, users, administrators, SOC personnel, DevSecOps, CloudOps, and project enclave teams with responsibilities for ASCP or the broader CUI environment.
+
+Roles & Responsibilities:
+• AO – Approves incident declarations with major business/risk impact.
+• SO – Coordinates business actions and continuity during incidents.
+• ISSM – Leads incident response governance and DFARS 7012 reporting.
+• ISSO – Coordinates technical response, documentation, and evidence preservation.
+• SOC – Executes detection, triage, analysis, response, and escalation.
+• DevSecOps – Provides technical response support; restores services post-incidents.
+• CloudOps – Provides AWS GovCloud-level support for incident containment.
+• Users – Must immediately report suspected incidents.
+
+Policy Statements:
+1. Incident Categories:
+   ASCP classifies incidents as:
+   • Unauthorized access attempts
+   • Suspicious authentication events
+   • Malware infections or blocked malware events
+   • CUI exposure or attempted exfiltration
+   • Privilege escalation attempts
+   • Container runtime compromises
+   • Misconfigurations that expose ASCP assets
+   • Denial-of-service or resource exhaustion attempts
+   • Cloud service abnormalities (GuardDuty findings)
+
+2. Incident Detection:
+   • SOC must continuously monitor SIEM, GuardDuty, CloudTrail, VPC Flow Logs.
+   • SOC alerts must be triaged within 15 minutes.
+   • ASCP logs must never be disabled; tamper-events trigger alerts.
+
+3. Incident Reporting:
+   • Users must report anomalies within 15 minutes.
+   • SOC must notify ISSO and ISSM immediately for confirmed incidents.
+   • DFARS 252.204-7012 reporting must occur within 72 hours of discovery.
+
+4. Containment:
+   • Compromised identities/devices isolated via Conditional Access and ZTNA.
+   • DevSecOps isolates impacted pods or revokes IAM roles as needed.
+   • CloudOps quarantines affected AWS resources.
+
+5. Eradication:
+   • Removal of malware, unauthorized access, compromised containers, or vulnerable configurations.
+   • Patching, secret rotation, or redeployment via CI/CD pipelines.
+
+6. Recovery:
+   • Restoration of services using clean images and infrastructure-as-code.
+   • Validation via post-recovery testing.
+   • Evidence stored in immutable S3 buckets.
+
+7. Forensic Evidence:
+   • Logs preserved for 7 years.
+   • Memory captures for impacted containers (if applicable).
+   • Evidence tracked and tagged as CUI.
+
+8. Post-Incident Review:
+   • Conducted by ISSM and SOC.
+   • Root cause documented.
+   • Remediation entered into POA&M.
+   • Updates applied to training, configurations, and detection rules.
+
+9. Communications Protocol:
+   • Only designated personnel may communicate about incidents.
+   • Sensitive details must not be shared outside authorized teams.
+
+Control Alignment:
+• NIST SP 800-171 Rev 2 – 3.6.1 through 3.6.3.
+
+Enforcement:
+Failure to comply with this policy may result in disciplinary action, access termination, or additional corrective actions.
+
+Version: 1.0

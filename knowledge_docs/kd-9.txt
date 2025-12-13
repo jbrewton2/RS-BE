@@ -1,0 +1,66 @@
+Media Protection Policy
+
+Purpose:
+This Media Protection Policy defines the requirements for protecting, controlling, handling, storing, transporting, sanitizing, and disposing of digital and physical media containing Controlled Unclassified Information (CUI) within the AegisSecure Cloud Platform (ASCP) environment.
+
+Scope:
+This policy applies to all organizational personnel, contractors, systems, devices, and storage locations used to access, store, process, or handle CUI within ASCP, associated enterprise IT systems, and project support enclaves.
+
+Roles & Responsibilities:
+• AO – Provides authority for approval of media exceptions.
+• SO – Ensures business processes align with secure media handling.
+• ISSM – Defines and enforces media handling requirements.
+• ISSO – Oversees day-to-day compliance, documentation, and reporting.
+• DevSecOps/CloudOps – Ensure CUI storage locations (S3, RDS) enforce encryption and access controls.
+• Users – Must follow all media protection rules and report violations.
+
+Policy Statements:
+1. CUI Media Restrictions:
+   • ASCP prohibits the storage of CUI on portable media (USB drives, external HDDs, DVDs).
+   • CUI may only be stored within S3 CUI buckets or encrypted RDS databases.
+   • No CUI may be downloaded to local endpoints unless expressly approved by ISSM.
+
+2. Digital Media Controls:
+   • All digital media containing CUI must be encrypted using FIPS 140-2 compliant mechanisms.
+   • S3 buckets must enforce KMS CMK encryption, Object Lock, and versioning.
+   • RDS must enforce storage-level encryption and TLS-only connections.
+   • Copy/paste, print, and save-as functions must be restricted in ASCP’s viewer.
+
+3. Portable Storage Devices:
+   • USB storage devices are prohibited for CUI.
+   • Exceptions require AO + ISSM approval and must use FIPS-validated encrypted media.
+   • All exceptions must be logged and tracked.
+
+4. Transmission of Media:
+   • CUI may not be emailed, uploaded to unauthorized services, or transmitted using non-approved channels.
+   • All CUI transmission must occur through encrypted TLS 1.2+ and approved workflows.
+
+5. Physical Media Handling:
+   • ASCP uses only cloud-native CUI storage; physical media is not permitted.
+   • If CUI is ever printed (rare, exception-based), documents must be stored in locked containers and shredded using cross-cut destruction.
+   • All prints must be logged and tracked.
+
+6. Media Sanitization:
+   • All CUI media must be sanitized using NIST SP 800-88 Rev 1 compliant techniques.
+   • For cloud storage, sanitization relies on S3 versioning, object locking, lifecycle policy, and cryptographic erasure.
+   • Break-glass object deletion requires ISSM approval and must be logged.
+
+7. Media Retention:
+   • CUI logs, evidence, and artifacts must be retained:
+     - 1 year hot storage
+     - 7 years immutable archive
+   • Retention policies must meet DFARS 252.204-7012 and incident reporting obligations.
+
+8. Prohibited Actions:
+   • Downloading CUI to personal devices.
+   • Uploading CUI to non-ASCP systems.
+   • Printing CUI without approval.
+   • Using unencrypted or unapproved media.
+
+Control Alignment:
+• NIST SP 800-171 Rev 2 – 3.8.1 through 3.8.9
+
+Enforcement:
+Non-compliance may lead to disciplinary action, access revocation, and security incident procedures.
+
+Version: 1.0

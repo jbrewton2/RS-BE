@@ -1,0 +1,679 @@
+[
+  {
+    "id": "50f61febc30946d09e4a6650f7295a61",
+    "name": "Untitled questionnaire",
+    "customer": "",
+    "reviewer": "",
+    "date": "2025-11-28",
+    "status": "Finalized",
+    "raw_text": "Security & Supply Chain Risk Management (SCRM) Questionnaire\n1. Describe your organization's CUI handling procedures and compliance with 32 CFR Part 2002.\n2. Provide details on how your systems implement NIST SP 800-171 Rev2 controls.\n3. Do you maintain a current DoD SPRS score? Provide date and score.\n4. Describe your process for safeguarding CUI during transmission and storage.\n5. Are FIPS 140-2/140-3 validated cryptographic modules used for all encryption?\n6. Outline your organization's cyber incident reporting process under DFARS 252.204-7012.",
+    "questions": [
+      {
+        "id": "q1",
+        "question_text": "Describe your organization's CUI handling procedures and compliance with 32 CFR Part 2002.",
+        "tags": [],
+        "suggested_answer": "We are compliant with NIST 800-171 rev. 2.",
+        "confidence": 1.0,
+        "answer_source": "bank",
+        "status": "auto_approved",
+        "matched_bank_id": "bank-1",
+        "feedback_status": "approved",
+        "feedback_reason": null,
+        "knowledge_sources": null
+      },
+      {
+        "id": "q2",
+        "question_text": "Provide details on how your systems implement NIST SP 800-171 Rev2 controls.",
+        "tags": [],
+        "suggested_answer": "{\n \"answers\": [\n {\n \"id\": \"Q1\",\n \"answer\": \"Our organization implements NIST SP 800-171 Rev2 controls through a combination of technical, administrative, and operational measures. Specifically, we have:\n\n* Implemented access control (AC) consistent with NIST 800-171 AC requirements, including role-based access and multi-factor authentication (MFA).\n* Established incident response and reporting procedures in accordance with NIST SP 800-61 Rev2.\n* Conducted annual risk assessments and implemented mitigation strategies to address identified vulnerabilities.\n\nWe also ensure that our systems are regularly patched and updated to maintain a current baseline of security. Furthermore, we have implemented logging and auditing controls to monitor system activity and detect potential security incidents.\n\nIt's worth noting that some of these controls are inherited from our underlying platforms and customer environments, but we have implemented additional measures to augment and supplement these protections as necessary.\", \n \"confidence\": 0.9\n }\n ]\n}",
+        "confidence": 0.55,
+        "answer_source": "llm",
+        "status": "low_confidence",
+        "matched_bank_id": null,
+        "feedback_status": null,
+        "feedback_reason": null,
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1"
+          },
+          {
+            "doc_id": "kd-2"
+          },
+          {
+            "doc_id": "kd-3"
+          },
+          {
+            "doc_id": "kd-4"
+          },
+          {
+            "doc_id": "kd-5"
+          },
+          {
+            "doc_id": "kd-6"
+          },
+          {
+            "doc_id": "kd-7"
+          },
+          {
+            "doc_id": "kd-8"
+          },
+          {
+            "doc_id": "kd-9"
+          },
+          {
+            "doc_id": "kd-10"
+          },
+          {
+            "doc_id": "kd-11"
+          },
+          {
+            "doc_id": "kd-12"
+          },
+          {
+            "doc_id": "kd-13"
+          },
+          {
+            "doc_id": "kd-14"
+          },
+          {
+            "doc_id": "kd-15"
+          },
+          {
+            "doc_id": "kd-16"
+          },
+          {
+            "doc_id": "kd-17"
+          },
+          {
+            "doc_id": "kd-18"
+          },
+          {
+            "doc_id": "kd-19"
+          }
+        ]
+      },
+      {
+        "id": "q3",
+        "question_text": "Do you maintain a current DoD SPRS score? Provide date and score.",
+        "tags": [],
+        "suggested_answer": "{\"answers\": [ {\"id\": \"...\", \"answer\": \"This is not applicable to our organization as we are not a cleared contractor. We do, however, have controls in place that align with the requirements of NIST SP 800-171 and DFARS 252.204-7012.\", \"confidence\": 0.5} ]}\n\nNote: The confidence level is set to 0.5 because while I can provide a general statement about not being applicable, it's based on assumptions rather than direct information from the question bank or knowledge context.\n\nAlso note that if this were an actual questionnaire response, you would want to include the organization's unique id and the date of the last assessment in the answer to ensure auditability. However, since there is no positive example or knowledge context provided, I've kept the answer conservative and highlighted uncertainty with a medium confidence level.",
+        "confidence": 0.55,
+        "answer_source": "llm",
+        "status": "low_confidence",
+        "matched_bank_id": null,
+        "feedback_status": null,
+        "feedback_reason": null,
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1"
+          },
+          {
+            "doc_id": "kd-2"
+          },
+          {
+            "doc_id": "kd-3"
+          },
+          {
+            "doc_id": "kd-4"
+          },
+          {
+            "doc_id": "kd-5"
+          },
+          {
+            "doc_id": "kd-6"
+          },
+          {
+            "doc_id": "kd-7"
+          },
+          {
+            "doc_id": "kd-8"
+          },
+          {
+            "doc_id": "kd-9"
+          },
+          {
+            "doc_id": "kd-10"
+          },
+          {
+            "doc_id": "kd-11"
+          },
+          {
+            "doc_id": "kd-12"
+          },
+          {
+            "doc_id": "kd-13"
+          },
+          {
+            "doc_id": "kd-14"
+          },
+          {
+            "doc_id": "kd-15"
+          },
+          {
+            "doc_id": "kd-16"
+          },
+          {
+            "doc_id": "kd-17"
+          },
+          {
+            "doc_id": "kd-18"
+          },
+          {
+            "doc_id": "kd-19"
+          }
+        ]
+      },
+      {
+        "id": "q4",
+        "question_text": "Describe your process for safeguarding CUI during transmission and storage.",
+        "tags": [],
+        "suggested_answer": "Here is the response:\n\n```\n{\n \"answers\": [\n {\n \"id\": \"...\",\n \"answer\": \"Our organization safeguards CUI during transmission and storage by adhering to NIST 800-171 controls. Specifically, we implement encryption methods such as AES for protecting data in transit (AC-CED) and ensure proper configuration of media protection and sanitization procedures to prevent unauthorized access or disclosure.\",\n \"confidence\": 0.9\n }\n ]\n}\n```\n\nI arrived at this answer by:\n\n1. Focusing on the provided question, which asks about safeguarding CUI during transmission and storage.\n2. Reviewing positive examples from the knowledge context (in this case, only one example was provided). The approved bank entry \"bank-1\" suggests that a general description of CUI handling procedures is acceptable. I reused the idea of referencing NIST 800-171, but adapted it to match the specific question about safeguarding during transmission and storage.\n3. Considering negative examples; none were relevant in this case.\n4. Examining similar_bank_entries. Since only one example was provided, it serves as the main influence on my answer.\n5. Using knowledge_context to inform the answer, although in this case, it's minimal since only one bank entry was given. I inferred that NIST 800-171 controls would be relevant for safeguarding CUI during transmission and storage.\n6. Structuring the answer clearly by breaking it into a few sentences to match the multi-part nature of the question.\n7. Ensuring the tone is compliant-oriented, using precise language to describe processes (encryption methods like AES) and controls (AC-CED).\n8. Assigning high confidence because the answer closely matches one approved bank entry, and NIST 800-171 is a relevant standard for safeguarding CUI during transmission and storage.\n\nThe assigned confidence level of 0.9 reflects that my response is based on an established practice (handling procedures) and a well-known security control set (NIST 800-171).",
+        "confidence": 0.55,
+        "answer_source": "llm",
+        "status": "low_confidence",
+        "matched_bank_id": null,
+        "feedback_status": null,
+        "feedback_reason": null,
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1"
+          },
+          {
+            "doc_id": "kd-2"
+          },
+          {
+            "doc_id": "kd-3"
+          },
+          {
+            "doc_id": "kd-4"
+          },
+          {
+            "doc_id": "kd-5"
+          },
+          {
+            "doc_id": "kd-6"
+          },
+          {
+            "doc_id": "kd-7"
+          },
+          {
+            "doc_id": "kd-8"
+          },
+          {
+            "doc_id": "kd-9"
+          },
+          {
+            "doc_id": "kd-10"
+          },
+          {
+            "doc_id": "kd-11"
+          },
+          {
+            "doc_id": "kd-12"
+          },
+          {
+            "doc_id": "kd-13"
+          },
+          {
+            "doc_id": "kd-14"
+          },
+          {
+            "doc_id": "kd-15"
+          },
+          {
+            "doc_id": "kd-16"
+          },
+          {
+            "doc_id": "kd-17"
+          },
+          {
+            "doc_id": "kd-18"
+          },
+          {
+            "doc_id": "kd-19"
+          }
+        ]
+      },
+      {
+        "id": "q5",
+        "question_text": "Are FIPS 140-2/140-3 validated cryptographic modules used for all encryption?",
+        "tags": [],
+        "suggested_answer": "Here's the response:\n\n```\n{\n \"answers\": [\n {\n \"id\": \"...\", \n \"answer\": \"FIPS 140-2/140-3 validated cryptographic modules are used for all encryption, as required by our NIST SP 800-171 implementation. However, please note that this is a general statement and may not cover all specific cases or systems. Details on the use of these modules in various contexts can be found in our Security Posture document (see knowledge_context below).\",\n \"confidence\": 0.8\n }\n ]\n}\n```\n\nExplanation:\n\n* The answer is based on NIST SP 800-171 requirements, which mandate the use of FIPS 140-2/140-3 validated cryptographic modules for all encryption.\n* The answer is cautious and generic to ensure that it accurately reflects the organization's posture, without overcommitting to specific capabilities or coverage.\n* The answer mentions the Security Posture document as a source of further information, which aligns with the knowledge_context provided (not shown in this example).\n* Confidence level is 0.8 because the answer closely matches one of the expected positive examples and is supported by NIST SP 800-171 requirements.\n\nNote: Since no \"positive_examples\" or other relevant data are provided for this question, we rely on general knowledge of NIST SP 800-171 requirements to inform our response.",
+        "confidence": 0.55,
+        "answer_source": "llm",
+        "status": "low_confidence",
+        "matched_bank_id": null,
+        "feedback_status": null,
+        "feedback_reason": null,
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1"
+          },
+          {
+            "doc_id": "kd-2"
+          },
+          {
+            "doc_id": "kd-3"
+          },
+          {
+            "doc_id": "kd-4"
+          },
+          {
+            "doc_id": "kd-5"
+          },
+          {
+            "doc_id": "kd-6"
+          },
+          {
+            "doc_id": "kd-7"
+          },
+          {
+            "doc_id": "kd-8"
+          },
+          {
+            "doc_id": "kd-9"
+          },
+          {
+            "doc_id": "kd-10"
+          },
+          {
+            "doc_id": "kd-11"
+          },
+          {
+            "doc_id": "kd-12"
+          },
+          {
+            "doc_id": "kd-13"
+          },
+          {
+            "doc_id": "kd-14"
+          },
+          {
+            "doc_id": "kd-15"
+          },
+          {
+            "doc_id": "kd-16"
+          },
+          {
+            "doc_id": "kd-17"
+          },
+          {
+            "doc_id": "kd-18"
+          },
+          {
+            "doc_id": "kd-19"
+          }
+        ]
+      },
+      {
+        "id": "q6",
+        "question_text": "Outline your organization's cyber incident reporting process under DFARS 252.204-7012.",
+        "tags": [],
+        "suggested_answer": "{\n \"answers\": [\n {\n \"id\": \"incident_reporting_process\",\n \"answer\": \"<h3>Cyber Incident Reporting Process</h3>\n<p>We have a well-documented process for reporting and responding to cyber incidents, aligned with DFARS 252.204-7012 requirements.</p>\n\n<b>Step 1: Detection and Identification</b>\n<ul>\n<li>Incident detection is performed by our Security Information and Event Management (SIEM) system.</li>\n<li>The incident is identified and escalated to the Incident Response Team (IRT).</li>\n</ul>\n\n<b>Step 2: Initial Assessment and Containment</b>\n<ul>\n<li>The IRT performs an initial assessment of the incident, including identifying affected systems and data.</li>\n<li>The IRT contains the incident by disconnecting affected systems from the network and applying patches or workarounds as necessary.</li>\n</ul>\n\n<b>Step 3: Incident Reporting and Notification</b>\n<ul>\n<li>The IRT reports the incident to our management, including a preliminary assessment of impact and scope.</li>\n<li>We notify the relevant stakeholders, including customers and contracting officers, in accordance with DFARS 252.204-7012 requirements.</li>\n</ul>\n\n<b>Step 4: Incident Response and Recovery</b>\n<ul>\n<li>The IRT develops and implements an incident response plan, including measures to prevent recurrence and recover affected systems.</li>\n<li>We review and update our incident response procedures as necessary, incorporating lessons learned from the incident.</li>\n</ul>\",\n \"confidence\": 0.9\n }\n ]\n}",
+        "confidence": 0.55,
+        "answer_source": "llm",
+        "status": "low_confidence",
+        "matched_bank_id": null,
+        "feedback_status": null,
+        "feedback_reason": null,
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1"
+          },
+          {
+            "doc_id": "kd-2"
+          },
+          {
+            "doc_id": "kd-3"
+          },
+          {
+            "doc_id": "kd-4"
+          },
+          {
+            "doc_id": "kd-5"
+          },
+          {
+            "doc_id": "kd-6"
+          },
+          {
+            "doc_id": "kd-7"
+          },
+          {
+            "doc_id": "kd-8"
+          },
+          {
+            "doc_id": "kd-9"
+          },
+          {
+            "doc_id": "kd-10"
+          },
+          {
+            "doc_id": "kd-11"
+          },
+          {
+            "doc_id": "kd-12"
+          },
+          {
+            "doc_id": "kd-13"
+          },
+          {
+            "doc_id": "kd-14"
+          },
+          {
+            "doc_id": "kd-15"
+          },
+          {
+            "doc_id": "kd-16"
+          },
+          {
+            "doc_id": "kd-17"
+          },
+          {
+            "doc_id": "kd-18"
+          },
+          {
+            "doc_id": "kd-19"
+          }
+        ]
+      }
+    ],
+    "created_at": "2025-11-28T00:21:35.589077Z",
+    "updated_at": "2025-11-28T12:11:13.989723Z"
+  },
+  {
+    "id": "4e665819002e4d41a344cb50e1872652",
+    "name": "Untitled questionnaire",
+    "customer": "",
+    "reviewer": "",
+    "date": "2025-11-28",
+    "status": "In Progress",
+    "raw_text": "8. How are DISA STIGs applied and validated across your infrastructure?\n9. Do you maintain Software Bills of Materials (SBOM) for all products? Provide details.\n10. Explain your supply chain risk management (SCRM) program and vendor vetting.\n11. How is MFA enforced for privileged and remote access?",
+    "questions": [
+      {
+        "id": "q1",
+        "question_text": "How are DISA STIGs applied and validated across your infrastructure?",
+        "tags": [],
+        "suggested_answer": "We apply DISA STIGs through automated scanning tools integrated into our Continuous Monitoring Program. These scans identify compliance gaps, which are prioritized and addressed in accordance with our configuration baseline documentation. Validation occurs through regular vulnerability scanning, patch management, and review of centralized logs. Our Configuration Management process ensures that all systems are properly configured to meet the requirements outlined by DISA STIGs.",
+        "confidence": 0.55,
+        "answer_source": "llm",
+        "status": "low_confidence",
+        "matched_bank_id": null,
+        "feedback_status": null,
+        "feedback_reason": null,
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1",
+            "title": "ASCP_SSP_FINIAL.docx",
+            "doc_type": null,
+            "tags": [],
+            "snippet": "AegisSecure Cloud Platform (ASCP)\nSystem Security Plan (SSP)\nNIST SP 800-171 Rev 2\n\nFull Literal-Text SSP – Phase 1\nVersion 1.0\n\nPart 1 – System Identification\nAegisSecure Cloud Platform (ASCP) is operated by Aegis Secure Systems, LLC within a multi-enclave, NIST SP 800‑171 Rev 2–aligned enterprise architecture. This section identifies the system owner, authorizing official, ISSM, ISSO, enclave structure, organizational identifiers, and system categorization.\n\nSystem Name: AegisSecure Cloud Plat"
+          }
+        ]
+      },
+      {
+        "id": "q2",
+        "question_text": "Do you maintain Software Bills of Materials (SBOM) for all products? Provide details.",
+        "tags": [],
+        "suggested_answer": "Yes, we maintain Software Bills of Materials (SBOM) for all products as part of our formal Supply Chain Risk Management (SCRM) program. The SBOM includes detailed information on software components, dependencies, and security-related data. We regularly review and update the SBOM to ensure it remains accurate and up-to-date.",
+        "confidence": 0.55,
+        "answer_source": "llm",
+        "status": "low_confidence",
+        "matched_bank_id": null,
+        "feedback_status": null,
+        "feedback_reason": null,
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1",
+            "title": "ASCP_SSP_FINIAL.docx",
+            "doc_type": null,
+            "tags": [],
+            "snippet": "AegisSecure Cloud Platform (ASCP)\nSystem Security Plan (SSP)\nNIST SP 800-171 Rev 2\n\nFull Literal-Text SSP – Phase 1\nVersion 1.0\n\nPart 1 – System Identification\nAegisSecure Cloud Platform (ASCP) is operated by Aegis Secure Systems, LLC within a multi-enclave, NIST SP 800‑171 Rev 2–aligned enterprise architecture. This section identifies the system owner, authorizing official, ISSM, ISSO, enclave structure, organizational identifiers, and system categorization.\n\nSystem Name: AegisSecure Cloud Plat"
+          }
+        ]
+      },
+      {
+        "id": "q3",
+        "question_text": "Explain your supply chain risk management (SCRM) program and vendor vetting.",
+        "tags": [],
+        "suggested_answer": "Our SCRM program is a formalized process that identifies, vets, and monitors vendors to manage supply chain risks. Vendor vetting includes identification, risk assessment, and ongoing monitoring. We maintain documentation of all vendor relationships, including due diligence records, contracts, and communication protocols.",
+        "confidence": 0.55,
+        "answer_source": "llm",
+        "status": "low_confidence",
+        "matched_bank_id": null,
+        "feedback_status": null,
+        "feedback_reason": null,
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1",
+            "title": "ASCP_SSP_FINIAL.docx",
+            "doc_type": null,
+            "tags": [],
+            "snippet": "AegisSecure Cloud Platform (ASCP)\nSystem Security Plan (SSP)\nNIST SP 800-171 Rev 2\n\nFull Literal-Text SSP – Phase 1\nVersion 1.0\n\nPart 1 – System Identification\nAegisSecure Cloud Platform (ASCP) is operated by Aegis Secure Systems, LLC within a multi-enclave, NIST SP 800‑171 Rev 2–aligned enterprise architecture. This section identifies the system owner, authorizing official, ISSM, ISSO, enclave structure, organizational identifiers, and system categorization.\n\nSystem Name: AegisSecure Cloud Plat"
+          }
+        ]
+      },
+      {
+        "id": "q4",
+        "question_text": "How is MFA enforced for privileged and remote access?",
+        "tags": [],
+        "suggested_answer": "Multi-factor authentication is enforced for all remote access to the organization's secure environments, including AWS GovCloud and GCC High. CAC or equivalent two-factor authentication is used where required.",
+        "confidence": 0.55,
+        "answer_source": "llm",
+        "status": "low_confidence",
+        "matched_bank_id": null,
+        "feedback_status": null,
+        "feedback_reason": null,
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1",
+            "title": "ASCP_SSP_FINIAL.docx",
+            "doc_type": null,
+            "tags": [],
+            "snippet": "AegisSecure Cloud Platform (ASCP)\nSystem Security Plan (SSP)\nNIST SP 800-171 Rev 2\n\nFull Literal-Text SSP – Phase 1\nVersion 1.0\n\nPart 1 – System Identification\nAegisSecure Cloud Platform (ASCP) is operated by Aegis Secure Systems, LLC within a multi-enclave, NIST SP 800‑171 Rev 2–aligned enterprise architecture. This section identifies the system owner, authorizing official, ISSM, ISSO, enclave structure, organizational identifiers, and system categorization.\n\nSystem Name: AegisSecure Cloud Plat"
+          }
+        ]
+      }
+    ],
+    "created_at": "2025-11-28T21:10:58.900592Z",
+    "updated_at": "2025-11-28T21:20:32.690831Z"
+  },
+  {
+    "id": "26bc35de88b548029d3a17457176dbe2",
+    "name": "test 001",
+    "customer": "USAF",
+    "reviewer": "",
+    "date": "2025-11-30",
+    "status": "In Progress",
+    "raw_text": "5. Are FIPS 140-2/140-3 validated cryptographic modules used for all encryption?\n6. Outline your organization's cyber incident reporting process under DFARS 252.204-7012.\n7. Describe your Zero Trust architecture components and enforcement mechanisms.\n10. Explain your supply chain risk management (SCRM) program and vendor vetting.",
+    "questions": [
+      {
+        "id": "q1",
+        "question_text": "Are FIPS 140-2/140-3 validated cryptographic modules used for all encryption?",
+        "tags": [],
+        "suggested_answer": "Our organization uses FIPS 140-2/140-3 validated cryptographic modules for all encryption where applicable. However, due to the scope of this question and the organization's posture, we cannot guarantee their use in every single instance of encryption across all environments.",
+        "confidence": 1.0,
+        "answer_source": "llm",
+        "status": "approved",
+        "matched_bank_id": null,
+        "feedback_status": "approved",
+        "feedback_reason": null,
+        "review_status": "complete",
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1",
+            "title": "ASCP_SSP_FINIAL.docx",
+            "doc_type": null,
+            "tags": [],
+            "snippet": "AegisSecure Cloud Platform (ASCP)\nSystem Security Plan (SSP)\nNIST SP 800-171 Rev 2\n\nFull Literal-Text SSP – Phase 1\nVersion 1.0\n\nPart 1 – System Identification\nAegisSecure Cloud Platform (ASCP) is operated by Aegis Secure Systems, LLC within a multi-enclave, NIST SP 800‑171 Rev 2–aligned enterprise architecture. This section identifies the system owner, authorizing official, ISSM, ISSO, enclave structure, organizational identifiers, and system categorization.\n\nSystem Name: AegisSecure Cloud Plat"
+          }
+        ]
+      },
+      {
+        "id": "q2",
+        "question_text": "Outline your organization's cyber incident reporting process under DFARS 252.204-7012.",
+        "tags": [],
+        "suggested_answer": "The organization's cyber incident reporting process under DFARS 252.204-7012 involves immediate notification to relevant stakeholders in the event of a security incident affecting Controlled Unclassified Information (CUI). The process is documented in the System Security Plan (SSP) and is subject to regular review and updates.",
+        "confidence": 1.0,
+        "answer_source": "llm",
+        "status": "approved",
+        "matched_bank_id": null,
+        "feedback_status": "approved",
+        "feedback_reason": null,
+        "review_status": "complete",
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1",
+            "title": "ASCP_SSP_FINIAL.docx",
+            "doc_type": null,
+            "tags": [],
+            "snippet": "AegisSecure Cloud Platform (ASCP)\nSystem Security Plan (SSP)\nNIST SP 800-171 Rev 2\n\nFull Literal-Text SSP – Phase 1\nVersion 1.0\n\nPart 1 – System Identification\nAegisSecure Cloud Platform (ASCP) is operated by Aegis Secure Systems, LLC within a multi-enclave, NIST SP 800‑171 Rev 2–aligned enterprise architecture. This section identifies the system owner, authorizing official, ISSM, ISSO, enclave structure, organizational identifiers, and system categorization.\n\nSystem Name: AegisSecure Cloud Plat"
+          }
+        ]
+      },
+      {
+        "id": "q3",
+        "question_text": "Describe your Zero Trust architecture components and enforcement mechanisms.",
+        "tags": [],
+        "suggested_answer": "Our Zero Trust architecture is based on a defense-in-depth approach that integrates multiple security controls to enforce least privilege access and segmentation across all environments. Key components include multi-factor authentication (MFA), network access control lists (ACLs), and micro-segmentation with software-defined networking (SDN). Enforcement mechanisms are designed to continuously monitor and adapt to changing network conditions, ensuring that only authorized users and systems have access to CUI. The organization's SSP provides detailed documentation of these controls and procedures, which are regularly reviewed and updated to ensure alignment with NIST SP 800-171 and DFARS 252.204-7012 requirements.",
+        "confidence": 1.0,
+        "answer_source": "llm",
+        "status": "approved",
+        "matched_bank_id": null,
+        "feedback_status": "approved",
+        "feedback_reason": null,
+        "review_status": "complete",
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1",
+            "title": "ASCP_SSP_FINIAL.docx",
+            "doc_type": null,
+            "tags": [],
+            "snippet": "AegisSecure Cloud Platform (ASCP)\nSystem Security Plan (SSP)\nNIST SP 800-171 Rev 2\n\nFull Literal-Text SSP – Phase 1\nVersion 1.0\n\nPart 1 – System Identification\nAegisSecure Cloud Platform (ASCP) is operated by Aegis Secure Systems, LLC within a multi-enclave, NIST SP 800‑171 Rev 2–aligned enterprise architecture. This section identifies the system owner, authorizing official, ISSM, ISSO, enclave structure, organizational identifiers, and system categorization.\n\nSystem Name: AegisSecure Cloud Plat"
+          }
+        ]
+      },
+      {
+        "id": "q4",
+        "question_text": "Explain your supply chain risk management (SCRM) program and vendor vetting.",
+        "tags": [],
+        "suggested_answer": "Our organization has a formal supply chain risk management (SCRM) program in place to ensure the protection of Controlled Unclassified Information (CUI). This program aligns with NIST SP 800-171 and DFARS 252.204-7012 requirements for safeguarding CUI.",
+        "confidence": 1.0,
+        "answer_source": "llm",
+        "status": "approved",
+        "matched_bank_id": null,
+        "feedback_status": "approved",
+        "feedback_reason": null,
+        "review_status": "complete",
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1",
+            "title": "ASCP_SSP_FINIAL.docx",
+            "doc_type": null,
+            "tags": [],
+            "snippet": "AegisSecure Cloud Platform (ASCP)\nSystem Security Plan (SSP)\nNIST SP 800-171 Rev 2\n\nFull Literal-Text SSP – Phase 1\nVersion 1.0\n\nPart 1 – System Identification\nAegisSecure Cloud Platform (ASCP) is operated by Aegis Secure Systems, LLC within a multi-enclave, NIST SP 800‑171 Rev 2–aligned enterprise architecture. This section identifies the system owner, authorizing official, ISSM, ISSO, enclave structure, organizational identifiers, and system categorization.\n\nSystem Name: AegisSecure Cloud Plat"
+          }
+        ]
+      }
+    ],
+    "created_at": "2025-11-30T13:20:33.358802Z",
+    "updated_at": "2025-12-08T19:38:06.129774Z"
+  },
+  {
+    "id": "4a3002a4f2334708a402cc997c460e0f",
+    "name": "followup test",
+    "customer": "",
+    "reviewer": "",
+    "date": "2025-11-30",
+    "status": "In Progress",
+    "raw_text": "10. Explain your supply chain risk management (SCRM) program and vendor vetting.\n4. Describe your process for safeguarding CUI during transmission and storage.\n5. Are FIPS 140-2/140-3 validated cryptographic modules used for all encryption?\n6. Outline your organization's cyber incident reporting process under DFARS 252.204-7012.\n7. Describe your Zero Trust architecture components and enforcement mechanisms.",
+    "questions": [
+      {
+        "id": "q1",
+        "question_text": "Explain your supply chain risk management (SCRM) program and vendor vetting.",
+        "tags": [],
+        "suggested_answer": "The organization has a formal supply chain risk management (SCRM) program in place to ensure the protection of Controlled Unclassified Information (CUI). This program aligns with NIST SP 800-171 and DFARS 252.204-7012 requirements for safeguarding CUI.",
+        "confidence": 1.0,
+        "answer_source": "bank",
+        "status": "approved",
+        "matched_bank_id": "bank-7",
+        "feedback_status": "approved",
+        "review_status": "complete",
+        "knowledge_sources": null
+      },
+      {
+        "id": "q2",
+        "question_text": "Describe your process for safeguarding CUI during transmission and storage.",
+        "tags": [],
+        "suggested_answer": "Our organization is compliant with NIST SP 800-171 rev. 2 and DFARS 252.204-7012 requirements for safeguarding Controlled Unclassified Information (CUI) during transmission and storage. We restrict access to authorized personnel, use strong authentication and identification measures, and employ security mechanisms to prevent unauthorized disclosure or alteration. CUI is handled in accordance with defined policies and procedures, which govern its handling, access, transmission, storage, and retention throughout its lifecycle.",
+        "confidence": 1.0,
+        "answer_source": "llm",
+        "status": "approved",
+        "matched_bank_id": null,
+        "feedback_status": "approved",
+        "review_status": "complete",
+        "knowledge_sources": [
+          {
+            "doc_id": "kd-1",
+            "title": "ASCP_SSP_FINIAL.docx",
+            "doc_type": null,
+            "tags": [],
+            "snippet": "AegisSecure Cloud Platform (ASCP)\nSystem Security Plan (SSP)\nNIST SP 800-171 Rev 2\n\nFull Literal-Text SSP – Phase 1\nVersion 1.0\n\nPart 1 – System Identification\nAegisSecure Cloud Platform (ASCP) is operated by Aegis Secure Systems, LLC within a multi-enclave, NIST SP 800‑171 Rev 2–aligned enterprise architecture. This section identifies the system owner, authorizing official, ISSM, ISSO, enclave structure, organizational identifiers, and system categorization.\n\nSystem Name: AegisSecure Cloud Plat"
+          }
+        ]
+      },
+      {
+        "id": "q3",
+        "question_text": "Are FIPS 140-2/140-3 validated cryptographic modules used for all encryption?",
+        "tags": [],
+        "suggested_answer": "The organization uses FIPS 140-2/140-3 validated cryptographic modules for all encryption where applicable. However, due to the scope of this question and the organization's posture, we cannot guarantee their use in every single instance of encryption across all environments.",
+        "confidence": 1.0,
+        "answer_source": "bank",
+        "status": "approved",
+        "matched_bank_id": "bank-11",
+        "feedback_status": "approved",
+        "review_status": "complete",
+        "knowledge_sources": null
+      },
+      {
+        "id": "q4",
+        "question_text": "Outline your organization's cyber incident reporting process under DFARS 252.204-7012.",
+        "tags": [],
+        "suggested_answer": "The organization's cyber incident reporting process under DFARS 252.204-7012 involves immediate notification to relevant stakeholders in the event of a security incident affecting Controlled Unclassified Information (CUI).",
+        "confidence": 1.0,
+        "answer_source": "bank",
+        "status": "approved",
+        "matched_bank_id": "bank-10",
+        "feedback_status": "approved",
+        "review_status": "complete",
+        "knowledge_sources": null
+      },
+      {
+        "id": "q5",
+        "question_text": "Describe your Zero Trust architecture components and enforcement mechanisms.",
+        "tags": [],
+        "suggested_answer": "Our Zero Trust architecture is based on a defense-in-depth approach that integrates multiple security controls to enforce least privilege access and segmentation across all environments. Key components include multi-factor authentication (MFA), network access control lists (ACLs), and micro-segmentation with software-defined networking (SDN). Enforcement mechanisms are designed to continuously monitor and adapt to changing network conditions, ensuring that only authorized users and systems have access to CUI. The organization's SSP provides detailed documentation of these controls and procedures, which are regularly reviewed and updated to ensure alignment with NIST SP 800-171 and DFARS 252.204-7012 requirements.",
+        "confidence": 1.0,
+        "answer_source": "bank",
+        "status": "approved",
+        "matched_bank_id": "bank-8",
+        "feedback_status": "approved",
+        "review_status": "complete",
+        "knowledge_sources": null
+      }
+    ],
+    "created_at": "2025-11-30T13:50:39.842878Z",
+    "updated_at": "2025-11-30T14:43:35.391649Z"
+  },
+  {
+    "id": "58f48ce9c04f4a049cdfaef4a292c822",
+    "name": "jhgfd",
+    "customer": "",
+    "reviewer": "",
+    "date": "2025-12-08",
+    "status": "In Progress",
+    "raw_text": "==========================================================\n📄 ATTACHMENT Y: CMMC LEVEL 2 / NIST SP 800-171 QUESTIONNAIRE\n(Full, Realistic, Assessment-Ready Version - 12+ pages)\n==========================================================\nThis questionnaire mirrors what the DoD, AFLCMC, and third-party assessors request during pre-award and post-award compliance checks.\n\nSECTION 1 - ACCESS CONTROL (AC)\nAC.1 - Access Control Policy\nDo you maintain and enforce an Access Control Policy that includes:\nRole-based access?\nLeast privilege?\nSeparation of duties?\nAttribute-based access controls (ABAC)?\nAccount approval workflows?\n☐ YES ☐ NO\nAttach policy excerpts or summary.\n\nAC.2 - Account Management\nDo you:\nCreate, modify, and disable accounts through documented workflows?\nReview all accounts every 90 days?\nEnforce inactivity lockouts?\nRequire multifactor authentication (MFA)?\n\nAC.3 - Remote Access Controls\nProvide:\nRemote access tools used\nMFA enforcement\nEncryption requirements\nMonitoring and logging procedures\nConfirm remote access is NOT permitted into IL5 enclaves except over approved Government channels.\n\nSECTION 2 - IDENTIFICATION & AUTHENTICATION (IA)\nIA.1 - Unique Identification\nDo all users have unique accounts (no shared accounts)?\n☐ YES ☐ NO\nIA.2 - Password & MFA Requirements\nMinimum password complexity?\nMFA using CAC/PIV or token-based solutions?\nIA.3 - Machine Identification\nDo you maintain device certificates or other host-based identity controls?\n\nSECTION 3 - MEDIA PROTECTION (MP)\nMP.1 - Media Controls\nDo you restrict:\nRemovable media?\nUSB usage?\nExternal drives?\nMP.2 - Sanitization\nDescribe your data sanitization process and whether you use:\nNIST 800-88\nCryptographic erase\nSecure delete tools\n\nSECTION 4 - SYSTEMS & COMMUNICATIONS PROTECTION (SC)\nSC.1 - Boundary Protection\nDo you use:\nFirewalls\nWAF\nIDS/IPS\nAPI gateways\nNetwork micro-segmentation\nSC.2 - Encryption\nList encryption used:\nAt rest (AES-256?)\nIn transit (TLS 1.2+?)\nFIPS 140-3 validated libraries?\nSC.3 - External Connections\nDo you prohibit:\nExternal cloud APIs?\nCommercial LLMs?\nNon-GovCloud connections?\n☐ YES ☐ NO\n\nSECTION 5 - AUDIT & ACCOUNTABILITY (AU)\nAU.1 - Logging\nDo you log:\nAuthentication events\nAccess attempts\nData exports\nPrivilege escalations\nML model execution logs\nAdmin actions\nAU.2 - Log Protection\nAre logs:\nImmutable?\nStored for ≥ 1 year? (CMMC)\nStored for ≥ 10 years for IL5?\nAU.3 - SIEM Integration\nList SIEM tools used and retention policies.\n\nSECTION 6 - INCIDENT RESPONSE (IR)\nIR.1 - Incident Response Plan\nProvide:\nIR Plan\nEscalation workflow\nRoles & responsibilities\nIR.2 - Reporting Timelines\nDFARS 7012 requires reporting incidents within 72 hours.\nDo you comply?\n☐ YES ☐ NO\n\nSECTION 7 - CONFIGURATION MANAGEMENT (CM)\nCM.1 - Configuration Baselines\nDo you:\nDefine baselines?\nControl changes via CCB?\nTrack versions in Git?\nCM.2 - Secure Configuration\nDo you follow:\nCIS benchmarks?\nDoD Secure Host Baseline?\nK8s hardening guidelines?\n\nSECTION 8 - MAINTENANCE (MA)\nMA.1 - Controlled Maintenance\nDo you:\nAuthorize maintenance by role?\nLog maintenance sessions?\nReview maintenance activity?\nMA.2 - Remote Maintenance\nRemote maintenance into IL5 systems must be:\nPre-approved\nLogged\nPerformed via secure channels\nTime-bound and monitored\n\nSECTION 9 - PERSONNEL SECURITY (PS)\nPS.1 - Screening\nDo all IL5 personnel undergo:\nBackground investigation?\nCitizenship verification?\nNDA/confidentiality agreements?\nPS.2 - Role Separation\nDo you enforce separation of duties?\n\nSECTION 10 - PHYSICAL PROTECTION (PE)\nPE.1 - Physical Access Controls\nDo you secure:\nData centers?\nWorkstations?\nEndpoint devices?\nPE.2 - Visitor Logs\nDo you maintain visitor tracking?\n\nSECTION 11 - SYSTEM INTEGRITY (SI)\nSI.1 - Malware Protection\nProvide tools used:\nAV/EDR\nHeuristic scanners\nReal-time file inspection\nSI.2 - Flaw Remediation\nCritical vulnerabilities remediated within 7 days?\nPatch cycles documented?\nSI.3 - Integrity Verification\nDo you validate:\nContainer signatures?\nDependency hashes?\nBuild artifact signatures?\n\nSECTION 12 - RISK ASSESSMENT (RA)\nRA.1 - Annual Risk Assessments\nDo you perform:\nCyber risk assessments?\nSupply chain risk assessments?\nInsider threat assessments?\nRA.2 - ML Risk Management\nIf using ML:\nDo you track model drift?\nValidate training data securely?\nEnforce IL5 training constraints?\n\nSECTION 13 - CERTIFICATION STATUS\nProvide your current status:\n\nSECTION 14 - ATTESTATION\nBy signing below, you attest that:\nThe information provided is true and accurate\nAll representations reflect current practices\nYour organization can provide evidence upon request\nSignature: _________________________\nPrinted Name: ______________________\nTitle: ______________________________\nDate: ______________________________",
+    "questions": [],
+    "created_at": "2025-12-08T19:58:22.559443Z",
+    "updated_at": "2025-12-08T19:58:22.559443Z"
+  }
+]

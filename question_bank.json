@@ -1,0 +1,62 @@
+[
+  {
+    "id": "bank-1",
+    "text": "Describe your organization's CUI handling procedures and compliance with 32 CFR Part 2002.",
+    "answer": "We are compliant with NIST 800-171 rev. 2.",
+    "primary_tag": "CUI",
+    "frameworks": [
+      "NIST 800-171 Rev. 2"
+    ],
+    "status": "approved",
+    "variants": [],
+    "rejection_reasons": [],
+    "last_feedback": null,
+    "usage_count": 7,
+    "last_used_at": "2025-11-28T18:47:11.653881Z"
+  },
+  {
+    "id": "bank-2",
+    "text": "Do you maintain Software Bills of Materials (SBOM) for all products? Provide details.",
+    "answer": "We maintain Software Bills of Materials (SBOMs) for all products, as required by our System Security Plan (SSP) and in alignment with NIST SP 800-171 and DFARS 252.204-7012.",
+    "primary_tag": null,
+    "frameworks": [],
+    "status": "approved",
+    "variants": [],
+    "rejection_reasons": [],
+    "last_feedback": null,
+    "usage_count": 1,
+    "last_used_at": "2025-11-29T21:37:33.243674Z"
+  },
+  {
+    "id": "bank-10",
+    "text": "Outline your organization's cyber incident reporting process under DFARS 252.204-7012.",
+    "answer": "The organization's cyber incident reporting process under DFARS 252.204-7012 involves immediate notification to relevant stakeholders in the event of a security incident affecting Controlled Unclassified Information (CUI). The process is documented in the System Security Plan (SSP) and is subject to regular review and updates.",
+    "primary_tag": null,
+    "frameworks": [],
+    "status": "approved",
+    "variants": [],
+    "rejection_reasons": [],
+    "last_feedback": null,
+    "usage_count": 3,
+    "last_used_at": "2025-11-30T14:42:52.779085Z"
+  },
+  {
+    "id": "bank-5",
+    "text": "Explain your supply chain risk management (SCRM) program and vendor vetting.",
+    "answer": "Our organization has a formal supply chain risk management (SCRM) program in place to ensure the protection of Controlled Unclassified Information (CUI). This program aligns with NIST SP 800-171 and DFARS 252.204-7012 requirements for safeguarding CUI.",
+    "primary_tag": null,
+    "frameworks": [],
+    "status": "approved",
+    "variants": [
+      "Explain your supply chain risk management (SCRM) program and vendor vetting.",
+      "Describe Explain your supply chain risk management (SCRM) program and vendor vetting.",
+      "Explain your supply chain risk management (SCRM) program and vendor vetting.",
+      "Please describe Explain your supply chain risk management (SCRM) program and vendor vetting.",
+      "Provide details on Explain your supply chain risk management (SCRM) program and vendor vetting."
+    ],
+    "rejection_reasons": [],
+    "last_feedback": null,
+    "usage_count": 7,
+    "last_used_at": "2025-12-08T19:58:22.607334Z"
+  }
+]

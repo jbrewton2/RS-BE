@@ -1,0 +1,14 @@
+{
+  "clause-data-classification": 23,
+  "clause-dfars-7019-7020": 22,
+  "clause-nist-800-53-fedramp": 10,
+  "ctx-dr-bc": 41,
+  "ctx-encryption": 23,
+  "ctx-mfa": 18,
+  "ctx-siem": 18,
+  "clause-dfars-7021": 5,
+  "clause-flowdown": 5,
+  "clause-incident-reporting": 5,
+  "clause-nist-800-171": 5,
+  "ctx-fedramp-boundary": 5
+}

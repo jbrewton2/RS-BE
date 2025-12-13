@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pypdf
+python-docx
+httpx
+pytesseract
+pdf2image
+Pillow
+pydantic
+python-multipart

@@ -1,0 +1,46 @@
+System & Communications Protection Policy
+
+**Purpose**
+This policy establishes requirements to protect the confidentiality, integrity, and availability of information and communications for the AegisSecure Cloud Platform (ASCP) operating in AWS GovCloud (US-East). It outlines safeguards for network boundaries, encryption, monitoring, and secure transmission of Controlled Unclassified Information (CUI).
+
+**Scope**
+This policy applies to all ASCP components, including compute resources, RDS PostgreSQL, S3 CUI storage, Entra ID GCC High identity systems, Keycloak RBAC, Zero Trust Network Access (ZTNA) gateways, administrators, engineers, contractors, and automated services interacting with CUI.
+
+**Roles & Responsibilities**
+- **System Owner:** Ensures system-level protections meet NIST 800-171.
+- **Security Manager:** Implements encryption, boundary defense, and network monitoring.
+- **DevSecOps Team:** Configures secure communication protocols and network boundaries.
+- **Users:** Follow secure access and data transmission requirements.
+
+**Policy Statements**
+1. **Network Boundary Protection**
+   - ASCP shall implement virtual private clouds, security groups, network access control lists, and firewall rules restricting traffic to approved endpoints.
+   - Boundary protection devices must enforce deny-by-default.
+2. **Zero Trust Network Access**
+   - All access must be authenticated, authorized, and continuously validated through ZTNA.
+3. **Cryptographic Protections**
+   - All CUI in transit shall be encrypted using FIPS-validated algorithms.
+   - TLS 1.2+ is required for all ASCP communications.
+4. **System Monitoring**
+   - Network monitoring tools shall inspect traffic for anomalies and unauthorized communications.
+   - Logs from Keycloak, ZTNA gateways, and AWS native services shall be aggregated centrally.
+5. **Secure Remote Administration**
+   - Remote administration must occur over encrypted channels with MFA enforced by Entra ID GCC High.
+6. **Communication Integrity Controls**
+   - ASCP shall use mutual TLS for service-to-service API communications.
+7. **Email and External Communications Restrictions**
+   - CUI transmission outside the enclave is prohibited unless encrypted and authorized.
+
+**Control Alignment (NIST SP 800-171 Rev 2)**
+- 3.13.1 Boundary Protections
+- 3.13.5 Public Access System Separation
+- 3.13.8 Encryption of CUI in Transit
+- 3.13.11 Monitoring Communications
+- 3.13.16 Secure Remote Access
+- 3.13.17 Remote Access Route Control
+
+**Enforcement**
+Non-compliance may result in access revocation, disciplinary action, or escalation to legal or compliance leads.
+
+**Version**
+Version 1.0 — 2025-11-24

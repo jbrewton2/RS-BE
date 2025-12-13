@@ -1,0 +1,21 @@
+Access Control Policy
+Purpose:
+Define access control requirements for the AegisSecure Cloud Platform (ASCP) consistent with NIST SP 800-171 Rev 2.
+
+Scope:
+Applies to all users, administrators, devices, and processes accessing ASCP.
+
+Policy:
+- Access must be restricted to authorized identities authenticated through Entra ID GCC High and Keycloak.
+- Devices must be Intune-managed and meet compliance policies.
+- Access permissions follow Least Privilege and Zero Trust principles.
+- Reviewer roles may access CUI data; administrative roles cannot.
+- Project enclave users may only consume metadata APIs.
+- Privileged access requires Privileged Access Workstations (PAWs) and Just-In-Time approval.
+- Quarterly access reviews must be performed by the ISSO.
+- All access is logged and monitored by the SOC.
+
+Enforcement:
+Non-compliance may result in access revocation, incident reporting, and disciplinary action.
+
+Version: 1.0

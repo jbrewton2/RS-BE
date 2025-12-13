@@ -1,0 +1,69 @@
+System & Information Integrity Policy
+
+**Purpose**
+The purpose of this System & Information Integrity Policy is to establish the controls necessary to protect the AegisSecure Cloud Platform (ASCP) from unauthorized alterations, malicious code, vulnerabilities, and integrity failures. This policy ensures timely detection, reporting, and remediation of security-relevant events to safeguard Controlled Unclassified Information (CUI) within the AWS GovCloud (US-East) enclave.
+
+**Scope**
+This policy applies to:
+- All ASCP systems, services, databases, and network components
+- All users, administrators, developers, contractors, and automated processes
+- All CUI and system configuration data stored or transmitted within the enclave
+- All monitoring, logging, scanning, and protection technologies supporting ASCP
+
+**Roles & Responsibilities**
+- **System Owner:** Ensures the system maintains integrity controls aligned with NIST 800-171.
+- **Security Manager:** Maintains monitoring systems, malware defenses, alerting, and remediation workflows.
+- **DevSecOps Team:** Implements automated scanning, patching, code integrity controls, and security event routing.
+- **Users:** Report suspicious activity, phishing attempts, or integrity anomalies immediately.
+
+**Policy Statements**
+
+1. **Integrity Monitoring & Alerting**
+   - ASCP must generate alerts for anomalous activity, unauthorized access attempts, and integrity failures within system components.
+   - AWS GuardDuty, CloudWatch, and Keycloak logs must be aggregated into a central SIEM for continuous integrity monitoring.
+
+2. **Malicious Code Protection**
+   - All systems must employ malware and anti-exploit protection where applicable.
+   - All uploads, including contract files, must undergo scanning using secure file handling mechanisms before processing.
+
+3. **Patch & Vulnerability Management**
+   - ASCP must apply security patches to systems, containers, services, and libraries within defined timelines:
+     - **Critical:** 15 days
+     - **High:** 30 days
+     - **Medium:** 60 days
+     - **Low:** 90 days
+   - SBOM scanning and dependency analysis are required for all ASCP builds.
+
+4. **System Scanning & Integrity Validation**
+   - Infrastructure scanning (EC2, AMIs, containers, Lambda) must be performed continuously via automated tools.
+   - ASCP shall maintain file integrity monitoring (FIM) for critical systems.
+
+5. **Secure Software Development**
+   - Code commits must undergo automated SAST, DAST, dependency scanning, and secret scanning.
+   - Approved GitLab CI pipelines shall enforce integrity checks before deployment.
+
+6. **Monitoring for Indicators of Compromise**
+   - All systems must be monitored for compromises, including unauthorized API calls, unexpected identity behavior, and anomalous network traffic.
+   - Detected indicators must immediately trigger incident response workflows.
+
+7. **Error Handling & Data Validation**
+   - Applications must sanitize input, handle errors securely, and validate all data before processing or storage.
+   - ASCP must prevent injection attacks, malformed input, and data corruption.
+
+8. **CUI Integrity Protection**
+   - RDS PostgreSQL and S3 CUI buckets shall enforce versioning, Object Lock, and server-side encryption.
+   - Unauthorized modifications to CUI are prohibited and must result in immediate alerts.
+
+**Control Alignment (NIST SP 800-171 Rev 2)**
+- 3.14.1 System Flaw Identification
+- 3.14.2 Flaw Remediation
+- 3.14.3 Malicious Code Protection
+- 3.14.4 Monitoring for Intrusions
+- 3.14.5 Indicators of Compromise Monitoring
+- 3.14.6 Integrity Verification
+
+**Enforcement**
+Violations of this policy may result in removal of access, disciplinary actions, reporting to the Security Manager, or escalation to compliance officials.
+
+**Version**
+Version 1.0 — 2025-11-24

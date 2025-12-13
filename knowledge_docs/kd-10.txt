@@ -1,0 +1,68 @@
+Personnel Security Policy
+
+Purpose:
+This Personnel Security Policy defines the requirements for vetting, authorizing, training, monitoring, and managing personnel with access to the AegisSecure Cloud Platform (ASCP), including those who store, process, or handle Controlled Unclassified Information (CUI). This policy supports NIST SP 800-171 Rev 2 Personnel Security controls (3.9.x).
+
+Scope:
+This policy applies to all employees, contractors, administrators, reviewers, DevSecOps personnel, CloudOps, SOC analysts, Identity Administrators, and any individuals granted access to ASCP or the CUI Processing Enclave.
+
+Roles & Responsibilities:
+• AO – Approves access exceptions; reviews personnel risk decisions.
+• SO – Ensures roles are properly staffed and personnel meet security requirements.
+• ISSM – Ensures personnel are screened and trained; oversees personnel security compliance.
+• ISSO – Verifies clearance of personnel before granting ASCP access; documents changes.
+• HR & Corporate Security – Conduct background checks and employment verification.
+• Managers – Ensure personnel complete annual training and follow CUI rules.
+• Users – Must complete training and adhere to all personnel security requirements.
+
+Policy Statements:
+1. Personnel Screening:
+   • All ASCP personnel must undergo background checks prior to system access.
+   • All personnel must be U.S. Persons as required for CUI handling.
+   • HR must verify identity, employment status, and eligibility.
+   • Third-party personnel require ISSM approval and signed agreements.
+
+2. Access Authorization:
+   • Access is granted based on role, need-to-know, and least privilege.
+   • Identity Admins may not grant access without ISSO approval.
+   • No shared accounts or generic credentials are permitted.
+
+3. Training Requirements:
+   • All users must complete annual cybersecurity and CUI handling training.
+   • Privileged users (DevSecOps, CloudOps, ISSO) must complete elevated role training.
+   • New personnel must complete onboarding security training before access.
+
+4. Personnel Transfers and Terminations:
+   • Access must be reviewed when personnel change roles.
+   • Access must be revoked upon termination or loss of eligibility.
+   • ISSO must disable all associated accounts within 15 minutes of notification.
+
+5. Monitoring Personnel Compliance:
+   • SOC and ISSO monitor activity logs for suspicious behavior.
+   • Privileged user activities must be logged and reviewed.
+   • Violations must be reported immediately.
+
+6. Third-Party Personnel:
+   • Contractors must sign confidentiality/NDA agreements.
+   • Contractors must meet the same training and background screening requirements.
+   • Contractor access must be time-bound and reviewed quarterly.
+
+7. Enforcement of Security Responsibilities:
+   Personnel must:
+   • Protect CUI.
+   • Follow ASCP access control rules.
+   • Report suspicious activity immediately.
+   • Use only approved devices and accounts.
+
+8. Remote Workforce Requirements:
+   • Remote personnel must use Intune-managed devices.
+   • Remote access must be via Zero Trust Network Access (ZTNA).
+   • No personnel may access ASCP from personal or unmanaged devices.
+
+Control Alignment:
+• NIST SP 800-171 Rev 2 – 3.9.1 and 3.9.2.
+
+Enforcement:
+Non-compliance may result in disciplinary action, access revocation, or security incident escalation.
+
+Version: 1.0

@@ -1,0 +1,106 @@
+Continuous Monitoring Policy
+**Purpose**
+The purpose of this Continuous Monitoring Policy is to establish requirements for ongoing security monitoring, assessment, logging, and review activities that ensure the AegisSecure Cloud Platform (ASCP) maintains a strong security posture, identifies threats in real time, and complies with NIST SP 800-171 Rev 2. Continuous Monitoring (ConMon) provides ongoing awareness of vulnerabilities, indicators of compromise, and control effectiveness.
+**Scope**
+This policy applies to:
+- All ASCP environments hosted in AWS GovCloud (US-East)
+- All infrastructure components, applications, containers, databases, CI/CD pipelines, and identity systems
+- All personnel with administrative, development, or security responsibilities
+- All logging, SIEM, detection, and monitoring tools used to protect CUI
+**Roles & Responsibilities**
+- **System Owner:** Ensures continuous monitoring activities align with governance and contractual requirements.
+- **Security Manager:** Oversees monitoring operations, reviews alerts, and ensures control effectiveness.
+- **DevSecOps Team:** Implements monitoring agents, log pipelines, dashboards, and automated alerting.
+- **Incident Response Team:** Investigates and responds to alerts and anomalies.
+- **Users:** Report suspicious activity or anomalies immediately.
+---
+### **Policy Statements**
+#### **1. Security Monitoring Requirements**
+ASCP must continuously monitor:
+- Authentication and access activity (Entra ID GCC High, Keycloak)
+- Network traffic patterns and anomalies
+- System integrity and configuration changes
+- Vulnerability status and patch levels
+- AWS GuardDuty findings and Inspector alerts
+- API calls and resource actions (CloudTrail)
+- Critical infrastructure health (EC2, RDS, S3, containers)
+Monitoring must be active 24/7.
+#### **2. Logging Requirements**
+- All relevant logs must be collected, aggregated, and forwarded to a central SIEM.
+- Mandatory log sources:
+  - AWS CloudTrail
+  - CloudWatch Logs
+  - VPC Flow Logs
+  - Keycloak access and admin logs
+  - Application logs (API, frontend, background tasks)
+  - Container logs
+  - RDS PostgreSQL audit logs
+- Logs must be:
+  - Immutable
+  - Timestamped using synchronized time sources
+  - Stored in encrypted S3 with lifecycle and retention controls
+  - Protected with least privilege IAM policies
+#### **3. Alerting Requirements**
+- Alerts must be automatically triggered for:
+  - Unauthorized access attempts
+  - Privilege escalations
+  - CUI access anomalies
+  - Data exfiltration indicators
+  - Network scanning or probing
+  - Misconfigurations or drift
+  - Exploitable vulnerabilities
+Alerts must be reviewed within defined timelines:
+- Critical: within 1 hour
+- High: within 4 hours
+- Medium: within 24 hours
+- Low: within 48 hours
+#### **4. Control Effectiveness Monitoring**
+ASCP must:
+- Perform automated compliance checks using IaC and CSPM tools.
+- Review configuration drift, baseline changes, and CIS benchmark deviations.
+- Validate that encryption, backups, access controls, and network boundaries are enforced.
+- Generate monthly ConMon dashboards for leadership.
+#### **5. Continuous Assessment Activities**
+- Weekly vulnerability scans
+- Daily GuardDuty review
+- Monthly access reviews
+- Quarterly privilege audits and key rotation checks
+- Annual penetration testing (or equivalent Red Team activity)
+- Ongoing code scanning with every commit through CI/CD
+#### **6. Integration with Incident Response**
+- Alerts or anomalies must immediately trigger IR triage.
+- Monitoring data must be available for IR analysis.
+- Post-incident reviews must evaluate monitoring coverage and gaps.
+#### **7. Reporting & Metrics**
+ASCP must produce monthly and quarterly monitoring reports covering:
+- Alert volumes and response times
+- Security control drift
+- Vulnerability trends
+- Access anomalies
+- System uptime and reliability metrics
+- Compliance status for NIST 800-171 Rev 2
+#### **8. Protection of Monitoring Data**
+- Monitoring and logging data are considered sensitive and must be protected.
+- Access to SIEM dashboards and logs requires:
+  - Keycloak RBAC
+  - MFA through Entra ID GCC High
+- Tampering, deletion, or modification of logs is strictly prohibited.
+---
+### **Control Alignment (NIST SP 800-171 Rev 2)**
+- **3.3.1 – 3.3.8:** Audit & Accountability
+- **3.12.1:** Ongoing Assessments
+- **3.12.2:** Security Monitoring
+- **3.12.3:** Vulnerability Management
+- **3.14:** System Integrity
+- **3.13:** Communications Protection (monitoring of network events)
+---
+### **Enforcement**
+Failure to comply with this policy may result in:
+- Removal of privileged access
+- Disciplinary action
+- Mandatory retraining
+- Escalation to leadership
+- Reporting to contracting officials if monitoring gaps affect CUI
+---
+### **Version**
+**Version 1.0 — 2025-11-24**

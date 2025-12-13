@@ -1,0 +1,11 @@
+{
+  "default_input_per_1k": 5.0001,
+  "default_output_per_1k": 7.0,
+  "models": [
+    {
+      "input_per_1k": 0.0001,
+      "model": "llama3.1:8b",
+      "output_per_1k": 0.0009
+    }
+  ]
+}

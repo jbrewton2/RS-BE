@@ -1,0 +1,37 @@
+Identification & Authentication Policy
+
+Purpose:
+This Identification & Authentication (IA) Policy establishes requirements for verifying the identity of users, service accounts, devices, and processes accessing the AegisSecure Cloud Platform (ASCP). It ensures adherence to NIST SP 800-171 Rev 2 controls.
+
+Scope:
+Applies to all users, administrators, service accounts, automation processes, and devices accessing ASCP or related enclaves.
+
+Roles & Responsibilities:
+• AO – Approves major authentication exceptions.
+• SO – Ensures business alignment.
+• ISSM – Oversees authentication governance.
+• ISSO – Manages account lifecycle and reviews authentication logs.
+• Identity Admin – Manages Entra ID identities and Conditional Access.
+• Keycloak Admin – Manages enclave‑level RBAC and token policies.
+• DevSecOps – Enforces mTLS, service identity, and secure API authentication.
+• Users – Must safeguard credentials and report suspicious activity.
+
+Policy Statements:
+1. All authentication to ASCP must occur through Entra ID GCC High, federated into Keycloak.
+2. Multifactor Authentication (MFA) is mandatory using FIPS‑approved methods (hardware token or Authenticator app).
+3. Devices must be fully managed, compliant, encrypted, EDR‑protected, and located in the U.S.
+4. Password requirements follow Entra ID policy: 14+ characters, Smart Lockout, no reuse for 24 generations.
+5. Service accounts must use OAuth2 and least‑privilege roles, with secrets rotated every 90 days.
+6. Machine identities must use mTLS via service mesh (Istio) with SPIFFE IDs.
+7. Break‑glass accounts must be time‑restricted, logged, monitored, and disabled after use.
+8. Sessions must follow idle timeout (10 minutes) and absolute timeout (30 minutes).
+9. All identities must undergo quarterly access review.
+10. API access must enforce OAuth2, TLS1.2+, and no anonymous access.
+
+Control Alignment:
+NIST SP 800-171 Rev 2 – 3.5.1 through 3.5.10.
+
+Enforcement:
+Failure to follow this policy may result in access revocation, disciplinary action, and incident reporting.
+
+Version: 1.0

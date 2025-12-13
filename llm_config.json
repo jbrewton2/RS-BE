@@ -1,0 +1,12 @@
+{
+  "provider": "local_ollama",
+  "local_model": "llama3.1:8b",
+  "local_api_url": "http://localhost:11434/api/chat",
+  "remote_base_url": "http://localhost:11434/api/chat",
+  "remote_path": "/v1/chat/completions",
+  "remote_model": null,
+  "remote_api_key": null,
+  "remote_extra_headers": {},
+  "org_posture": "",
+  "prompt_override": ""
+}

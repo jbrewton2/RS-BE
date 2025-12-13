@@ -1,0 +1,341 @@
+{
+  "clause": [
+    {
+      "id": "clause-dfars-7019-7020",
+      "group": "clause",
+      "label": "DFARS 252.204-7019 / 7020 (SPRS & Assessment)",
+      "patterns": [
+        "\\b7012\\b",
+        "DFARS\\s*7019",
+        "DFARS[\\s\\-:]*7019",
+        "DFARS.*7019",
+        "\\b7019\\b",
+        "DFARS 252\\.204-\\s*7019",
+        "DFARS 252\\.204-[\\s\\-:]*7019",
+        "DFARS 252\\.204-.*7019",
+        "DFARS 252\\.204-\\s*7020",
+        "DFARS 252\\.204-[\\s\\-:]*7020",
+        "DFARS 252\\.204-.*7020",
+        "\\b7020\\b",
+        "DFARS\\s*7020",
+        "DFARS[\\s\\-:]*7020",
+        "DFARS.*7020"
+      ],
+      "tip": "Flags DoD assessment requirements and SPRS score submission.",
+      "severity": "Medium",
+      "enabled": true,
+      "category": "CYBER_DFARS",
+      "scopeHint": "enterprise",
+      "examples": null
+    },
+    {
+      "id": "clause-dfars-7021",
+      "group": "clause",
+      "label": "DFARS 252.204-7021 (CMMC)",
+      "patterns": [
+        "DFARS\\s*252\\.204-7021",
+        "\\bCMMC\\b",
+        "\\bCybersecurity\\ Maturity\\ Model\\ Certification\\b",
+        "\\bCMMC\\ Level\\s*[123]\\b"
+      ],
+      "tip": "Flags CMMC certification requirements.",
+      "severity": "Critical",
+      "enabled": true,
+      "category": "CYBER_DFARS",
+      "scopeHint": "enterprise",
+      "examples": null
+    },
+    {
+      "id": "clause-nist-800-171",
+      "group": "clause",
+      "label": "NIST SP 800-171 Reference",
+      "patterns": [
+        "NIST\\s*SP\\s*800-171",
+        "SP\\s*800-171",
+        "\\b800-171\\b"
+      ],
+      "tip": "Flags references to NIST SP 800-171 requirements for CUI environments.",
+      "severity": "Medium",
+      "enabled": true,
+      "category": "DATA_CLASSIFICATION",
+      "scopeHint": "enterprise",
+      "examples": null
+    },
+    {
+      "id": "clause-nist-800-53-fedramp",
+      "group": "clause",
+      "label": "NIST SP 800-53 / FedRAMP",
+      "patterns": [
+        "NIST\\s*SP\\s*800-53",
+        "SP\\s*800-53",
+        "\\bFedRAMP\\b",
+        "\\bFedRAMP\\ Moderate\\b",
+        "\\bFedRAMP\\ High\\b"
+      ],
+      "tip": "Flags FedRAMP or 800-53-aligned clauses, boundary/ATO requirements, or security control inheritance.",
+      "severity": "High",
+      "enabled": true,
+      "category": "CYBER_DFARS",
+      "scopeHint": "enterprise",
+      "examples": null
+    },
+    {
+      "id": "clause-hsar",
+      "group": "clause",
+      "label": "HSAR / DHS Security Requirements",
+      "patterns": [
+        "\\bHSAR\\b",
+        "\\bHomeland\\ Security\\ Acquisition\\ Regulation\\b",
+        "\\bSensitive\\ Security\\ Information\\b",
+        "\\bSSI\\b",
+        "\\bDHS\\ sensitive\\ systems\\b"
+      ],
+      "tip": "Flags DHS/HSAR-specific SSI, cyber controls, and sensitive systems requirements.",
+      "severity": "Medium",
+      "enabled": true,
+      "category": "PRIVACY",
+      "scopeHint": "project",
+      "examples": null
+    },
+    {
+      "id": "clause-ferpa-hipaa",
+      "group": "clause",
+      "label": "FERPA / HIPAA / PHI / EDU Privacy",
+      "patterns": [
+        "\\bFERPA\\b",
+        "\\bFamily\\ Educational\\ Rights\\ and\\ Privacy\\ Act\\b",
+        "\\bHIPAA\\b",
+        "\\bHealth\\ Insurance\\ Portability\\ and\\ Accountability\\ Act\\b",
+        "\\bProtected\\ Health\\ Information\\b",
+        "\\bPHI\\b",
+        "\\bstudent\\ data\\b",
+        "\\beducation\\ records\\b"
+      ],
+      "tip": "Flags education and healthcare data privacy requirements.",
+      "severity": "High",
+      "enabled": true,
+      "category": "PRIVACY",
+      "scopeHint": "project",
+      "examples": null
+    },
+    {
+      "id": "clause-data-classification",
+      "group": "clause",
+      "label": "Data Classification (CUI / PII / SBU / CTI)",
+      "patterns": [
+        "\\bControlled\\ Unclassified\\ Information\\b",
+        "\\bCUI\\b",
+        "\\bCUI\\ Category\\b",
+        "\\bPersonally\\ Identifiable\\ Information\\b",
+        "\\bPII\\b",
+        "\\bSensitive\\ But\\ Unclassified\\b",
+        "\\bSBU\\b",
+        "\\bControlled\\ Technical\\ Information\\b",
+        "\\bCTI\\b"
+      ],
+      "tip": "Flags clauses defining or invoking classification rules for sensitive or regulated data.",
+      "severity": "Critical",
+      "enabled": true,
+      "category": "DATA_CLASSIFICATION",
+      "scopeHint": "enterprise",
+      "examples": null
+    },
+    {
+      "id": "clause-incident-reporting",
+      "group": "clause",
+      "label": "Incident Reporting Requirements",
+      "patterns": [
+        "\\bcyber\\ incident\\b",
+        "\\bsecurity\\ incident\\b",
+        "\\bbreach\\ notification\\b",
+        "report within\\s*(24|48|72)\\s*hours",
+        "\\bnotify\\ the\\ Contracting\\ Officer\\b",
+        "\\bCO\\ shall\\ be\\ notified\\b",
+        "\\bagency\\ reporting\\ requirements\\b"
+      ],
+      "tip": "Flags incident reporting timelines: DFARS 72h, state privacy laws, federal CO notifications.",
+      "severity": "High",
+      "enabled": true,
+      "category": "INCIDENT_REPORTING",
+      "scopeHint": "enterprise",
+      "examples": null
+    },
+    {
+      "id": "clause-flowdown",
+      "group": "clause",
+      "label": "Flowdown Requirements",
+      "patterns": [
+        "\\bshall\\ flow\\ down\\b",
+        "\\bflowdown\\ requirement\\b",
+        "\\bflows\\ down\\ to\\ subcontractors\\b",
+        "\\bincluded\\ in\\ all\\ subcontracts\\b",
+        "\\bsubcontractor\\ compliance\\b"
+      ],
+      "tip": "Flags clauses that require you to pass obligations down to subcontractors.",
+      "severity": "Medium",
+      "enabled": true,
+      "category": "FLOWDOWN",
+      "scopeHint": "project",
+      "examples": null
+    },
+    {
+      "id": "clause-liability",
+      "group": "clause",
+      "label": "Liability / Indemnification",
+      "patterns": [
+        "indemnif(y|ication)",
+        "\\bhold\\ harmless\\b",
+        "\\blimitation\\ of\\ liability\\b",
+        "\\bconsequential\\ damages\\b",
+        "\\bdirect\\ damages\\b",
+        "\\bgross\\ negligence\\b"
+      ],
+      "tip": "Flags legal/financial exposure not directly tied to cyber rules but critical for risk.",
+      "severity": "High",
+      "enabled": true,
+      "category": "LIABILITY",
+      "scopeHint": "enterprise",
+      "examples": null
+    },
+    {
+      "id": "d032b536-f533-4134-af6f-3afdfd650e56",
+      "group": "clause",
+      "label": "",
+      "patterns": [],
+      "tip": "",
+      "severity": "Medium",
+      "enabled": true,
+      "category": "CYBER_DFARS",
+      "scopeHint": null,
+      "examples": null
+    }
+  ],
+  "context": [
+    {
+      "id": "ctx-mfa",
+      "group": "context",
+      "label": "MFA / Access Control",
+      "patterns": [
+        "\\bleast\\ privilege\\b",
+        "role[- ]based access control",
+        "\\bRBAC\\b"
+      ],
+      "tip": "Access control and identity / MFA references relevant to IAM-related risks.",
+      "severity": "Medium",
+      "enabled": true,
+      "category": "CYBER_DFARS",
+      "scopeHint": "enterprise",
+      "examples": null
+    },
+    {
+      "id": "ctx-encryption",
+      "group": "context",
+      "label": "Encryption (FIPS / TLS)",
+      "patterns": [
+        "FIPS\\s*140-2",
+        "FIPS\\s*140-3",
+        "encrypt(ed|ion)",
+        "TLS\\s*1\\.2",
+        "TLS\\s*1\\.3",
+        "\\bHTTPS\\ only\\b",
+        "\\bencryption\\ at\\ rest\\b",
+        "\\bencryption\\ in\\ transit\\b"
+      ],
+      "tip": "Encryption requirements supporting NIST 800-171 3.13.x controls.",
+      "severity": "Medium",
+      "enabled": true,
+      "category": "DATA_CLASSIFICATION",
+      "scopeHint": "enterprise",
+      "examples": null
+    },
+    {
+      "id": "ctx-siem",
+      "group": "context",
+      "label": "Logging / SIEM / Monitoring",
+      "patterns": [
+        "\\baudit\\ logs\\b",
+        "\\blog\\ retention\\b",
+        "\\bcontinuous\\ monitoring\\b",
+        "\\blog\\ correlation\\b",
+        "\\bSOC\\ monitoring\\b"
+      ],
+      "tip": "Logging and monitoring controls relevant to FedRAMP, DFARS, and state breach laws.",
+      "severity": "Low",
+      "enabled": true,
+      "category": "OTHER",
+      "scopeHint": "enterprise",
+      "examples": null
+    },
+    {
+      "id": "ctx-dr-bc",
+      "group": "context",
+      "label": "Backup / DR / Business Continuity",
+      "patterns": [
+        "\\bRTO\\b"
+      ],
+      "tip": "Context flags related to operational resilience and DR/BCP.",
+      "severity": "Medium",
+      "enabled": true,
+      "category": "OTHER",
+      "scopeHint": "enterprise",
+      "examples": null
+    },
+    {
+      "id": "ctx-state-laws",
+      "group": "context",
+      "label": "State Breach / Privacy Laws",
+      "patterns": [
+        "\\bstate\\ data\\ breach\\ law\\b",
+        "\\bstate\\ privacy\\ law\\b",
+        "\\bstate\\ breach\\ notification\\b",
+        "\\bCalifornia\\ Consumer\\ Privacy\\ Act\\b",
+        "\\bCCPA\\b",
+        "\\bVirginia\\ Consumer\\ Data\\ Protection\\ Act\\b",
+        "\\bCDPA\\b"
+      ],
+      "tip": "Flags general references to state-level privacy requirements.",
+      "severity": "Medium",
+      "enabled": true,
+      "category": "PRIVACY",
+      "scopeHint": "project",
+      "examples": null
+    },
+    {
+      "id": "ctx-edu",
+      "group": "context",
+      "label": "Education (EDU) Context",
+      "patterns": [
+        "\\bstudent\\ data\\b",
+        "\\beducation\\ records\\b",
+        "\\blearning\\ management\\ system\\b",
+        "\\bK-12\\b",
+        "\\buniversity\\ system\\b"
+      ],
+      "tip": "EDU-relevant privacy/operational context, often tied to FERPA-like constraints.",
+      "severity": "Medium",
+      "enabled": true,
+      "category": "PRIVACY",
+      "scopeHint": "project",
+      "examples": null
+    },
+    {
+      "id": "ctx-fedramp-boundary",
+      "group": "context",
+      "label": "FedRAMP Boundary / Shared Responsibility",
+      "patterns": [
+        "\\bFedRAMP\\ boundary\\b",
+        "\\bshared\\ responsibility\\b",
+        "\\bATO\\ package\\b",
+        "\\bauthorization\\ to\\ operate\\b",
+        "\\bresidual\\ risk\\b",
+        "\\bcustomer\\ responsibility\\b"
+      ],
+      "tip": "Contextual info about FedRAMP shared controls and ATO considerations.",
+      "severity": "Medium",
+      "enabled": true,
+      "category": "CYBER_DFARS",
+      "scopeHint": "enterprise",
+      "examples": null
+    }
+  ]
+}

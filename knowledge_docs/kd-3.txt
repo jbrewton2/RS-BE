@@ -1,0 +1,40 @@
+Access Control Policy
+
+Purpose:
+This Access Control Policy establishes requirements for managing, approving, granting, reviewing, monitoring, and revoking access to the AegisSecure Cloud Platform (ASCP) in alignment with NIST SP 800-171 Rev 2 and Zero Trust principles.
+
+Scope:
+This policy applies to all Aegis users, administrators, contractors, service accounts, automation processes, and devices accessing or interacting with ASCP, the CUI Processing Enclave, or related project enclaves.
+
+Roles & Responsibilities:
+• Authorizing Official (AO) – Approves risk, major access exceptions.
+• System Owner (SO) – Ensures access aligns with business needs.
+• ISSM – Oversees access governance; approves privileged roles.
+• ISSO – Grants/revokes access; performs quarterly access reviews.
+• Identity Admin – Manages Entra ID GCC High identities and CA enforcement.
+• Keycloak Admin – Manages enclave RBAC and service account credentials.
+• DevSecOps – Ensures technical controls enforce least privilege.
+• Users – Use only approved credentials/devices; safeguard accounts.
+
+Policy Statements:
+1. All authentication to ASCP shall occur through Entra ID GCC High, federated into Keycloak.
+2. ASCP must enforce least privilege and Zero Trust principles for all user and service access.
+3. Users must authenticate via MFA using a FIPS-approved factor.
+4. Devices accessing ASCP must be Intune-managed, compliant, and located within the United States.
+5. Privileged access must require:
+   • Just-In-Time (JIT) elevation
+   • Privileged Access Workstation (PAW)
+   • Session logging and SIEM monitoring
+6. Reviewers may access CUI documents; privileged roles shall not have access to CUI data.
+7. Project enclaves may use ASCP APIs in metadata-only mode; no CUI export is permitted.
+8. All access changes require proper documentation, approval, and tracking.
+9. Quarterly access reviews must be conducted by the ISSO and approved by the ISSM.
+10. Access violations shall trigger security review and potential revocation.
+
+Control Alignment:
+• NIST SP 800-171 Rev 2 – 3.1.1 through 3.1.22
+
+Enforcement:
+Violations of this policy may result in disciplinary action, access revocation, and incident reporting.
+
+Version: 1.0

@@ -1,0 +1,164 @@
+[
+  {
+    "id": "kd-1",
+    "title": "ASCP_SSP_FINIAL.docx",
+    "filename": "kd-1.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-24T10:09:25.442120",
+    "size_bytes": 87652
+  },
+  {
+    "id": "kd-2",
+    "title": "ASCP_Access_Control_Policy.docx",
+    "filename": "kd-2.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:13:58.639650",
+    "size_bytes": 926
+  },
+  {
+    "id": "kd-3",
+    "title": "ASCP_Policy_01_Access_Control.docx",
+    "filename": "kd-3.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:14:10.555300",
+    "size_bytes": 2252
+  },
+  {
+    "id": "kd-4",
+    "title": "ASCP_Policy_02_Audit_Logging.docx",
+    "filename": "kd-4.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:14:18.167349",
+    "size_bytes": 2115
+  },
+  {
+    "id": "kd-5",
+    "title": "ASCP_Policy_03_Configuration_Management.docx",
+    "filename": "kd-5.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:14:27.865220",
+    "size_bytes": 3313
+  },
+  {
+    "id": "kd-6",
+    "title": "ASCP_Policy_04_Identification_Authentication.docx",
+    "filename": "kd-6.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:14:44.222779",
+    "size_bytes": 2108
+  },
+  {
+    "id": "kd-7",
+    "title": "ASCP_Policy_05_Incident_Response.docx",
+    "filename": "kd-7.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:14:50.911827",
+    "size_bytes": 3435
+  },
+  {
+    "id": "kd-8",
+    "title": "ASCP_Policy_06_Maintenance.docx",
+    "filename": "kd-8.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:14:55.921818",
+    "size_bytes": 3608
+  },
+  {
+    "id": "kd-9",
+    "title": "ASCP_Policy_07_Media_Protection.docx",
+    "filename": "kd-9.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:15:04.053469",
+    "size_bytes": 3395
+  },
+  {
+    "id": "kd-10",
+    "title": "ASCP_Policy_08_Personnel_Security.docx",
+    "filename": "kd-10.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:15:10.210594",
+    "size_bytes": 3457
+  },
+  {
+    "id": "kd-11",
+    "title": "ASCP_Policy_09_Physical_Protection.docx",
+    "filename": "kd-11.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:15:15.203384",
+    "size_bytes": 3667
+  },
+  {
+    "id": "kd-12",
+    "title": "Change_Management_Policy.docx",
+    "filename": "kd-12.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:15:24.256155",
+    "size_bytes": 4500
+  },
+  {
+    "id": "kd-13",
+    "title": "Continuous_Monitoring_Policy.docx",
+    "filename": "kd-13.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:15:32.395178",
+    "size_bytes": 4829
+  },
+  {
+    "id": "kd-14",
+    "title": "CUI_Handling_and_Marking_Policy.docx",
+    "filename": "kd-14.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:15:39.029941",
+    "size_bytes": 4336
+  },
+  {
+    "id": "kd-15",
+    "title": "Risk_Management_Policy.docx",
+    "filename": "kd-15.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:15:45.995797",
+    "size_bytes": 4545
+  },
+  {
+    "id": "kd-16",
+    "title": "System_and_Communications_Protection_Policy.docx",
+    "filename": "kd-16.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:15:54.974399",
+    "size_bytes": 2663
+  },
+  {
+    "id": "kd-17",
+    "title": "System_and_Communications_Protection_Policy.docx",
+    "filename": "kd-17.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:16:03.336022",
+    "size_bytes": 2663
+  },
+  {
+    "id": "kd-18",
+    "title": "System_and_Information_Integrity_Policy.docx",
+    "filename": "kd-18.txt",
+    "doc_type": null,
+    "tags": [],
+    "created_at": "2025-11-26T04:16:17.262567",
+    "size_bytes": 3820
+  }
+]

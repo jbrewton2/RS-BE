@@ -1,0 +1,7 @@
+
+# Added by Split-CSSRepo.ps1
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*

@@ -1,0 +1,88 @@
+Maintenance Policy
+
+Purpose:
+This Maintenance Policy establishes requirements for performing, documenting, and securing maintenance activities for the AegisSecure Cloud Platform (ASCP). It ensures maintenance is executed safely, consistently, and in alignment with NIST SP 800-171 Rev 2 controls (3.7.x).
+
+Scope:
+Applies to all personnel involved in the maintenance of ASCP systems, including AWS GovCloud resources, Kubernetes clusters, containers, Terraform IaC, CI/CD pipelines, Keycloak, Zero Trust components, and monitoring/logging infrastructure.
+
+Roles & Responsibilities:
+• AO – Approves major/emergency maintenance decisions.
+• SO – Ensures maintenance aligns with business and operational needs.
+• ISSM – Approves significant changes, oversees maintenance governance.
+• ISSO – Documents maintenance and ensures evidence collection.
+• DevSecOps Lead – Owns maintenance process, tools, and secure baselines.
+• DevSecOps Engineers – Perform patching, upgrades, code deployments.
+• CloudOps – Maintain AWS infrastructure (VPC, RDS, S3, endpoints, KMS).
+• SOC – Monitors alerts during maintenance windows.
+• Users – Must not perform maintenance; report anomalies.
+
+Policy Statements:
+1. Authorized Maintenance:
+   Only DevSecOps, CloudOps, or ISSM-approved personnel may conduct maintenance.
+   Third-party maintenance must be explicitly approved, supervised, and logged.
+
+2. Privileged Access:
+   Privileged maintenance must use Secure Privileged Access Workstations (PAWs) with:
+   • Full-disk encryption
+   • EDR protections
+   • No general-purpose browsing or email
+   • Dedicated certificate-based access
+
+3. Maintenance Methods:
+   All maintenance must occur using approved tools:
+   • Terraform IaC
+   • Helm & Kubernetes manifests
+   • AWS CLI (FIPS endpoints)
+   • GitOps CI/CD pipelines
+   Manual production configuration changes are prohibited except under break-glass conditions.
+
+4. Emergency (“Break-Glass”) Maintenance:
+   • Must be approved by ISSM.
+   • Must be fully logged and documented.
+   • Must undergo review within 24 hours.
+   • Baseline configurations must be revalidated afterward.
+
+5. Patching Requirements:
+   ASCP maintenance must ensure:
+   • Critical vulnerabilities patched within 48 hours.
+   • High severity vulnerabilities within 7 days.
+   • Medium severity within 30 days.
+   • Node upgrades quarterly; container rebuilds weekly (or when new CVEs are released).
+
+6. Change Logging:
+   • All maintenance actions must be logged in CloudTrail, GitLab, Kubernetes audit logs, and SIEM.
+   • Logs must include date/time, personnel, tools used, and systems affected.
+
+7. Maintenance Records:
+   Maintenance activities must include:
+   • Description of maintenance
+   • Approval records
+   • Affected components
+   • Pre/post-validation results
+   • Evidence of success or remediation
+   Records retained for 7 years.
+
+8. Pre/Post Maintenance Validation:
+   Before maintenance:
+   • Snapshots/backups taken
+   • Drift detection run
+   After maintenance:
+   • Validation tests executed
+   • Mesh connectivity verified
+   • Logs reviewed for anomalies
+
+9. Prohibited Actions:
+   • SSH access to production nodes
+   • Manual edits to cloud resources
+   • Use of unauthorized or untracked scripts
+   • Unapproved remote access tools
+   • Maintenance on non-compliant devices
+
+Control Alignment:
+NIST SP 800-171 Rev 2 – 3.7.1 through 3.7.5
+
+Enforcement:
+Non-compliance may result in access revocation, administrative discipline, and incident escalation.
+
+Version: 1.0

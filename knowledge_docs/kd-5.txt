@@ -1,0 +1,74 @@
+Configuration Management Policy
+
+Purpose:
+This Configuration Management (CM) Policy defines the requirements for establishing, implementing, and maintaining secure, controlled, and documented configurations for the AegisSecure Cloud Platform (ASCP). It ensures consistent application of configuration controls that support NIST SP 800-171 Rev 2 compliance and protect Controlled Unclassified Information (CUI).
+
+Scope:
+This policy applies to all ASCP infrastructure, applications, cloud services, Kubernetes workloads, Terraform Infrastructure-as-Code (IaC), CI/CD pipelines, microservices, Keycloak identity configuration, network resources, and supporting systems.
+
+Roles & Responsibilities:
+• Authorizing Official (AO) – Approves major changes with security impact.
+• System Owner (SO) – Ensures resources and business alignment.
+• ISSM – Oversees CM program, approves high-impact changes.
+• ISSO – Maintains CM documentation and performs reviews.
+• DevSecOps Lead – Owns IaC, CI/CD, Kubernetes configuration, baselines.
+• DevSecOps Engineers – Implement changes, patch systems, deploy code.
+• CloudOps – Maintain AWS resources, VPC endpoints, and platform configuration.
+• CCB (Change Control Board) – Reviews and approves major changes.
+
+Policy Statements:
+1. Baseline Configurations:
+   ASCP shall maintain secure, documented baselines for:
+   • Kubernetes (EKS) clusters
+   • EC2/EKS node AMIs
+   • Terraform IaC modules
+   • Keycloak realm configuration
+   • Network/VPC structure
+   • RDS and S3 security configuration
+   • IAM roles and service accounts
+
+2. Infrastructure-as-Code (IaC):
+   • All infrastructure must be defined and deployed using Terraform and GitOps.
+   • Manual configuration changes are prohibited except under break-glass conditions.
+   • All IaC changes must use version control and approvals.
+
+3. Configuration Change Control:
+   • All changes require change tickets, security impact analysis, and approvals.
+   • Major changes require CCB review and authorization.
+   • Emergency changes must be documented and reviewed within 24 hours.
+
+4. Secure Configuration:
+   • All configurations must enforce:
+     - Least privilege IAM roles
+     - TLS 1.2+ and FIPS crypto
+     - No public access
+     - No privileged pods
+     - Pod Security Standards (restricted mode)
+     - Encrypted storage (EBS, S3, RDS)
+   • Only approved container base images may be used.
+
+5. Drift Detection:
+   • Terraform drift detection must run daily.
+   • Any configuration drift must be remediated immediately.
+
+6. Patching & Updates:
+   • Critical vulnerabilities patched within 48 hours.
+   • High severity within 7 days.
+   • Node images upgraded quarterly.
+   • Containers rebuilt and redeployed through CI/CD.
+
+7. Logging & Monitoring:
+   • All configuration changes logged (GitLab, CloudTrail, Keycloak).
+   • SOC monitors for anomalous configuration activity.
+
+8. Reviews:
+   • Quarterly CM reviews must be conducted.
+   • Baseline configurations must be updated after major changes.
+
+Control Alignment:
+• NIST SP 800-171 Rev 2 – 3.4.1 to 3.4.8.
+
+Enforcement:
+Non-compliance with this CM Policy may result in access revocation, security incident escalation, and disciplinary action.
+
+Version: 1.1 (Regenerated)

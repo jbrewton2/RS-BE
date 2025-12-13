@@ -1,0 +1,75 @@
+Physical Protection Policy
+
+Purpose:
+This Physical Protection Policy establishes the requirements for safeguarding physical access to locations, facilities, devices, equipment, and systems that support the AegisSecure Cloud Platform (ASCP). It ensures compliance with NIST SP 800-171 Rev 2 (3.10.x) and DoD CUI handling requirements.
+
+Scope:
+This policy applies to all Aegis facilities, personnel, equipment, data centers, devices, and physical components used to support ASCP, including:
+• Aegis corporate offices
+• Secure rooms and controlled areas
+• Privileged Access Workstations (PAWs)
+• Air-gapped test labs
+• AWS GovCloud datacenters (inherited controls)
+• Any location where ASCP administrative work is performed
+
+Roles & Responsibilities:
+• AO – Authorizes exceptions and approves facility security plans.
+• SO – Ensures business alignment and oversees facility access requirements.
+• ISSM – Maintains physical protection documentation; approves high-impact access.
+• ISSO – Tracks physical access logs, visitor logs, and security incidents.
+• Corporate Security – Manages physical security systems (badges, cameras, access logs).
+• Managers – Ensure personnel follow facility access rules.
+• Users – Must comply with badge requirements and physical safeguards.
+
+Policy Statements:
+1. Physical Access Controls:
+   • Only authorized personnel may access areas supporting ASCP.
+   • Access to secure areas requires an assigned badge with appropriate permissions.
+   • Tailgating into secure areas is strictly prohibited.
+   • Visitors must be escorted at all times.
+
+2. Facility Entry Requirements:
+   • Personnel must display badges visibly while on-site.
+   • Corporate Security must maintain access logs.
+   • Physical access must be revoked immediately upon termination.
+
+3. Visitor Management:
+   • All visitors must sign in and present valid identification.
+   • Visitors must wear visitor badges at all times.
+   • Visitors are not permitted to bring personal electronic devices into secure areas unless approved.
+
+4. AWS GovCloud Physical Controls (Inherited):
+   ASCP relies on AWS GovCloud physical controls which include:
+   • FISMA High, FedRAMP High, DoD IL4/IL5 compliant datacenters
+   • Guards, cameras, biometrics, perimeter fencing
+   • Multi-factor facility access control
+   • Environmental safeguards (power, cooling, fire suppression)
+
+5. Equipment Protection:
+   • ASCP administrative laptops and PAWs must not be left unattended in public spaces.
+   • All portable equipment must use full-disk encryption.
+   • Lost or stolen devices must be reported immediately.
+
+6. Delivery & Storage:
+   • Packages containing IT equipment must be inspected and logged.
+   • CUI-bearing devices must be stored in secured, locked locations when not in use.
+
+7. Alternative Work Areas:
+   • Remote employees must not print or store CUI physically.
+   • Home offices must adhere to corporate clean-desk requirements for any ASCP administrative activity.
+
+8. Environmental Controls:
+   • ASCP relies on AWS GovCloud-provided environmental controls for server infrastructure.
+   • Offices must ensure fire suppression, climate control, and surge protection.
+
+9. Emergency Protocols:
+   • In emergencies, CUI must be secured before evacuation (if safe to do so).
+   • Physical security systems must automatically lock down during emergencies where possible.
+
+Control Alignment:
+NIST SP 800-171 Rev 2 – 3.10.1 through 3.10.6.
+
+Enforcement:
+Violation of this policy may result in disciplinary action, removal of access, or security incident escalation.
+
+Version: 1.0
