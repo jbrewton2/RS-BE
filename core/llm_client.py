@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Tuple, List, Optional
 from pathlib import Path
 
@@ -9,8 +10,8 @@ import httpx
 from fastapi import HTTPException
 
 from backend.core.config import (
-    OLLAMA_API_URL,
-    DEFAULT_LLM_MODEL,
+    OLLAMA_API_URL as CONFIG_OLLAMA_API_URL,
+    DEFAULT_LLM_MODEL as CONFIG_DEFAULT_LLM_MODEL,
     SYSTEM_PROMPT_BASE,
     QUESTIONNAIRE_SYSTEM_PROMPT,
     KNOWLEDGE_DOCS_DIR,
@@ -20,6 +21,22 @@ from backend.core.config import (
 from backend.llm_status.store import append_llm_event
 from backend.pricing.llm_pricing_store import compute_cost_usd
 from backend.llm_config_store import load_llm_config, LLMConfig
+
+
+# ===================================================================
+# ENV OVERRIDES (deployment-friendly)
+# ===================================================================
+
+def _get_ollama_api_url() -> str:
+    # Prefer container env, fallback to config.py constant
+    return (os.getenv("OLLAMA_API_URL") or CONFIG_OLLAMA_API_URL or "").strip()
+
+def _get_default_model() -> str:
+    # Prefer container env, fallback to config.py constant
+    return (os.getenv("OLLAMA_MODEL") or CONFIG_DEFAULT_LLM_MODEL or "").strip()
+
+def _is_chat_endpoint(url: str) -> bool:
+    return url.rstrip("/").endswith("/api/chat")
 
 
 # ===================================================================
@@ -63,21 +80,10 @@ def _apply_prompt_override(base_prompt: str) -> str:
 def _build_review_system_prompt(prompt_override: Optional[str]) -> str:
     """
     Decide which system prompt to use for /analyze (contract review & chat).
-
-    - If prompt_override is provided (e.g., chat from the frontend), we use it
-      as the *entire* system prompt so that chat can define its own formatting
-      and behavior, without inheriting the OBJECTIVE/SCOPE-style headings from
-      REVIEW_SYSTEM_PROMPT.
-
-    - Otherwise (normal review analysis), we use REVIEW_SYSTEM_PROMPT
-      (or SYSTEM_PROMPT_BASE as a fallback), and then apply any org-level
-      LLMConfig.prompt_override via _apply_prompt_override.
     """
-    # Chat or other special callers: respect prompt_override fully.
     if prompt_override:
         return prompt_override.strip()
 
-    # Normal review analysis path:
     base = REVIEW_SYSTEM_PROMPT or SYSTEM_PROMPT_BASE
     return _apply_prompt_override(base)
 
@@ -91,16 +97,11 @@ def _compute_cost_for_model(
     input_tokens: int,
     output_tokens: int,
 ) -> Tuple[float, float, float]:
-    """
-    Wrapper using compute_cost_usd but returned in 3-tuple format
-    for compatibility with older usage logs.
-    """
     total_cost = compute_cost_usd(
         model=model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
     )
-    # Old fields kept for backward compatibility
     return (0.0, 0.0, total_cost)
 
 
@@ -113,7 +114,6 @@ def _log_llm_event(
     input_tokens: int,
     output_tokens: int,
 ) -> None:
-    """Best-effort logging that NEVER throws."""
     try:
         _, _, total_cost = _compute_cost_for_model(
             model=model,
@@ -134,7 +134,6 @@ def _log_llm_event(
             }
         )
     except Exception:
-        # never break user path due to logging
         pass
 
 
@@ -144,14 +143,21 @@ def _log_llm_event(
 
 async def _ollama_post(payload: dict, request_type: str) -> Tuple[str, int, int]:
     """
-    Call Ollama (or compatible chat API) and return:
+    Call Ollama and return:
       - assistant content string
       - prompt_eval_count as input_tokens
       - eval_count as output_tokens
     """
+    url = _get_ollama_api_url()
+    if not url:
+        raise HTTPException(
+            status_code=500,
+            detail="OLLAMA_API_URL is not configured (env OLLAMA_API_URL or backend/core/config.py).",
+        )
+
     async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
         try:
-            resp = await client.post(OLLAMA_API_URL, json=payload)
+            resp = await client.post(url, json=payload)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             raise HTTPException(
@@ -174,7 +180,7 @@ async def _ollama_post(payload: dict, request_type: str) -> Tuple[str, int, int]
                 detail=f"LLM JSON parse failed ({request_type}): {exc}",
             )
 
-    # Extract assistant content
+    # Extract assistant content (chat vs generate)
     content = None
     if isinstance(data, dict):
         msg = data.get("message")
@@ -210,7 +216,6 @@ async def _ollama_post(payload: dict, request_type: str) -> Tuple[str, int, int]
 async def _load_knowledge_context(
     knowledge_doc_ids: Optional[List[str]],
 ) -> str:
-    """Load text from knowledge_docs/<id>.txt into a single snippet."""
     if not knowledge_doc_ids:
         return ""
 
@@ -222,20 +227,12 @@ async def _load_knowledge_context(
                 txt = p.read_text(encoding="utf-8", errors="ignore")
                 chunks.append(txt[:6000])
             except Exception:
-                # ignore broken docs
                 pass
 
     return "\n\n".join(chunks).strip()
 
 
 async def call_llm_for_review(req):
-    """
-    Enhanced contract review call that:
-    - Uses REVIEW_SYSTEM_PROMPT (or SYSTEM_PROMPT_BASE) for normal review analysis
-    - For chat & special flows, uses req.prompt_override as the full system prompt
-    - Injects knowledge_context (SSPs, policies, prior questionnaires)
-    """
-
     knowledge_context = await _load_knowledge_context(req.knowledge_doc_ids)
 
     user_payload = {
@@ -246,23 +243,37 @@ async def call_llm_for_review(req):
         "prompt_override": req.prompt_override,
     }
 
-    # NEW: system prompt respects prompt_override fully for chat
     system_prompt = _build_review_system_prompt(
         getattr(req, "prompt_override", None)
     )
 
-    payload = {
-        "model": DEFAULT_LLM_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": json.dumps(user_payload, ensure_ascii=False),
-            },
-        ],
-        "temperature": req.temperature or 0.2,
-        "stream": False,
-    }
+    model = _get_default_model()
+
+    # Build payload based on endpoint type:
+    # - /api/chat expects messages[]
+    # - /api/generate expects a single prompt string
+    url = _get_ollama_api_url()
+    if _is_chat_endpoint(url):
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            ],
+            "temperature": req.temperature or 0.2,
+            "stream": False,
+        }
+    else:
+        prompt = (
+            f"{system_prompt}\n\n"
+            f"USER_PAYLOAD_JSON:\n{json.dumps(user_payload, ensure_ascii=False)}\n"
+        )
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "temperature": req.temperature or 0.2,
+            "stream": False,
+        }
 
     content, input_tokens, output_tokens = await _ollama_post(
         payload, "contract-review"
@@ -272,7 +283,7 @@ async def call_llm_for_review(req):
         app="contract_review",
         endpoint="/analyze",
         provider="local_ollama",
-        model=DEFAULT_LLM_MODEL,
+        model=model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
     )
@@ -285,15 +296,6 @@ async def call_llm_for_review(req):
 # ===================================================================
 
 async def call_llm_question_single(question: str, similar_bank_entries: list):
-    """
-    Single-question fallback LLM call.
-    Enhanced to pass org_posture for higher confidence & consistency.
-
-    NOTE: This returns plain answer text (string) for compatibility
-    with existing service.py usage.
-    """
-
-    # Prepare bank examples for the fallback model
     bank_items = [
         {
             "id": e.id,
@@ -326,27 +328,37 @@ async def call_llm_question_single(question: str, similar_bank_entries: list):
         + "\nRespond with ONLY the answer text (no JSON)."
     )
 
-    payload = {
-        "model": DEFAULT_LLM_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-        ],
-        "temperature": 0.2,
-        "stream": False,
-    }
+    model = _get_default_model()
+    url = _get_ollama_api_url()
+
+    if _is_chat_endpoint(url):
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            ],
+            "temperature": 0.2,
+            "stream": False,
+        }
+    else:
+        payload = {
+            "model": model,
+            "prompt": f"{system_prompt}\n\n{json.dumps(user_payload, ensure_ascii=False)}",
+            "temperature": 0.2,
+            "stream": False,
+        }
 
     content, input_tokens, output_tokens = await _ollama_post(
         payload, "questionnaire-single"
     )
 
-    # Log best-effort
     try:
         _log_llm_event(
             app="questionnaire_single",
             endpoint="/questionnaire/analyze",
             provider="local_ollama",
-            model=DEFAULT_LLM_MODEL,
+            model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
@@ -364,24 +376,6 @@ async def call_llm_question_batch(
     questions_payload: list,
     knowledge_context: str,
 ) -> dict:
-    """
-    Batch question LLM call. Returns dict mapping question_id -> answer info.
-
-    Expected JSON return format:
-
-      {
-        "answers": [
-          {
-            "id": "q1",
-            "answer": "...",
-            "confidence": 0.82,
-            "inferred_tags": ["CUI", "Encryption"]
-          },
-          ...
-        ]
-      }
-    """
-
     effective_posture = _get_effective_org_posture()
 
     user_payload = {
@@ -400,15 +394,26 @@ async def call_llm_question_batch(
         + "\nRespond ONLY with JSON. Do not add explanations."
     )
 
-    payload = {
-        "model": DEFAULT_LLM_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-        ],
-        "temperature": 0.2,
-        "stream": False,
-    }
+    model = _get_default_model()
+    url = _get_ollama_api_url()
+
+    if _is_chat_endpoint(url):
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            ],
+            "temperature": 0.2,
+            "stream": False,
+        }
+    else:
+        payload = {
+            "model": model,
+            "prompt": f"{system_prompt}\n\n{json.dumps(user_payload, ensure_ascii=False)}",
+            "temperature": 0.2,
+            "stream": False,
+        }
 
     raw, input_tokens, output_tokens = await _ollama_post(
         payload, "questionnaire-batch"
@@ -420,7 +425,6 @@ async def call_llm_question_batch(
             detail="Batch LLM returned empty response for questionnaire-batch.",
         )
 
-    # Parse JSON safely, handling ```json fences
     try:
         data = json.loads(raw)
     except Exception:
@@ -458,7 +462,6 @@ async def call_llm_question_batch(
         if not qid or not isinstance(ans, str):
             continue
 
-        # Normalize confidence
         try:
             conf_val = float(conf) if conf is not None else 0.6
             conf_val = max(0.0, min(conf_val, 1.0))
@@ -477,13 +480,12 @@ async def call_llm_question_batch(
             "inferred_tags": cleaned_tags,
         }
 
-    # Log usage (best-effort)
     try:
         _log_llm_event(
             app="questionnaire_batch",
             endpoint="/questionnaire/analyze",
             provider="local_ollama",
-            model=DEFAULT_LLM_MODEL,
+            model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )

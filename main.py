@@ -47,9 +47,15 @@ app = FastAPI(
     # No global auth dependencies for now; frontend Keycloak login is the gate.
 )
 
+# CORS:
+# - Vite dev: http://localhost:5173
+# - Docker/nginx: http://localhost:8080
+# - Include 127.0.0.1 variants as well
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
 ]
 
 app.add_middleware(
