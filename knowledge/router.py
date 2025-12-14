@@ -6,16 +6,21 @@ import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from backend.core.config import PdfReader, docx, KNOWLEDGE_STORE_FILE, KNOWLEDGE_DOCS_DIR
 from backend.knowledge.models import KnowledgeDocMeta, KnowledgeDocListResponse
 from backend.knowledge.service import list_docs, get_doc, save_doc
 
+# ✅ AUTH
+from backend.auth.jwt import get_current_user
+
 router = APIRouter(
     prefix="/knowledge",
     tags=["knowledge"],
+    # ✅ Enforce JWT on all /knowledge endpoints
+    dependencies=[Depends(get_current_user)],
 )
 
 STORE_PATH = Path(KNOWLEDGE_STORE_FILE)
@@ -191,7 +196,7 @@ async def get_knowledge_doc_text(doc_id: str):
     """
     Return the extracted text for a knowledge document as plain text.
 
-    This is used by the in-app viewer (iframe) so we don't trigger file downloads.
+    Used by the in-app viewer (iframe) so we don't trigger file downloads.
     """
     meta = _get_doc_meta_from_store(doc_id)
     if not meta:

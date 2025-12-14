@@ -18,11 +18,6 @@ from backend.core.config import PdfReader, docx, FILES_DIR
 from backend.schemas import AnalyzeRequestModel, AnalyzeResponseModel
 from backend.core.llm_client import call_llm_for_review
 
-# NOTE:
-# We previously experimented with backend.auth.deps and JWT-based auth.
-# That pulled in 'jose' and caused ModuleNotFoundError. We've removed all
-# auth dependencies from main.py for now.
-
 # Routers
 from backend.flags.router import router as flags_router
 from backend.reviews.router import router as reviews_router
@@ -38,13 +33,17 @@ from backend.questionnaire.sessions_router import (
     router as questionnaire_sessions_router,
 )
 
+# NEW: health router (safe / unauthenticated)
+from backend.health.router import router as health_router
+
 # ---------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------
 
 app = FastAPI(
     title="Contract Security Studio Backend",
-    # No global auth dependencies for now; frontend Keycloak login is the gate.
+    # No global auth dependencies here; we'll apply JWT auth per-router later
+    # to keep changes systematic and easy to debug.
 )
 
 # CORS:
@@ -215,6 +214,9 @@ async def analyze(req: AnalyzeRequestModel):
 # ---------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------
+# IMPORTANT: Include /health endpoints first, then the rest.
+# These should remain unauthenticated for readiness checks.
+app.include_router(health_router)
 
 app.include_router(flags_router)
 app.include_router(reviews_router)

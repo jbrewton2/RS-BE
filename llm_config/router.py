@@ -1,8 +1,10 @@
-# backend/llm_config/router.py
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends  # ✅ auth
 import httpx
+
+# ✅ AUTH
+from backend.auth.jwt import get_current_user
 
 from backend.llm_config_store import (
     LLMConfig,
@@ -14,6 +16,7 @@ from backend.llm_config_store import (
 router = APIRouter(
     prefix="/llm-config",
     tags=["llm-config"],
+    dependencies=[Depends(get_current_user)],  # ✅ protect all /llm-config
 )
 
 
@@ -35,7 +38,6 @@ async def get_llm_config_route():
 async def update_llm_config_route(cfg: LLMConfig):
     """
     Update and persist the LLM configuration.
-
     Validation:
       - remote_http requires remote_base_url + remote_model
     """
@@ -67,11 +69,6 @@ async def test_remote_llm_route():
     """
     Test the configured remote LLM endpoint by sending a minimal
     chat completion-style request.
-
-    Uses:
-      - remote_base_url + remote_path
-      - remote_model
-      - remote_api_key (Bearer) if present
     """
     cfg = load_llm_config()
 
@@ -91,7 +88,6 @@ async def test_remote_llm_route():
     path = (cfg.remote_path or "/v1/chat/completions").lstrip("/")
     url = f"{base}/{path}"
 
-    # Minimal OpenAI-style chat-completions payload
     payload = {
         "model": cfg.remote_model,
         "messages": [

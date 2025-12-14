@@ -1,7 +1,9 @@
-﻿# backend/pricing/router.py
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends  # ✅ auth
+
+# ✅ AUTH
+from backend.auth.jwt import get_current_user
 
 # ✅ use relative import so it works when backend is a package
 from .llm_pricing_store import (
@@ -10,7 +12,11 @@ from .llm_pricing_store import (
     save_llm_pricing,
 )
 
-router = APIRouter(prefix="/llm-pricing", tags=["llm-pricing"])
+router = APIRouter(
+    prefix="/llm-pricing",
+    tags=["llm-pricing"],
+    dependencies=[Depends(get_current_user)],  # ✅ protect all /llm-pricing
+)
 
 
 @router.get("", response_model=LlmPricingConfig)

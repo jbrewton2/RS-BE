@@ -8,3 +8,6 @@ pdf2image
 Pillow
 pydantic
 python-multipart
+python-jose[cryptography]>=3.3.0
+httpx>=0.27.0
+

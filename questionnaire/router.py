@@ -1,10 +1,9 @@
-﻿# backend/questionnaire/router.py
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends  # ✅ auth
 
 from backend.questionnaire.models import (
     QuestionnaireAnalyzeRequest,
@@ -21,17 +20,22 @@ from backend.questionnaire.bank import (
 )
 from backend.questionnaire.generator import generate_question_variants
 
+# ✅ AUTH
+from backend.auth.jwt import get_current_user
+
 # ---------------------------------------------------------------------
-# Routers
+# Routers (AUTH ENFORCED HERE)
 # ---------------------------------------------------------------------
 
 router = APIRouter(
     prefix="/questionnaire",
     tags=["questionnaire"],
+    dependencies=[Depends(get_current_user)],  # ✅ protect all /questionnaire/*
 )
 
 question_bank_router = APIRouter(
     tags=["question-bank"],
+    dependencies=[Depends(get_current_user)],  # ✅ protect /question-bank/* routes too
 )
 
 # ---------------------------------------------------------------------
@@ -261,16 +265,12 @@ async def upsert_questionnaire_bank_route(entry: QuestionBankUpsertModel):
 # ---------------------------------------------------------------------
 
 
-@question_bank_router.get(
-    "/question-bank", response_model=List[QuestionBankEntryModel]
-)
+@question_bank_router.get("/question-bank", response_model=List[QuestionBankEntryModel])
 async def get_question_bank_route():
     return load_question_bank()
 
 
-@question_bank_router.post(
-    "/question-bank", response_model=QuestionBankEntryModel
-)
+@question_bank_router.post("/question-bank", response_model=QuestionBankEntryModel)
 async def upsert_question_bank_route(entry: QuestionBankUpsertModel):
     return _upsert_bank_entry(entry)
 

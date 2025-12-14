@@ -1,107 +1,153 @@
-# backend/auth/jwt.py
-import json
-from functools import lru_cache
-from typing import Any, Dict, List
+from __future__ import annotations
+
+import os
+import time
+from typing import Any, Dict, Optional, List
 
 import httpx
-from jose import jwt, JWTError
-from pydantic import BaseModel
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import jwt
+from jose.exceptions import JWTError
 
-from backend.core.config import SETTINGS  # if you have a settings object; otherwise use env directly
+bearer = HTTPBearer(auto_error=False)
 
-class TokenData(BaseModel):
-    sub: str
-    preferred_username: str | None = None
-    email: str | None = None
-    realm_roles: List[str] = []
-    resource_roles: Dict[str, List[str]] = {}
+_JWKS_CACHE: Dict[str, Any] = {"jwks": None, "fetched_at": 0}
+_JWKS_TTL_SECONDS = 3600  # cache JWKS for 1 hour
 
-class KeycloakConfig(BaseModel):
-    url: str
-    realm: str
-    client_id: str
 
-def get_keycloak_config() -> KeycloakConfig:
-    # Adapt this to however you store config.
-    # Option A: use a SETTINGS object; Option B: environment vars directly.
-    return KeycloakConfig(
-        url=SETTINGS.KEYCLOAK_URL,          # e.g. "http://localhost:8080"
-        realm=SETTINGS.KEYCLOAK_REALM,      # "css-local"
-        client_id=SETTINGS.KEYCLOAK_CLIENT_ID,  # "css-frontend"
-    )
+def _jwks_issuer() -> str:
+    """
+    Used ONLY for fetching JWKS from inside docker network.
+    This should usually be the internal docker URL.
+    """
+    return os.getenv("KEYCLOAK_ISSUER", "http://keycloak:8080/realms/css-local").rstrip("/")
 
-@lru_cache(maxsize=1)
-def get_jwks() -> Dict[str, Any]:
-    cfg = get_keycloak_config()
-    jwks_url = f"{cfg.url}/realms/{cfg.realm}/protocol/openid-connect/certs"
-    try:
-        with httpx.Client(timeout=5.0) as client:
-            resp = client.get(jwks_url)
-            resp.raise_for_status()
-            return resp.json()
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch Keycloak JWKS: {e}")
 
-def decode_and_verify_token(token: str) -> TokenData:
-    cfg = get_keycloak_config()
-    jwks = get_jwks()
-    unverified_header = jwt.get_unverified_header(token)
-    kid = unverified_header.get("kid")
+def _allowed_issuers() -> List[str]:
+    """
+    Token issuer must match one of these EXACTLY.
 
-    key = None
-    for jwk in jwks.get("keys", []):
-        if jwk.get("kid") == kid:
-            key = jwk
-            break
-    if key is None:
+    Default behavior (if KEYCLOAK_ISSUER_ALLOWED is not set):
+      - accept internal docker issuer (http://keycloak:8080/realms/...)
+      - accept the browser-facing issuer (http://localhost:8090/realms/...)
+
+    You can override explicitly with:
+      KEYCLOAK_ISSUER_ALLOWED="issuer1,issuer2"
+    """
+    raw = os.getenv("KEYCLOAK_ISSUER_ALLOWED", "").strip()
+    if raw:
+        return [x.strip().rstrip("/") for x in raw.split(",") if x.strip()]
+
+    internal = _jwks_issuer()
+    external = internal.replace("http://keycloak:8080", "http://localhost:8090")
+    # de-dup and keep stable order
+    out = []
+    for x in [internal, external]:
+        if x and x not in out:
+            out.append(x)
+    return out
+
+
+def _jwks_url() -> str:
+    return f"{_jwks_issuer()}/protocol/openid-connect/certs"
+
+
+def _client_id() -> str:
+    # your Keycloak client in realm
+    return os.getenv("KEYCLOAK_CLIENT_ID", "css-frontend")
+
+
+async def _get_jwks() -> Dict[str, Any]:
+    now = int(time.time())
+    if _JWKS_CACHE["jwks"] and (now - _JWKS_CACHE["fetched_at"] < _JWKS_TTL_SECONDS):
+        return _JWKS_CACHE["jwks"]
+
+    url = _jwks_url()
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        jwks = r.json()
+
+    _JWKS_CACHE["jwks"] = jwks
+    _JWKS_CACHE["fetched_at"] = now
+    return jwks
+
+
+def _pick_key(jwks: Dict[str, Any], kid: str) -> Optional[Dict[str, Any]]:
+    for k in jwks.get("keys", []):
+        if k.get("kid") == kid and k.get("use") == "sig":
+            return k
+    return None
+
+
+def _aud_ok(claims: Dict[str, Any], client_id: str) -> bool:
+    """
+    Keycloak audience patterns vary.
+    Accept if:
+      - aud == client_id (string)
+      - aud contains client_id (list)
+      - OR azp == client_id
+    """
+    aud = claims.get("aud")
+    azp = claims.get("azp")
+
+    if isinstance(aud, str) and aud == client_id:
+        return True
+    if isinstance(aud, list) and client_id in aud:
+        return True
+    if isinstance(azp, str) and azp == client_id:
+        return True
+    return False
+
+
+async def get_current_user(
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
+) -> Dict[str, Any]:
+    if not creds or not creds.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token: unknown key id",
+            detail="Missing bearer token",
         )
 
+    token = creds.credentials
+    client_id = _client_id()
+    allowed_issuers = [x.rstrip("/") for x in _allowed_issuers()]
+
     try:
-        payload = jwt.decode(
+        header = jwt.get_unverified_header(token)
+        kid = header.get("kid")
+        if not kid:
+            raise HTTPException(status_code=401, detail="Token missing kid")
+
+        jwks = await _get_jwks()
+        key = _pick_key(jwks, kid)
+        if not key:
+            raise HTTPException(status_code=401, detail="Signing key not found")
+
+        # Decode with signature validation, but we enforce issuer ourselves (allowlist)
+        claims = jwt.decode(
             token,
             key,
-            algorithms=[key.get("alg", "RS256")],
-            audience=cfg.client_id,
-            issuer=f"{cfg.url}/realms/{cfg.realm}",
+            algorithms=["RS256"],
+            options={
+                "verify_aud": False,  # we validate audience ourselves
+                "verify_iss": False,  # we validate issuer ourselves (allowlist)
+            },
         )
+
+        iss = (claims.get("iss") or "").rstrip("/")
+        if iss not in allowed_issuers:
+            raise HTTPException(status_code=401, detail=f"Invalid issuer: {iss}")
+
+        if not _aud_ok(claims, client_id):
+            raise HTTPException(status_code=401, detail="Invalid token audience")
+
+        return claims
+
+    except HTTPException:
+        raise
     except JWTError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Could not validate credentials: {e}",
-        )
-
-    # Extract roles from Keycloak-style claims
-    realm_roles: List[str] = []
-    resource_roles: Dict[str, List[str]] = {}
-
-    realm_access = payload.get("realm_access") or {}
-    if isinstance(realm_access, dict):
-        roles = realm_access.get("roles") or []
-        if isinstance(roles, list):
-            realm_roles = [str(r) for r in roles]
-
-    resource_access = payload.get("resource_access") or {}
-    if isinstance(resource_access, dict):
-        for client, data in resource_access.items():
-            roles = data.get("roles") or []
-            resource_roles[client] = [str(r) for r in roles]
-
-    return TokenData(
-        sub=str(payload.get("sub")),
-        preferred_username=payload.get("preferred_username"),
-        email=payload.get("email"),
-        realm_roles=realm_roles,
-        resource_roles=resource_roles,
-    )
-
-def require_role(token: TokenData, role: str) -> None:
-    """Raise 403 if the Keycloak user does not have the given realm role."""
-    if role not in token.realm_roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Missing required role: {role}",
-        )
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Auth error: {str(e)}")

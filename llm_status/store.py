@@ -1,4 +1,3 @@
-# backend/llm_status/store.py
 from __future__ import annotations
 
 import json
@@ -13,6 +12,7 @@ LLM_STATS_FILE = BASE_DIR / "llm_stats.json"
 def _load_events() -> List[Dict[str, Any]]:
     """
     Load the current list of LLM events from llm_stats.json.
+
     If the file is missing or invalid, return an empty list.
     """
     if not LLM_STATS_FILE.exists():
@@ -34,9 +34,17 @@ def _load_events() -> List[Dict[str, Any]]:
 
 def append_llm_event(event: Dict[str, Any]) -> None:
     """
-    Append a single LLM event to llm_stats.json as part of a list.
-    Shape is intentionally loose: the aggregator (/llm-stats)
-    will only look at a few keys (timestamp, app, model, tokens, cost).
+    Append a single LLM event to llm_stats.json.
+
+    Shape is intentionally loose: the aggregator (/llm-status)
+    only relies on a small set of fields:
+      - timestamp
+      - app
+      - model
+      - input_tokens / output_tokens
+      - cost (derived later from pricing)
+
+    Additional fields are preserved for future analytics.
     """
     events = _load_events()
 

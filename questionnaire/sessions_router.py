@@ -1,5 +1,4 @@
-﻿# backend/questionnaire/sessions_router.py
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import uuid
@@ -7,13 +6,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends  # ✅ auth
 from pydantic import BaseModel
 
 from backend.questionnaire.models import QuestionnaireQuestionModel
 from backend.questionnaire.bank import normalize_text  # reuse the same normalizer
 
-router = APIRouter(prefix="/questionnaires", tags=["questionnaires"])
+# ✅ AUTH
+from backend.auth.jwt import get_current_user
+
+router = APIRouter(
+    prefix="/questionnaires",
+    tags=["questionnaires"],
+    dependencies=[Depends(get_current_user)],  # ✅ protect all /questionnaires/*
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SESSIONS_FILE = BASE_DIR / "questionnaires.json"
@@ -70,7 +76,6 @@ def _normalize_question_in_place(q: Dict[str, Any]) -> None:
     """
     q["question_text"] = normalize_text(q.get("question_text"))
     q["suggested_answer"] = normalize_text(q.get("suggested_answer"))
-    # Optional: normalize tags if present
     if "tags" in q and isinstance(q["tags"], list):
         q["tags"] = [normalize_text(t) for t in q["tags"] if normalize_text(t)]
 
@@ -151,13 +156,10 @@ def get_questionnaire_session(session_id: str) -> QuestionnaireSessionModel:
 # POST /questionnaires  (create / update)
 # ---------------------------------------------------------
 @router.post("", response_model=QuestionnaireSessionModel)
-def upsert_questionnaire_session(
-    payload: QuestionnaireSessionUpsert,
-) -> QuestionnaireSessionModel:
+def upsert_questionnaire_session(payload: QuestionnaireSessionUpsert) -> QuestionnaireSessionModel:
     sessions = _load_sessions()
     now = _now_iso()
 
-    # Normalize incoming payload strings
     normalized_questions: List[Dict[str, Any]] = []
     for q in payload.questions:
         q_dict = QuestionnaireQuestionModel(**q.dict()).dict()
