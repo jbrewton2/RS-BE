@@ -1,11 +1,26 @@
-stages:
-  - build
+﻿# IMPORTANT: Do NOT define top-level `stages:` in this GitLab environment.
+
+smoke:
+  image: alpine:3.20
+  script:
+    - echo "CI is alive for $CI_PROJECT_PATH on $CI_COMMIT_REF_NAME ($CI_PIPELINE_SOURCE)"
+
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
 
 variables:
+  SECRET_DETECTION_ENABLED: "true"
+  # Exclude common python caches/virtualenvs and build outputs
+  SAST_EXCLUDED_PATHS: "**/__pycache__/**,**/.venv/**,**/venv/**,**/dist/**,**/build/**,**/*.min.js"
+
+  # Docker build job
   DOCKER_TLS_CERTDIR: ""
   DOCKER_DRIVER: overlay2
   DOCKER_BUILDKIT: "1"
 
+# Optional: build/push backend container image (only MR/main/tags)
+# Keep this ONLY if css-backend repo has a Dockerfile at repo root.
 build_and_push_backend:
   stage: build
   image: docker:27
@@ -13,34 +28,26 @@ build_and_push_backend:
     - name: docker:27-dind
       command: ["--mtu=1460"]
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_TAG
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+    - if: '$CI_COMMIT_TAG'
+      when: on_success
+    - when: never
   script:
-    - echo "Logging into GitLab registry..."
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
-
     - export IMAGE="$CI_REGISTRY_IMAGE"
     - export SHA_TAG="sha-$CI_COMMIT_SHORT_SHA"
-
-    - echo "Building $IMAGE:$SHA_TAG"
     - docker build --pull -t "$IMAGE:$SHA_TAG" .
-
-    # Always push immutable sha tag
     - docker push "$IMAGE:$SHA_TAG"
-
-    # Push moving dev tag for main
     - |
       if [ "$CI_COMMIT_BRANCH" = "main" ]; then
-        echo "Tagging dev"
         docker tag "$IMAGE:$SHA_TAG" "$IMAGE:dev"
         docker push "$IMAGE:dev"
       fi
-
-    # Push prod tag + release tag for Git tags (e.g., v1.2.3)
     - |
       if [ -n "$CI_COMMIT_TAG" ]; then
-        echo "Tagging prod and $CI_COMMIT_TAG"
         docker tag "$IMAGE:$SHA_TAG" "$IMAGE:prod"
         docker push "$IMAGE:prod"
         docker tag "$IMAGE:$SHA_TAG" "$IMAGE:$CI_COMMIT_TAG"
