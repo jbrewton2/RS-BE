@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
@@ -8,6 +8,10 @@ from .storage import StorageProvider
 from .llm import LLMProvider
 from .vectorstore import VectorStore
 from .jobs import JobRunner
+from backend.providers.impl.llm_ollama import OllamaLLMProvider
+from backend.providers.impl.storage_local_files import LocalFilesStorageProvider
+from backend.providers.impl.vector_disabled import DisabledVectorStore
+from backend.providers.impl.jobs_local_inline import LocalInlineJobRunner
 
 
 class _NotWiredError(RuntimeError):
@@ -90,9 +94,11 @@ def get_providers() -> Providers:
         settings = load_provider_settings()
         _cached = Providers(
             settings=settings,
-            storage=_NullStorage(),
-            llm=_NullLLM(),
-            vector=_NullVector(),
-            jobs=_NullJobs(),
+            storage=LocalFilesStorageProvider(),
+            llm=OllamaLLMProvider(),
+            vector=DisabledVectorStore(),
+            jobs=LocalInlineJobRunner(),
         )
     return _cached
+
+
