@@ -1,4 +1,4 @@
-# backend/knowledge/service.py
+﻿# backend/knowledge/service.py
 from __future__ import annotations
 
 import json
@@ -91,19 +91,25 @@ def save_doc(
     """
     Save a new knowledge document's text and metadata.
 
-    - Writes text into KNOWLEDGE_DOCS_DIR as <id>.txt
+    - Stores extracted text via StorageProvider as: knowledge_docs/<id>.txt
     - Appends metadata into knowledge_store.json
     """
     raw_store = _read_knowledge_store()
 
     new_id = _new_knowledge_doc_id(raw_store)
     safe_name = f"{new_id}.txt"
-    os.makedirs(KNOWLEDGE_DOCS_DIR, exist_ok=True)
-    path = os.path.join(KNOWLEDGE_DOCS_DIR, safe_name)
+
+    # Store extracted text via StorageProvider (preferred)
+    storage = get_providers().storage
+    key = f"knowledge_docs/{safe_name}"
 
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
+        storage.put_object(
+            key=key,
+            data=text.encode("utf-8", errors="ignore"),
+            content_type="text/plain",
+            metadata=None,
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -124,6 +130,7 @@ def save_doc(
     _write_knowledge_store(raw_store)
 
     return meta
+
 
 
 # ---------------------------------------------------------------------
@@ -147,7 +154,20 @@ def _load_knowledge_docs_meta() -> List[KnowledgeDocMeta]:
 def _load_knowledge_doc_text(doc_meta: KnowledgeDocMeta) -> str:
     """
     Internal helper: load text for a given knowledge doc.
+
+    Preferred: StorageProvider key "knowledge_docs/<filename>"
+    Fallback: legacy filesystem under KNOWLEDGE_DOCS_DIR
     """
+    # 1) StorageProvider (preferred)
+    try:
+        storage = get_providers().storage
+        key = f"knowledge_docs/{doc_meta.filename}"
+        data = storage.get_object(key)
+        return data.decode("utf-8", errors="ignore")
+    except Exception:
+        pass
+
+    # 2) Legacy filesystem fallback
     path = os.path.join(KNOWLEDGE_DOCS_DIR, doc_meta.filename)
     if not os.path.exists(path):
         return ""

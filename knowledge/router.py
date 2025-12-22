@@ -1,4 +1,4 @@
-# backend/knowledge/router.py
+﻿# backend/knowledge/router.py
 from __future__ import annotations
 
 from io import BytesIO
@@ -6,20 +6,20 @@ import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Request
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 
 from backend.core.config import PdfReader, docx, KNOWLEDGE_STORE_FILE, KNOWLEDGE_DOCS_DIR
 from backend.knowledge.models import KnowledgeDocMeta, KnowledgeDocListResponse
 from backend.knowledge.service import list_docs, get_doc, save_doc
 
-# ✅ AUTH
+# âœ… AUTH
 from backend.auth.jwt import get_current_user
 
 router = APIRouter(
     prefix="/knowledge",
     tags=["knowledge"],
-    # ✅ Enforce JWT on all /knowledge endpoints
+    # âœ… Enforce JWT on all /knowledge endpoints
     dependencies=[Depends(get_current_user)],
 )
 
@@ -113,7 +113,7 @@ def _extract_text_from_upload(file: UploadFile, data: bytes) -> str:
 
 
 # ---------------------------------------------------------------------
-# GET /knowledge/docs   — list docs
+# GET /knowledge/docs   â€” list docs
 # ---------------------------------------------------------------------
 
 @router.get("/docs", response_model=KnowledgeDocListResponse)
@@ -128,7 +128,7 @@ async def list_knowledge_docs_route():
 
 
 # ---------------------------------------------------------------------
-# GET /knowledge/docs/{doc_id}   — get one doc meta
+# GET /knowledge/docs/{doc_id}   â€” get one doc meta
 # ---------------------------------------------------------------------
 
 @router.get("/docs/{doc_id}", response_model=KnowledgeDocMeta)
@@ -140,7 +140,7 @@ async def get_knowledge_doc_route(doc_id: str):
 
 
 # ---------------------------------------------------------------------
-# POST /knowledge/docs   — upload & ingest a doc
+# POST /knowledge/docs   â€” upload & ingest a doc
 # ---------------------------------------------------------------------
 
 @router.post("/docs", response_model=KnowledgeDocMeta)
@@ -188,20 +188,36 @@ async def upload_knowledge_doc_route(
 
 
 # ---------------------------------------------------------------------
-# GET /knowledge/docs/{doc_id}/text — inline extracted text for viewer
+# GET /knowledge/docs/{doc_id}/text â€” inline extracted text for viewer
 # ---------------------------------------------------------------------
 
 @router.get("/docs/{doc_id}/text", response_class=PlainTextResponse)
-async def get_knowledge_doc_text(doc_id: str):
+async def get_knowledge_doc_text(doc_id: str, request: Request):
     """
     Return the extracted text for a knowledge document as plain text.
 
-    Used by the in-app viewer (iframe) so we don't trigger file downloads.
+    Preferred: StorageProvider key "knowledge_docs/<doc_id>.txt"
+    Fallback: legacy filesystem under KNOWLEDGE_DOCS_DIR
     """
     meta = _get_doc_meta_from_store(doc_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Knowledge document not found")
 
+    key = f"knowledge_docs/{doc_id}.txt"
+
+    # 1) StorageProvider (preferred)
+    try:
+        storage = request.app.state.providers.storage
+        data = storage.get_object(key)
+        content = data.decode("utf-8", errors="ignore")
+        return PlainTextResponse(content, media_type="text/plain")
+    except FileNotFoundError:
+        pass
+    except Exception:
+        # fall back to legacy filesystem
+        pass
+
+    # 2) Legacy filesystem fallback
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     text_path = DOCS_DIR / f"{doc_id}.txt"
 
@@ -214,31 +230,41 @@ async def get_knowledge_doc_text(doc_id: str):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to read text file: {exc}")
 
-    return PlainTextResponse(content, media_type="text/plain")
-
-
-# ---------------------------------------------------------------------
-# GET /knowledge/docs/{doc_id}/file — download extracted text file
+    return PlainTextResponse(content, media_type="text/plain")# ---------------------------------------------------------------------
+# GET /knowledge/docs/{doc_id}/file â€” download extracted text file
 # ---------------------------------------------------------------------
 
 @router.get("/docs/{doc_id}/file")
-async def get_knowledge_doc_file(doc_id: str):
+async def get_knowledge_doc_file(doc_id: str, request: Request):
     """
     Serve the extracted text file as a download (.txt).
 
-    Used by the Download button in the KnowledgePage.
+    Preferred: StorageProvider key "knowledge_docs/<doc_id>.txt"
+    Fallback: legacy filesystem under KNOWLEDGE_DOCS_DIR
     """
     meta = _get_doc_meta_from_store(doc_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Knowledge document not found")
 
+    filename = (meta.get("title") or doc_id) + ".txt"
+    key = f"knowledge_docs/{doc_id}.txt"
+
+    # 1) StorageProvider (preferred)
+    try:
+        storage = request.app.state.providers.storage
+        data = storage.get_object(key)
+        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        return Response(content=data, media_type="text/plain", headers=headers)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+    # 2) Legacy filesystem fallback
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     text_path = DOCS_DIR / f"{doc_id}.txt"
-
     if not text_path.exists():
         raise HTTPException(status_code=404, detail="Extracted text file not found")
-
-    filename = (meta.get("title") or doc_id) + ".txt"
 
     return FileResponse(
         path=str(text_path),
@@ -246,13 +272,8 @@ async def get_knowledge_doc_file(doc_id: str):
         filename=filename,
     )
 
-
-# ---------------------------------------------------------------------
-# DELETE /knowledge/docs/{doc_id} — delete doc + text file
-# ---------------------------------------------------------------------
-
 @router.delete("/docs/{doc_id}")
-async def delete_knowledge_doc_route(doc_id: str):
+async def delete_knowledge_doc_route(doc_id: str, request: Request):
     """
     Delete a knowledge document's metadata and extracted text file.
     """
@@ -273,6 +294,13 @@ async def delete_knowledge_doc_route(doc_id: str):
 
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     text_path = DOCS_DIR / f"{doc_id}.txt"
+
+    # Best-effort delete from StorageProvider (preferred)
+    try:
+        storage = request.app.state.providers.storage
+        storage.delete_object(f"knowledge_docs/{doc_id}.txt")
+    except Exception:
+        pass
     try:
         if text_path.exists():
             text_path.unlink()
@@ -281,3 +309,10 @@ async def delete_knowledge_doc_route(doc_id: str):
         pass
 
     return {"ok": True}
+
+
+
+
+
+
+
