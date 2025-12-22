@@ -17,6 +17,7 @@ from backend.core.config import PdfReader, docx, FILES_DIR
 # Schemas & LLM review handler (legacy /analyze)
 from backend.schemas import AnalyzeRequestModel, AnalyzeResponseModel
 from backend.core.llm_client import call_llm_for_review
+from backend.core.providers_root import init_providers
 
 # Routers
 from backend.flags.router import router as flags_router
@@ -44,8 +45,11 @@ app = FastAPI(
     title="Contract Security Studio Backend",
     # No global auth dependencies here; we'll apply JWT auth per-router later
     # to keep changes systematic and easy to debug.
-)
+)
 
+# Providers (Phase 0.5): attach provider container to app.state
+# NOTE: no behavior change until code starts reading app.state.providers.
+app.state.providers = init_providers()
 # CORS:
 # - Vite dev: http://localhost:5173
 # - Docker/nginx: http://localhost:8080
@@ -249,3 +253,5 @@ if __name__ == "__main__":
         port=8000,
         reload=True,
     )
+
+
