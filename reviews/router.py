@@ -1,4 +1,4 @@
-# backend/reviews/router.py
+﻿# backend/reviews/router.py
 from __future__ import annotations
 
 import json
@@ -9,6 +9,7 @@ from backend.schemas import AnalyzeRequestModel, AnalyzeResponseModel
 from backend.core.llm_client import call_llm_for_review
 from backend.flags.service import scan_text_for_flags
 from backend.core.config import REVIEWS_FILE
+from backend.providers.factory import get_providers
 from fastapi import Depends
 from backend.auth.jwt import get_current_user
 
@@ -24,9 +25,24 @@ router = APIRouter(
 # File helpers
 # ---------------------------------------------------------------------
 
-
 def _read_reviews_file() -> List[Dict[str, Any]]:
-    """Load reviews.json as a list of dicts."""
+    """Load reviews.json as a list of dicts.
+
+    Preferred: StorageProvider key "stores/reviews.json"
+    Fallback: legacy filesystem REVIEWS_FILE
+    """
+    key = "stores/reviews.json"
+
+    # 1) StorageProvider (preferred)
+    try:
+        storage = get_providers().storage
+        raw = storage.get_object(key).decode("utf-8", errors="ignore")
+        data = json.loads(raw) if raw.strip() else []
+        return data if isinstance(data, list) else []
+    except Exception:
+        pass
+
+    # 2) Legacy filesystem fallback
     if not os.path.exists(REVIEWS_FILE):
         return []
     try:
@@ -38,12 +54,18 @@ def _read_reviews_file() -> List[Dict[str, Any]]:
 
 
 def _write_reviews_file(reviews: List[Dict[str, Any]]) -> None:
-    """Persist reviews.json."""
-    with open(REVIEWS_FILE, "w", encoding="utf-8") as f:
-        json.dump(reviews, f, indent=2, ensure_ascii=False)
+    """Persist reviews.json via StorageProvider.
 
+    Storage key: stores/reviews.json
+    """
+    key = "stores/reviews.json"
+    storage = get_providers().storage
+    try:
+        payload = json.dumps(reviews, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
+        storage.put_object(key=key, data=payload, content_type="application/json", metadata=None)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to persist reviews store: {exc}")
 
-# ---------------------------------------------------------------------
 # Auto-flags helpers (hit_key + snippets)
 # ---------------------------------------------------------------------
 
