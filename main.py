@@ -6,9 +6,9 @@ from io import BytesIO
 from typing import Optional, List
 
 import uvicorn
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 # Core config: PdfReader, docx, FILES_DIR paths
@@ -45,7 +45,8 @@ app = FastAPI(
     title="Contract Security Studio Backend",
     # No global auth dependencies here; we'll apply JWT auth per-router later
     # to keep changes systematic and easy to debug.
-)
+)
+
 
 # Providers (Phase 0.5): attach provider container to app.state
 # NOTE: no behavior change until code starts reading app.state.providers.
@@ -84,11 +85,16 @@ class ExtractResponseModel(BaseModel):
 # ---------------------------------------------------------------------
 
 @app.get("/files/{filename}")
-async def get_file(filename: str):
-    file_path = os.path.join(FILES_DIR, filename)
-    if not os.path.isfile(file_path):
+async def get_file(filename: str, request: Request):
+    # Phase 1 adoption: serve via StorageProvider (local impl reads FILES_DIR)
+    storage = request.app.state.providers.storage
+    try:
+        data = storage.get_object(filename)
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(file_path, media_type="application/pdf")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {exc}")
+    return Response(content=data, media_type="application/pdf")
 
 
 def _extract_text_from_pdf_stream(stream: BytesIO) -> str:
@@ -137,7 +143,7 @@ def extract_text_from_upload(file: UploadFile, data: bytes) -> str:
 
 
 @app.post("/extract", response_model=ExtractResponseModel)
-async def extract(file: UploadFile = File(...)):
+async def extract(file: UploadFile = File(...), request: Request = None):
     filename = file.filename or ""
     ext = os.path.splitext(filename)[1].lower()
 
@@ -155,13 +161,24 @@ async def extract(file: UploadFile = File(...)):
         return ExtractResponseModel(text=text, type="docx")
 
     # PDF — save original + extract text
+    # PDF — save original + extract text
     if ext == ".pdf":
         if PdfReader is None:
             raise HTTPException(status_code=500, detail="PDF support not installed.")
         safe_name = filename.replace(" ", "_") or "uploaded.pdf"
-        pdf_path = os.path.join(FILES_DIR, safe_name)
-        with open(pdf_path, "wb") as f:
-            f.write(contents)
+
+        # Phase 1 adoption: persist PDF via StorageProvider (local impl writes FILES_DIR)
+        storage = request.app.state.providers.storage if request is not None else None
+        if storage is None:
+            raise HTTPException(status_code=500, detail="Storage provider not available")
+
+        storage.put_object(
+            key=safe_name,
+            data=contents,
+            content_type="application/pdf",
+            metadata=None,
+        )
+
         pdf_url = f"/files/{safe_name}"
         text = _extract_text_from_pdf_stream(BytesIO(contents))
         return ExtractResponseModel(text=text, type="pdf", pdf_url=pdf_url, pages=None)
@@ -253,5 +270,9 @@ if __name__ == "__main__":
         port=8000,
         reload=True,
     )
+
+
+
+
 
 
