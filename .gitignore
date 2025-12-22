@@ -5,3 +5,21 @@ __pycache__/
 .venv/
 .env
 .env.*
+
+# Local Python env + caches (local dev only)
+.venv/
+.venv/**
+
+.pytest_cache/
+.pytest_cache/**
+
+__pycache__/
+**/__pycache__/
+
+*.pyc
+*.pyo
+*.pyd
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
