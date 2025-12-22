@@ -23,3 +23,9 @@ __pycache__/
 # Editor/OS noise
 .DS_Store
 Thumbs.db
+
+# Local Python env + caches
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
