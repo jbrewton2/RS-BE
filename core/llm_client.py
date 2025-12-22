@@ -147,14 +147,14 @@ def _clip_text(value: Any, max_chars: int) -> str:
     t = t.strip()
     if len(t) <= max_chars:
         return t
-    return t[: max(0, max_chars - 1)] + "…"
+    return t[: max(0, max_chars - 1)] + "â€¦"
 
 
 def _safe_json_dumps(obj: Any, max_chars: int) -> str:
     s = json.dumps(obj, ensure_ascii=False)
     if len(s) <= max_chars:
         return s
-    return s[: max(0, max_chars - 1)] + "…"
+    return s[: max(0, max_chars - 1)] + "â€¦"
 
 
 # ===================================================================
@@ -353,7 +353,7 @@ async def call_llm_for_review(req) -> str:
 
 
 # ===================================================================
-# QUESTIONNAIRE — SINGLE QUESTION (fallback path)
+# QUESTIONNAIRE â€” SINGLE QUESTION (fallback path)
 # ===================================================================
 
 async def call_llm_question_single(question: str, similar_bank_entries: list) -> str:
@@ -424,7 +424,7 @@ async def call_llm_question_single(question: str, similar_bank_entries: list) ->
 
 
 # ===================================================================
-# QUESTIONNAIRE — BATCH (robust JSON handling + org_posture)
+# QUESTIONNAIRE â€” BATCH (robust JSON handling + org_posture)
 # ===================================================================
 
 async def call_llm_question_batch(questions_payload: list, knowledge_context: str) -> dict:
