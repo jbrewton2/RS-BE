@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import json
 from io import BytesIO
 from typing import Optional, List
@@ -71,7 +72,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-os.makedirs(FILES_DIR, exist_ok=True)
+
+
+def ensure_seeded_stores() -> None:
+    """
+    One-time seed of provider-first JSON stores under FILES_DIR/stores from legacy root files.
+
+    Idempotent:
+      - If stores/<name>.json exists -> do nothing
+      - Else if legacy file exists at /app/backend/<name>.json -> copy it once
+      - Else -> create minimal empty JSON ([])
+
+    This keeps dev volumes and new installs from "starting empty" unexpectedly.
+    """
+    stores_dir = Path(FILES_DIR) / "stores"
+    stores_dir.mkdir(parents=True, exist_ok=True)
+
+    seeds = [
+        ("reviews.json", "reviews.json", "[]"),
+        ("questionnaires.json", "questionnaires.json", "[]"),
+        ("question_bank.json", "question_bank.json", "[]"),
+        ("knowledge_store.json", "knowledge_store.json", "[]"),
+    ]
+
+    for store_name, legacy_name, empty_json in seeds:
+        target = stores_dir / store_name
+        if target.exists():
+            continue
+
+        legacy_path = Path(__file__).resolve().parent / legacy_name
+        try:
+            if legacy_path.exists():
+                target.write_bytes(legacy_path.read_bytes())
+            else:
+                target.write_text(empty_json, encoding="utf-8")
+        except Exception:
+            # Never fail startup because of seed issues
+            try:
+                if not target.exists():
+                    target.write_text(empty_json, encoding="utf-8")
+            except Exception:
+                pass
 
 
 
@@ -354,6 +395,7 @@ if __name__ == "__main__":
         port=8000,
         reload=True,
     )
+
 
 
 
