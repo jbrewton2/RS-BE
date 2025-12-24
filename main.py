@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 from io import BytesIO
 from typing import Optional, List
 
@@ -72,6 +73,89 @@ app.add_middleware(
 
 os.makedirs(FILES_DIR, exist_ok=True)
 
+
+
+# ---------------------------------------------------------------------
+# Startup safety net: seed StorageProvider stores once (future-proof)
+# ---------------------------------------------------------------------
+
+@app.on_event("startup")
+async def _ensure_storage_seeded():
+    """
+    Ensure provider-backed store files exist under:
+      - stores/*.json
+      - knowledge_docs/*.txt
+
+    If missing, seed from legacy filesystem locations once.
+    """
+    storage = app.state.providers.storage
+
+    # JSON stores: (storage_key, legacy_path, empty_default)
+    stores = [
+        ("stores/reviews.json", os.path.join(os.path.dirname(__file__), "reviews.json"), "[]"),
+        ("stores/questionnaires.json", os.path.join(os.path.dirname(__file__), "questionnaires.json"), "[]"),
+        ("stores/question_bank.json", os.path.join(os.path.dirname(__file__), "question_bank.json"), "[]"),
+        ("stores/knowledge_store.json", os.path.join(os.path.dirname(__file__), "knowledge_store.json"), "[]"),
+    ]
+
+    for key, legacy_path, empty_default in stores:
+        try:
+            storage.head_object(key)
+            continue
+        except Exception:
+            pass
+
+        data = None
+        try:
+            if os.path.exists(legacy_path):
+                with open(legacy_path, "rb") as f:
+                    data = f.read()
+        except Exception:
+            data = None
+
+        if not data:
+            data = empty_default.encode("utf-8")
+
+        try:
+            storage.put_object(
+                key=key,
+                data=data,
+                content_type="application/json",
+                metadata=None,
+            )
+        except Exception:
+            # Don't kill startup; worst case routes can recreate stores later.
+            pass
+
+    # Knowledge doc texts: seed from legacy KNOWLEDGE_DOCS_DIR -> storage key knowledge_docs/<filename>
+    try:
+        legacy_docs_dir = KNOWLEDGE_DOCS_DIR
+        if os.path.isdir(legacy_docs_dir):
+            for name in os.listdir(legacy_docs_dir):
+                if not name.endswith(".txt"):
+                    continue
+                legacy_file = os.path.join(legacy_docs_dir, name)
+                storage_key = f"knowledge_docs/{name}"
+
+                try:
+                    storage.head_object(storage_key)
+                    continue
+                except Exception:
+                    pass
+
+                try:
+                    with open(legacy_file, "rb") as f:
+                        b = f.read()
+                    storage.put_object(
+                        key=storage_key,
+                        data=b,
+                        content_type="text/plain",
+                        metadata=None,
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 class ExtractResponseModel(BaseModel):
     text: str
@@ -270,6 +354,7 @@ if __name__ == "__main__":
         port=8000,
         reload=True,
     )
+
 
 
 
