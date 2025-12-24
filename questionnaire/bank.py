@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from backend.providers.factory import get_providers
 import os
 import unicodedata
 from typing import List, Optional
@@ -91,14 +92,34 @@ def _normalize_entry_in_place(entry: QuestionBankEntryModel) -> None:
 
 
 def load_question_bank() -> List[QuestionBankEntryModel]:
-    if not os.path.exists(QUESTION_BANK_PATH):
-        return []
+    """Load question_bank.json.
 
+    Preferred: StorageProvider key "stores/question_bank.json"
+    Fallback: legacy filesystem QUESTION_BANK_PATH
+    """
+    key = "stores/question_bank.json"
+
+    raw = None
+    # 1) StorageProvider (preferred)
     try:
-        with open(QUESTION_BANK_PATH, "r", encoding="utf-8") as f:
-            raw = json.load(f)
+        storage = get_providers().storage
+        raw_text = storage.get_object(key).decode("utf-8", errors="ignore")
+        candidate = json.loads(raw_text) if raw_text.strip() else []
+        if isinstance(candidate, list):
+            raw = candidate
     except Exception:
-        return []
+        pass
+
+    # 2) Legacy filesystem fallback
+    if raw is None:
+        if not os.path.exists(QUESTION_BANK_PATH):
+            return []
+        try:
+            with open(QUESTION_BANK_PATH, "r", encoding="utf-8") as f:
+                candidate = json.load(f)
+            raw = candidate if isinstance(candidate, list) else []
+        except Exception:
+            return []
 
     entries: List[QuestionBankEntryModel] = []
     for item in raw:
@@ -106,13 +127,10 @@ def load_question_bank() -> List[QuestionBankEntryModel]:
             entry = QuestionBankEntryModel(**item)
         except Exception:
             continue
-
-        # Normalize on load (helps clean older data)
         _normalize_entry_in_place(entry)
         entries.append(entry)
 
     return entries
-
 
 def save_question_bank(entries: List[QuestionBankEntryModel]) -> None:
     # Normalize before saving (so any updates are also cleaned)
@@ -120,6 +138,20 @@ def save_question_bank(entries: List[QuestionBankEntryModel]) -> None:
         _normalize_entry_in_place(e)
 
     serializable = [e.model_dump() for e in entries]
+
+    # Provider-first store
+    key = "stores/question_bank.json"
+    storage = get_providers().storage
+    payload = json.dumps(serializable, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
+
+    # 1) StorageProvider (preferred)
+    try:
+        storage.put_object(key=key, data=payload, content_type="application/json", metadata=None)
+        return
+    except Exception:
+        pass
+
+    # 2) Legacy filesystem fallback
     with open(QUESTION_BANK_PATH, "w", encoding="utf-8") as f:
-        # keep ensure_ascii=False for proper UTF-8, but our text is already clean
         json.dump(serializable, f, indent=2, ensure_ascii=False)
+

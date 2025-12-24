@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+from backend.providers.factory import get_providers
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ router = APIRouter(
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SESSIONS_FILE = BASE_DIR / "questionnaires.json"
+STORE_KEY = "stores/questionnaires.json"
 
 
 class QuestionnaireSessionModel(BaseModel):
@@ -64,10 +66,6 @@ class QuestionnaireSessionUpsert(BaseModel):
 
 
 def _ensure_file_exists() -> None:
-    if not SESSIONS_FILE.exists():
-        SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with SESSIONS_FILE.open("w", encoding="utf-8") as f:
-            json.dump([], f, ensure_ascii=False)
 
 
 def _normalize_question_in_place(q: Dict[str, Any]) -> None:
@@ -98,33 +96,50 @@ def _normalize_session_in_place(session: Dict[str, Any]) -> None:
                 _normalize_question_in_place(q)
 
 
-def _load_sessions() -> List[Dict[str, Any]]:
-    """
-    Load sessions from JSON, normalizing text so we don't leak curly quotes / bad chars.
-    """
-    _ensure_file_exists()
-    with SESSIONS_FILE.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, list):
-        data = []
+def _load_sessions() -> list[dict]:
+    """Load questionnaire sessions.
 
-    for item in data:
-        if isinstance(item, dict):
-            _normalize_session_in_place(item)
-    return data
-
-
-def _save_sessions(sessions: List[Dict[str, Any]]) -> None:
+    Preferred: StorageProvider key STORE_KEY
+    Fallback: legacy filesystem SESSIONS_FILE
     """
-    Normalize and save sessions back to disk.
+    # 1) StorageProvider (preferred)
+    try:
+        storage = get_providers().storage
+        raw = storage.get_object(STORE_KEY).decode("utf-8", errors="ignore")
+        data = json.loads(raw) if raw.strip() else []
+        return data if isinstance(data, list) else []
+    except Exception:
+        pass
+
+    # 2) Legacy filesystem fallback
+    if not SESSIONS_FILE.exists():
+        return []
+    try:
+        with SESSIONS_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+def _save_sessions(sessions: list[dict]) -> None:
+    """Persist questionnaire sessions to StorageProvider.
+
+    Storage key: STORE_KEY
     """
+    payload = json.dumps(sessions, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
+
+    # 1) StorageProvider (preferred)
+    try:
+        storage = get_providers().storage
+        storage.put_object(key=STORE_KEY, data=payload, content_type="application/json", metadata=None)
+        return
+    except Exception:
+        pass
+
+    # 2) Legacy filesystem fallback
     SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    for item in sessions:
-        if isinstance(item, dict):
-            _normalize_session_in_place(item)
     with SESSIONS_FILE.open("w", encoding="utf-8") as f:
         json.dump(sessions, f, indent=2, ensure_ascii=False)
-
 
 def _now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
@@ -231,3 +246,4 @@ def delete_questionnaire_session(session_id: str) -> Dict[str, bool]:
         raise HTTPException(status_code=404, detail="Questionnaire session not found.")
     _save_sessions(new_sessions)
     return {"ok": True}
+
