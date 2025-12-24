@@ -65,9 +65,6 @@ class QuestionnaireSessionUpsert(BaseModel):
     questions: List[QuestionnaireQuestionModel]
 
 
-def _ensure_file_exists() -> None:
-
-
 def _normalize_question_in_place(q: Dict[str, Any]) -> None:
     """
     Normalize all text fields on a single question dict.
