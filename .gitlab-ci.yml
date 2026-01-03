@@ -1,4 +1,4 @@
-﻿﻿# IMPORTANT: Do NOT define top-level `stages:` in this GitLab environment.
+﻿# IMPORTANT: Do NOT define top-level `stages:` in this GitLab environment.
 
 smoke:
   image: alpine:3.20
