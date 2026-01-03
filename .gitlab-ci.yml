@@ -1,4 +1,4 @@
-﻿# IMPORTANT: Do NOT define top-level `stages:` in this GitLab environment.
+﻿﻿# IMPORTANT: Do NOT define top-level `stages:` in this GitLab environment.
 
 smoke:
   image: alpine:3.20
@@ -11,13 +11,45 @@ include:
 
 variables:
   SECRET_DETECTION_ENABLED: "true"
-  # Exclude common python caches/virtualenvs and build outputs
   SAST_EXCLUDED_PATHS: "**/__pycache__/**,**/.venv/**,**/venv/**,**/dist/**,**/build/**,**/*.min.js"
-
-  # Docker build job
   DOCKER_TLS_CERTDIR: ""
   DOCKER_DRIVER: overlay2
   DOCKER_BUILDKIT: "1"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+# ---------------------------------------------
+# ✅ Backend unit tests (pytest)
+# ---------------------------------------------
+pytest_backend:
+  stage: test
+  image: python:3.11-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+    - if: '$CI_COMMIT_TAG'
+      when: on_success
+    - when: never
+  cache:
+    key: "pip-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .cache/pip
+  variables:
+    # Mimic Dockerfile behavior: repo is treated as the backend package root
+    PYTHONPATH: "$CI_PROJECT_DIR"
+  before_script:
+    - python --version
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install -U pytest
+  script:
+    - pytest -q --junitxml=report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+    expire_in: 7 days
 
 # Optional: build/push backend container image (only MR/main/tags)
 # Keep this ONLY if css-backend repo has a Dockerfile at repo root.
