@@ -9,10 +9,10 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 # AUTH
-from backend.auth.jwt import get_current_user
+from auth.jwt import get_current_user
 
 # Pricing helper to compute cost from tokens + pricing config
-from backend.pricing.llm_pricing_store import compute_cost_usd
+from pricing.llm_pricing_store import compute_cost_usd
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LLM_STATS_FILE = BASE_DIR / "llm_stats.json"
@@ -155,3 +155,4 @@ def get_llm_status() -> LlmStatsSummary:
             status_code=500,
             detail=f"Failed to aggregate LLM status: {exc}",
         )
+

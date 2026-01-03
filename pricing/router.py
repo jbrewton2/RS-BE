@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException, Depends  # ✅ auth
 
 # ✅ AUTH
-from backend.auth.jwt import get_current_user
+from auth.jwt import get_current_user
 
 # ✅ use relative import so it works when backend is a package
 from .llm_pricing_store import (
@@ -40,3 +40,4 @@ def update_llm_pricing(cfg: LlmPricingConfig) -> LlmPricingConfig:
         return cfg
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save pricing: {exc}") from exc
+

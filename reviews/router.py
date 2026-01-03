@@ -5,14 +5,14 @@ import json
 import os
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException
-from backend.schemas import AnalyzeRequestModel, AnalyzeResponseModel
-from backend.core.llm_client import call_llm_for_review
-from backend.flags.service import scan_text_for_flags
-from backend.core.config import REVIEWS_FILE
-from backend.providers.factory import get_providers
-from backend.providers.factory import get_providers
+from schemas import AnalyzeRequestModel, AnalyzeResponseModel
+from core.llm_client import call_llm_for_review
+from flags.service import scan_text_for_flags
+from core.config import REVIEWS_FILE
+from providers.factory import get_providers
+from providers.factory import get_providers
 from fastapi import Depends
-from backend.auth.jwt import get_current_user
+from auth.jwt import get_current_user
 
 
 router = APIRouter(
@@ -262,4 +262,5 @@ async def delete_review(review_id: str):
         raise HTTPException(status_code=404, detail="Review not found")
     _write_reviews_file(new_list)
     return {"ok": True}
+
 

@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+﻿FROM python:3.11-slim
 
 # Prevent python from writing pyc files & buffering stdout
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -15,11 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy backend source as a package
-# This preserves imports like: from backend.core...
-COPY . /app/backend
+# ✅ Copy repo as-is into /app (no fake /app/backend package)
+COPY . /app
 
 EXPOSE 8000
 
-# Run FastAPI as module
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# ✅ Run FastAPI from repo root module
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

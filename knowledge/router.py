@@ -9,12 +9,12 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Request
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 
-from backend.core.config import PdfReader, docx, KNOWLEDGE_STORE_FILE, KNOWLEDGE_DOCS_DIR
-from backend.knowledge.models import KnowledgeDocMeta, KnowledgeDocListResponse
-from backend.knowledge.service import list_docs, get_doc, save_doc
+from core.config import PdfReader, docx, KNOWLEDGE_STORE_FILE, KNOWLEDGE_DOCS_DIR
+from knowledge.models import KnowledgeDocMeta, KnowledgeDocListResponse
+from knowledge.service import list_docs, get_doc, save_doc
 
 # âœ… AUTH
-from backend.auth.jwt import get_current_user
+from auth.jwt import get_current_user
 
 router = APIRouter(
     prefix="/knowledge",
@@ -309,6 +309,7 @@ async def delete_knowledge_doc_route(doc_id: str, request: Request):
         pass
 
     return {"ok": True}
+
 
 
 

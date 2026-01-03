@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
-from backend.providers.vectorstore import VectorStore
+from providers.vectorstore import VectorStore
 
 
 class DisabledVectorStore(VectorStore):
@@ -17,3 +17,4 @@ class DisabledVectorStore(VectorStore):
 
     def delete_by_document(self, document_id: str) -> None:
         return
+

@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import json
-from backend.providers.factory import get_providers
+from providers.factory import get_providers
 import os
 import unicodedata
 from typing import List, Optional
 
-from backend.core.config import QUESTION_BANK_PATH
-from backend.questionnaire.models import QuestionBankEntryModel
+from core.config import QUESTION_BANK_PATH
+from questionnaire.models import QuestionBankEntryModel
 
 
 def normalize_text(value: Optional[str]) -> str:
@@ -154,4 +154,5 @@ def save_question_bank(entries: List[QuestionBankEntryModel]) -> None:
     # 2) Legacy filesystem fallback
     with open(QUESTION_BANK_PATH, "w", encoding="utf-8") as f:
         json.dump(serializable, f, indent=2, ensure_ascii=False)
+
 

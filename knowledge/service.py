@@ -8,8 +8,8 @@ from typing import List, Dict
 
 from fastapi import HTTPException
 
-from backend.core.config import KNOWLEDGE_STORE_FILE, KNOWLEDGE_DOCS_DIR
-from backend.knowledge.models import KnowledgeDocMeta
+from core.config import KNOWLEDGE_STORE_FILE, KNOWLEDGE_DOCS_DIR
+from knowledge.models import KnowledgeDocMeta
 
 
 # ---------------------------------------------------------------------
@@ -237,3 +237,4 @@ def build_context_for_question(
         )
 
     return results
+

@@ -9,20 +9,20 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime
 from fastapi import HTTPException
 
-from backend.questionnaire.models import (
+from questionnaire.models import (
     QuestionnaireQuestionModel,
     QuestionBankEntryModel,
     QuestionnaireAnalyzeRequest,
     AnalyzeQuestionnaireResponse,
 )
-from backend.questionnaire.parser import parse_questions_from_text
-from backend.questionnaire.bank import load_question_bank, save_question_bank
-from backend.questionnaire.scoring import derive_status_and_confidence
-from backend.core.llm_client import (
+from questionnaire.parser import parse_questions_from_text
+from questionnaire.bank import load_question_bank, save_question_bank
+from questionnaire.scoring import derive_status_and_confidence
+from core.llm_client import (
     call_llm_question_batch,
     call_llm_question_single,
 )
-from backend.core.config import KNOWLEDGE_STORE_FILE, KNOWLEDGE_DOCS_DIR
+from core.config import KNOWLEDGE_STORE_FILE, KNOWLEDGE_DOCS_DIR
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -574,3 +574,4 @@ async def analyze_questionnaire(
         questions=questions,
         overall_confidence=overall,
     )
+

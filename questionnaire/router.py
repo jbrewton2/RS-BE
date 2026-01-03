@@ -5,23 +5,23 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends  # ✅ auth
 
-from backend.questionnaire.models import (
+from questionnaire.models import (
     QuestionnaireAnalyzeRequest,
     AnalyzeQuestionnaireResponse,
     QuestionnaireFeedbackRequest,
     QuestionBankEntryModel,
     QuestionBankUpsertModel,
 )
-from backend.questionnaire.service import analyze_questionnaire
-from backend.questionnaire.bank import (
+from questionnaire.service import analyze_questionnaire
+from questionnaire.bank import (
     load_question_bank,
     save_question_bank,
     normalize_text,
 )
-from backend.questionnaire.generator import generate_question_variants
+from questionnaire.generator import generate_question_variants
 
 # ✅ AUTH
-from backend.auth.jwt import get_current_user
+from auth.jwt import get_current_user
 
 # ---------------------------------------------------------------------
 # Routers (AUTH ENFORCED HERE)
@@ -283,3 +283,4 @@ async def delete_question_bank_entry_route(entry_id: str):
         raise HTTPException(status_code=404, detail="Bank entry not found")
     save_question_bank(new_bank)
     return {"ok": True}
+

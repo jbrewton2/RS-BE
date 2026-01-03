@@ -4,9 +4,9 @@ from fastapi import APIRouter, HTTPException, Depends  # ✅ auth
 import httpx
 
 # ✅ AUTH
-from backend.auth.jwt import get_current_user
+from auth.jwt import get_current_user
 
-from backend.llm_config_store import (
+from llm_config_store import (
     LLMConfig,
     LLMProvider,
     load_llm_config,
@@ -114,3 +114,4 @@ async def test_remote_llm_route():
         )
 
     return {"ok": True, "message": "Remote LLM endpoint responded successfully."}
+

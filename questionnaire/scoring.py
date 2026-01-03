@@ -1,7 +1,7 @@
 ﻿# backend/questionnaire/scoring.py
 from __future__ import annotations
 from typing import List, Optional
-from backend.questionnaire.models import QuestionnaireQuestionModel
+from questionnaire.models import QuestionnaireQuestionModel
 
 def derive_status_and_confidence(questions: List[QuestionnaireQuestionModel]) -> Optional[float]:
     confidences = []
@@ -28,3 +28,4 @@ def derive_status_and_confidence(questions: List[QuestionnaireQuestionModel]) ->
         return None
 
     return sum(confidences) / len(confidences)
+

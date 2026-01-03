@@ -1,5 +1,4 @@
-﻿# backend/main.py
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from pathlib import Path
@@ -10,34 +9,34 @@ from typing import Optional, List
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 # Core config: PdfReader, docx, FILES_DIR paths
-from backend.core.config import PdfReader, docx, FILES_DIR
+from core.config import PdfReader, docx, FILES_DIR, KNOWLEDGE_DOCS_DIR
 
 # Schemas & LLM review handler (legacy /analyze)
-from backend.schemas import AnalyzeRequestModel, AnalyzeResponseModel
-from backend.core.llm_client import call_llm_for_review
-from backend.core.providers_root import init_providers
+from schemas import AnalyzeRequestModel, AnalyzeResponseModel
+from core.llm_client import call_llm_for_review
+from core.providers_root import init_providers
 
 # Routers
-from backend.flags.router import router as flags_router
-from backend.reviews.router import router as reviews_router
-from backend.questionnaire.router import (
+from flags.router import router as flags_router
+from reviews.router import router as reviews_router
+from questionnaire.router import (
     router as questionnaire_router,
     question_bank_router,
 )
-from backend.knowledge.router import router as knowledge_router
-from backend.llm_config.router import router as llm_config_router
-from backend.pricing.router import router as pricing_router
-from backend.llm_status.router import router as llm_status_router
-from backend.questionnaire.sessions_router import (
+from knowledge.router import router as knowledge_router
+from llm_config.router import router as llm_config_router
+from pricing.router import router as pricing_router
+from llm_status.router import router as llm_status_router
+from questionnaire.sessions_router import (
     router as questionnaire_sessions_router,
 )
 
 # NEW: health router (safe / unauthenticated)
-from backend.health.router import router as health_router
+from health.router import router as health_router
 
 # ---------------------------------------------------------------------
 # FastAPI app
@@ -45,18 +44,12 @@ from backend.health.router import router as health_router
 
 app = FastAPI(
     title="Contract Security Studio Backend",
-    # No global auth dependencies here; we'll apply JWT auth per-router later
-    # to keep changes systematic and easy to debug.
 )
 
-
 # Providers (Phase 0.5): attach provider container to app.state
-# NOTE: no behavior change until code starts reading app.state.providers.
 app.state.providers = init_providers()
+
 # CORS:
-# - Vite dev: http://localhost:5173
-# - Docker/nginx: http://localhost:8080
-# - Include 127.0.0.1 variants as well
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -71,49 +64,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-
-def ensure_seeded_stores() -> None:
-    """
-    One-time seed of provider-first JSON stores under FILES_DIR/stores from legacy root files.
-
-    Idempotent:
-      - If stores/<name>.json exists -> do nothing
-      - Else if legacy file exists at /app/backend/<name>.json -> copy it once
-      - Else -> create minimal empty JSON ([])
-
-    This keeps dev volumes and new installs from "starting empty" unexpectedly.
-    """
-    stores_dir = Path(FILES_DIR) / "stores"
-    stores_dir.mkdir(parents=True, exist_ok=True)
-
-    seeds = [
-        ("reviews.json", "reviews.json", "[]"),
-        ("questionnaires.json", "questionnaires.json", "[]"),
-        ("question_bank.json", "question_bank.json", "[]"),
-        ("knowledge_store.json", "knowledge_store.json", "[]"),
-    ]
-
-    for store_name, legacy_name, empty_json in seeds:
-        target = stores_dir / store_name
-        if target.exists():
-            continue
-
-        legacy_path = Path(__file__).resolve().parent / legacy_name
-        try:
-            if legacy_path.exists():
-                target.write_bytes(legacy_path.read_bytes())
-            else:
-                target.write_text(empty_json, encoding="utf-8")
-        except Exception:
-            # Never fail startup because of seed issues
-            try:
-                if not target.exists():
-                    target.write_text(empty_json, encoding="utf-8")
-            except Exception:
-                pass
-
 
 
 # ---------------------------------------------------------------------
@@ -165,7 +115,6 @@ async def _ensure_storage_seeded():
                 metadata=None,
             )
         except Exception:
-            # Don't kill startup; worst case routes can recreate stores later.
             pass
 
     # Knowledge doc texts: seed from legacy KNOWLEDGE_DOCS_DIR -> storage key knowledge_docs/<filename>
@@ -198,6 +147,7 @@ async def _ensure_storage_seeded():
     except Exception:
         pass
 
+
 class ExtractResponseModel(BaseModel):
     text: str
     type: str
@@ -211,7 +161,6 @@ class ExtractResponseModel(BaseModel):
 
 @app.get("/files/{filename}")
 async def get_file(filename: str, request: Request):
-    # Phase 1 adoption: serve via StorageProvider (local impl reads FILES_DIR)
     storage = request.app.state.providers.storage
     try:
         data = storage.get_object(filename)
@@ -251,22 +200,6 @@ def _extract_text_from_docx_stream(stream: BytesIO) -> str:
         raise HTTPException(status_code=500, detail=f"Failed to read DOCX: {exc}")
 
 
-def extract_text_from_upload(file: UploadFile, data: bytes) -> str:
-    filename = (file.filename or "").lower()
-    if filename.endswith(".pdf"):
-        # PDFs are handled separately so we can persist the original file
-        raise HTTPException(
-            status_code=400,
-            detail="PDFs should be processed via the dedicated PDF path.",
-        )
-    if filename.endswith(".docx") or filename.endswith(".doc"):
-        return _extract_text_from_docx_stream(BytesIO(data))
-    try:
-        return data.decode("utf-8", errors="ignore")
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Failed to decode text: {exc}")
-
-
 @app.post("/extract", response_model=ExtractResponseModel)
 async def extract(file: UploadFile = File(...), request: Request = None):
     filename = file.filename or ""
@@ -280,19 +213,15 @@ async def extract(file: UploadFile = File(...), request: Request = None):
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    # DOCX
     if ext == ".docx":
         text = _extract_text_from_docx_stream(BytesIO(contents))
         return ExtractResponseModel(text=text, type="docx")
 
-    # PDF — save original + extract text
-    # PDF — save original + extract text
     if ext == ".pdf":
         if PdfReader is None:
             raise HTTPException(status_code=500, detail="PDF support not installed.")
         safe_name = filename.replace(" ", "_") or "uploaded.pdf"
 
-        # Phase 1 adoption: persist PDF via StorageProvider (local impl writes FILES_DIR)
         storage = request.app.state.providers.storage if request is not None else None
         if storage is None:
             raise HTTPException(status_code=500, detail="Storage provider not available")
@@ -308,7 +237,6 @@ async def extract(file: UploadFile = File(...), request: Request = None):
         text = _extract_text_from_pdf_stream(BytesIO(contents))
         return ExtractResponseModel(text=text, type="pdf", pdf_url=pdf_url, pages=None)
 
-    # Treat as plain text
     text = contents.decode("utf-8", errors="ignore")
     return ExtractResponseModel(text=text, type=ext.lstrip(".") or "txt")
 
@@ -319,12 +247,6 @@ async def extract(file: UploadFile = File(...), request: Request = None):
 
 @app.post("/analyze", response_model=AnalyzeResponseModel)
 async def analyze(req: AnalyzeRequestModel):
-    """
-    Contract analysis endpoint using LLM.
-
-    NOTE: Preferred path is POST /reviews/analyze, which uses review-aware
-    metadata and knowledge_doc_ids; this exists mostly for backward compat.
-    """
     text = (req.text or "").strip()
     if not text or "no text extracted" in text.lower():
         summary = (
@@ -341,29 +263,16 @@ async def analyze(req: AnalyzeRequestModel):
             "RECOMMENDED NEXT STEPS\n"
             "- Obtain a native PDF or text-based source.\n"
         )
-        return AnalyzeResponseModel(
-            summary=summary,
-            risks=[],
-            doc_type=None,
-            deliverables=[],
-        )
+        return AnalyzeResponseModel(summary=summary, risks=[], doc_type=None, deliverables=[])
 
     summary = await call_llm_for_review(req)
-    return AnalyzeResponseModel(
-        summary=summary,
-        risks=[],
-        doc_type=None,
-        deliverables=[],
-    )
+    return AnalyzeResponseModel(summary=summary, risks=[], doc_type=None, deliverables=[])
 
 
 # ---------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------
-# IMPORTANT: Include /health endpoints first, then the rest.
-# These should remain unauthenticated for readiness checks.
 app.include_router(health_router)
-
 app.include_router(flags_router)
 app.include_router(reviews_router)
 app.include_router(questionnaire_router)
@@ -375,31 +284,15 @@ app.include_router(llm_status_router)
 app.include_router(questionnaire_sessions_router)
 
 
-# ---------------------------------------------------------------------
-# Root
-# ---------------------------------------------------------------------
-
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "CSS backend running"}
 
 
-# ---------------------------------------------------------------------
-# Entrypoint
-# ---------------------------------------------------------------------
-
 if __name__ == "__main__":
     uvicorn.run(
-        "backend.main:app",
+        "main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,
     )
-
-
-
-
-
-
-
-

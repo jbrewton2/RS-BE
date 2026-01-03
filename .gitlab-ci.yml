@@ -36,7 +36,7 @@ pytest_backend:
     paths:
       - .cache/pip
   variables:
-    # Mimic Dockerfile behavior: repo is treated as the backend package root
+    # Repo root is the import root for modules (core/, providers/, questionnaire/, etc.)
     PYTHONPATH: "$CI_PROJECT_DIR"
   before_script:
     - python --version

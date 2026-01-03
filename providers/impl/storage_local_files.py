@@ -3,13 +3,13 @@
 import os
 from typing import Any, Dict, Optional
 
-from backend.core.config import FILES_DIR
-from backend.providers.storage import StorageProvider
+from core.config import FILES_DIR
+from providers.storage import StorageProvider
 
 
 class LocalFilesStorageProvider(StorageProvider):
     """
-    Local filesystem storage provider using backend.core.config.FILES_DIR.
+    Local filesystem storage provider using core.config.FILES_DIR.
 
     Phase 0.75:
     - Not yet used by /extract route (no behavior change)
@@ -51,3 +51,4 @@ class LocalFilesStorageProvider(StorageProvider):
         # Local dev: return a stable route path that backend already serves.
         # Caller is responsible for mapping key -> filename.
         return f"/files/{key}"
+

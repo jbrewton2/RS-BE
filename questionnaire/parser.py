@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import List
 
-from backend.questionnaire.models import QuestionnaireQuestionModel
+from questionnaire.models import QuestionnaireQuestionModel
 
 
 # A completely ASCII-safe regex.
@@ -56,3 +56,4 @@ def parse_questions_from_text(raw_text: str) -> List[QuestionnaireQuestionModel]
             )
 
     return questions
+

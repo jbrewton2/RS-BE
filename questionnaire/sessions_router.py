@@ -9,12 +9,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.providers.factory import get_providers
-from backend.questionnaire.models import QuestionnaireQuestionModel
-from backend.questionnaire.bank import normalize_text
+from providers.factory import get_providers
+from questionnaire.models import QuestionnaireQuestionModel
+from questionnaire.bank import normalize_text
 
 # ✅ Auth guard (matches the rest of CSS protected API behavior)
-from backend.auth.jwt import get_current_user
+from auth.jwt import get_current_user
 
 router = APIRouter(
     prefix="/questionnaires",
@@ -328,3 +328,4 @@ def delete_questionnaire_session(session_id: str) -> Dict[str, bool]:
         raise HTTPException(status_code=404, detail="Questionnaire session not found.")
     _save_sessions(new_sessions)
     return {"ok": True}
+

@@ -3,7 +3,7 @@
 from typing import Any, Dict, Optional
 import uuid
 
-from backend.providers.jobs import JobRunner
+from providers.jobs import JobRunner
 
 
 class LocalInlineJobRunner(JobRunner):
@@ -20,3 +20,4 @@ class LocalInlineJobRunner(JobRunner):
 
     def result(self, job_id: str) -> Optional[Dict[str, Any]]:
         return None
+

@@ -1,138 +1,107 @@
-﻿# backend/core/config.py
-from __future__ import annotations
+﻿from __future__ import annotations
 
-import os
+from pathlib import Path
+import json
+from typing import Any, Optional
 
-# ----------------------------------------------------
-# PDF / DOCX libraries (shared by backend.main + others)
-# ----------------------------------------------------
-
+# -------------------------------------------------
+# Optional libs (match historical contract)
+# -------------------------------------------------
 try:
+    # preferred
     from pypdf import PdfReader as _PdfReader
-except ImportError:  # pypdf not installed
+except Exception:
     _PdfReader = None
 
 try:
-    import docx as _docx  # python-docx
-except ImportError:  # python-docx not installed
+    # fallback (deprecated but sometimes present)
+    from PyPDF2 import PdfReader as _PdfReader2  # type: ignore
+except Exception:
+    _PdfReader2 = None
+
+try:
+    import docx as _docx  # python-docx module
+except Exception:
     _docx = None
 
-# These are what backend.main imports
-PdfReader = _PdfReader
+# Public names expected by main.py and others
+PdfReader = _PdfReader or _PdfReader2
 docx = _docx
 
-# ----------------------------------------------------
-# Base directories & file paths
-# ----------------------------------------------------
+# -------------------------------------------------
+# Base Paths
+# -------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parents[1]
 
-# This file is backend/core/config.py → BASE_DIR = backend/
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+FILES_DIR = BASE_DIR / "files"
+FILES_DIR.mkdir(exist_ok=True)
 
-# Files dir for uploaded PDFs
-FILES_DIR = os.path.join(BASE_DIR, "files")
-os.makedirs(FILES_DIR, exist_ok=True)
+KNOWLEDGE_DOCS_DIR = BASE_DIR / "knowledge_docs"
+KNOWLEDGE_DOCS_DIR.mkdir(exist_ok=True)
 
-# Reviews + question bank + knowledge store
-REVIEWS_FILE = os.path.join(BASE_DIR, "reviews.json")
-QUESTION_BANK_PATH = os.path.join(BASE_DIR, "question_bank.json")
-KNOWLEDGE_STORE_FILE = os.path.join(BASE_DIR, "knowledge_store.json")
-KNOWLEDGE_DOCS_DIR = os.path.join(BASE_DIR, "knowledge_docs")
-os.makedirs(KNOWLEDGE_DOCS_DIR, exist_ok=True)
+QUESTION_BANK_PATH = BASE_DIR / "question_bank.json"
+KNOWLEDGE_STORE_FILE = BASE_DIR / "knowledge_store.json"
+REVIEWS_FILE = BASE_DIR / "reviews.json"
 
-# ----------------------------------------------------
-# LLM config defaults (ENV FIRST, SAFE DEFAULTS)
-# ----------------------------------------------------
-
-# IMPORTANT:
-# - Prefer env vars at runtime (Docker / deployment)
-# - Default to Ollama /api/generate (most compatible)
-OLLAMA_API_URL = os.getenv(
-    "OLLAMA_API_URL",
-    "http://localhost:11434/api/generate",
+# -------------------------------------------------
+# Organization / Posture Defaults
+# -------------------------------------------------
+ORG_POSTURE_SUMMARY = (
+    "Default organizational security posture. "
+    "Override via configuration if needed."
 )
 
-DEFAULT_LLM_MODEL = os.getenv(
-    "OLLAMA_MODEL",
-    "llama3.1:8b-instruct-q4_K_M",
-)
+# -------------------------------------------------
+# Safe File Helpers
+# -------------------------------------------------
+def load_json_file_safe(path: Path, default: Any):
+    try:
+        if not path.exists():
+            return default
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
 
-# ----------------------------------------------------
-# Risk categories (shared)
-# ----------------------------------------------------
 
-RISK_CATEGORY_LIST = [
-    "DATA_CLASSIFICATION",
-    "CYBER_DFARS",
-    "INCIDENT_REPORTING",
-    "FLOWDOWN",
-    "LIABILITY",
-    "SLA",
-    "TERMINATION",
-    "IP",
-    "PRIVACY",
-    "OTHER",
+def save_json_file_safe(path: Path, data: Any) -> None:
+    try:
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def load_text_file_safe(path: Path) -> str:
+    try:
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+# -------------------------------------------------
+# Public Contract
+# -------------------------------------------------
+__all__ = [
+    # Paths
+    "BASE_DIR",
+    "FILES_DIR",
+    "KNOWLEDGE_DOCS_DIR",
+    "QUESTION_BANK_PATH",
+    "KNOWLEDGE_STORE_FILE",
+    "REVIEWS_FILE",
+
+    # Libraries (historical API)
+    "PdfReader",
+    "docx",
+
+    # Org config
+    "ORG_POSTURE_SUMMARY",
+
+    # Helpers
+    "load_json_file_safe",
+    "save_json_file_safe",
+    "load_text_file_safe",
 ]
-
-# ----------------------------------------------------
-# System prompts (review vs questionnaire)
-# ----------------------------------------------------
-
-SYSTEM_PROMPT_BASE = """
-You are an expert contract, cybersecurity, and privacy reviewer for a large
-U.S. government contractor.
-
-You are reviewing one or more CONTRACT DOCUMENTS (RFP, RFI, SOW, PWS, draft
-contract, attachments, etc.). Your job is to describe WHAT THESE DOCUMENTS
-REQUIRE — not to describe a generic service or the contractor's general posture.
-
-Return a concise, plain-text summary in the following sections:
-
-OBJECTIVE
-SCOPE
-KEY REQUIREMENTS
-KEY RISKS
-GAPS AND AMBIGUITIES
-RECOMMENDED NEXT STEPS
-""".strip()
-
-# High-level organization posture that can be referenced by LLMs.
-ORG_POSTURE_SUMMARY = """
-The organization is a U.S. defense contractor responsible for safeguarding
-Controlled Unclassified Information (CUI) in accordance with applicable federal
-and DoD requirements.
-
-Key posture points:
-- NIST SP 800-171 aligned
-- DFARS 252.204-7012 compliant
-- Strong access control and authentication
-- Encryption at rest and in transit
-- Documented SSP, SCRM, and security policies
-""".strip()
-
-# Used for questionnaire batch + single question
-QUESTIONNAIRE_SYSTEM_PROMPT = """
-You are a senior Security and Compliance engineer at a U.S. defense contractor.
-Your job is to answer security and SCRM questionnaires conservatively and
-accurately using NIST 800-171 and DFARS guidance.
-
-Respond only with the requested output format.
-""".strip()
-
-# Used by review analysis (call_llm_for_review)
-REVIEW_SYSTEM_PROMPT = """
-You are an expert contract analyst specializing in DFARS, NIST 800-171,
-SOW/PWS analysis, and risk identification for U.S. Government contractors.
-
-Produce a structured assessment:
-OBJECTIVE
-SCOPE
-KEY REQUIREMENTS
-KEY RISKS
-GAPS AND AMBIGUITIES
-RECOMMENDED NEXT STEPS
-
-Rules:
-- Do not hallucinate certifications
-- Be conservative and explicit
-- Use assessment language, not marketing
-""".strip()

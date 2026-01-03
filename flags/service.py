@@ -1,11 +1,11 @@
-# backend/flags/service.py
+﻿# backend/flags/service.py
 from __future__ import annotations
 
 from typing import List, Dict
 import re
 
-from backend.flags_store import FlagsPayload, FlagRule, load_flags
-from backend.flags_usage_store import increment_usage_for_flags
+from flags_store import FlagsPayload, FlagRule, load_flags
+from flags_usage_store import increment_usage_for_flags
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ def scan_text_for_flags(
 ) -> Dict[str, object]:
     """
     Canonical flag-scanning function used by /flags/test and (optionally)
-    by the reviews backend.
+    by the reviews 
 
     - Loads FlagsPayload from flags.json via load_flags().
     - Applies all enabled clause/context rules.
@@ -174,3 +174,4 @@ def scan_text_for_flags(
             increment_usage_for_flags(unique_flag_ids)
 
     return {"hits": hits, "summary": summary}
+

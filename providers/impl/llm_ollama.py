@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
-from backend.providers.llm import LLMProvider
+from providers.llm import LLMProvider
 
 
 class OllamaLLMProvider(LLMProvider):
@@ -28,3 +28,4 @@ class OllamaLLMProvider(LLMProvider):
             "text": "",
             "metadata": {"provider": "ollama", "model": model, "params": params or {}},
         }
+
