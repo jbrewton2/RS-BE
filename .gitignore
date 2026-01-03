@@ -20,6 +20,8 @@ __pycache__/
 *.pyo
 *.pyd
 
+.pytest_cache/
+
 # Editor/OS noise
 .DS_Store
 Thumbs.db
@@ -34,4 +36,8 @@ __pycache__/
 __pycache__/
 **/__pycache__/
 *.pyc
+
+# JSON files at root and in files/seed/
+/*.json
+!files/seed/*.json
 

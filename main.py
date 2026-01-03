@@ -81,15 +81,22 @@ async def _ensure_storage_seeded():
     """
     storage = app.state.providers.storage
 
-    # JSON stores: (storage_key, legacy_path, empty_default)
+        # JSON stores: (storage_key, seed_path, empty_default)
+    seed_dir = os.path.join(FILES_DIR, "seed")
+
     stores = [
-        ("stores/reviews.json", os.path.join(os.path.dirname(__file__), "reviews.json"), "[]"),
-        ("stores/questionnaires.json", os.path.join(os.path.dirname(__file__), "questionnaires.json"), "[]"),
-        ("stores/question_bank.json", os.path.join(os.path.dirname(__file__), "question_bank.json"), "[]"),
-        ("stores/knowledge_store.json", os.path.join(os.path.dirname(__file__), "knowledge_store.json"), "[]"),
+        ("stores/reviews.json", os.path.join(seed_dir, "reviews.json"), "[]"),
+        ("stores/questionnaires.json", os.path.join(seed_dir, "questionnaires.json"), "[]"),
+        ("stores/question_bank.json", os.path.join(seed_dir, "question_bank.json"), "[]"),
+        ("stores/knowledge_store.json", os.path.join(seed_dir, "knowledge_store.json"), "[]"),
+        ("stores/flags.json", os.path.join(seed_dir, "flags.json"), "[]"),
+        ("stores/flags_usage.json", os.path.join(seed_dir, "flags_usage.json"), "{}"),
+        ("stores/llm_config.json", os.path.join(seed_dir, "llm_config.json"), "{}"),
+        ("stores/llm_pricing.json", os.path.join(seed_dir, "llm_pricing.json"), "{}"),
+        ("stores/llm_stats.json", os.path.join(seed_dir, "llm_stats.json"), "[]"),
     ]
 
-    for key, legacy_path, empty_default in stores:
+    for key, seed_path, empty_default in stores:
         try:
             storage.head_object(key)
             continue
@@ -98,8 +105,8 @@ async def _ensure_storage_seeded():
 
         data = None
         try:
-            if os.path.exists(legacy_path):
-                with open(legacy_path, "rb") as f:
+            if os.path.exists(seed_path):
+                with open(seed_path, "rb") as f:
                     data = f.read()
         except Exception:
             data = None

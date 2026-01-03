@@ -4,8 +4,8 @@ from __future__ import annotations
 from typing import List, Dict
 import re
 
-from flags_store import FlagsPayload, FlagRule, load_flags
-from flags_usage_store import increment_usage_for_flags
+from flags.store import FlagsPayload, FlagRule, load_flags
+from flags.usage_store import increment_usage_for_flags
 
 
 # ---------------------------------------------------------------------------
@@ -174,4 +174,5 @@ def scan_text_for_flags(
             increment_usage_for_flags(unique_flag_ids)
 
     return {"hits": hits, "summary": summary}
+
 
