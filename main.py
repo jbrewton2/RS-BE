@@ -70,6 +70,51 @@ app.add_middleware(
 # Startup safety net: seed StorageProvider stores once (future-proof)
 # ---------------------------------------------------------------------
 
+def _pg_connect_for_startup():
+    """
+    Short-lived DB connection helper for startup tasks.
+    Uses env vars (works for Azure sidecar Postgres).
+    """
+    host = os.getenv("PGHOST", "127.0.0.1")
+    port = int(os.getenv("PGPORT", "5432"))
+    db = os.getenv("PGDATABASE", "css")
+    user = os.getenv("PGUSER", "cssadmin")
+    pw = os.getenv("PGPASSWORD", "")
+
+    # Try psycopg (new) then psycopg2 (old)
+    try:
+        import psycopg  # type: ignore
+        return psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw)
+    except Exception:
+        import psycopg2  # type: ignore
+        return psycopg2.connect(host=host, port=port, dbname=db, user=user, password=pw)
+
+
+def _ensure_pgvector_extension():
+    """
+    Bulletproof pgvector enablement.
+    If VECTOR_STORE=pgvector, ensure CREATE EXTENSION IF NOT EXISTS vector; runs once at startup.
+    Safe/idempotent. If DB not ready, fail soft.
+    """
+    if os.getenv("VECTOR_STORE", "").lower() != "pgvector":
+        return
+
+    try:
+        conn = _pg_connect_for_startup()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        finally:
+            conn.close()
+    except Exception:
+        # Fail soft: DB may not be ready yet; vector health can still create it later.
+        pass
+
+
 @app.on_event("startup")
 async def _ensure_storage_seeded():
     """
@@ -81,7 +126,10 @@ async def _ensure_storage_seeded():
     """
     storage = app.state.providers.storage
 
-        # JSON stores: (storage_key, seed_path, empty_default)
+    # 1) Ensure pgvector is available (idempotent)
+    _ensure_pgvector_extension()
+
+    # 2) JSON stores: (storage_key, seed_path, empty_default)
     seed_dir = os.path.join(FILES_DIR, "seed")
 
     stores = [
@@ -124,7 +172,7 @@ async def _ensure_storage_seeded():
         except Exception:
             pass
 
-    # Knowledge doc texts: seed from legacy KNOWLEDGE_DOCS_DIR -> storage key knowledge_docs/<filename>
+    # 3) Knowledge doc texts: seed from legacy KNOWLEDGE_DOCS_DIR -> storage key knowledge_docs/<filename>
     try:
         legacy_docs_dir = KNOWLEDGE_DOCS_DIR
         if os.path.isdir(legacy_docs_dir):
@@ -208,7 +256,12 @@ def _extract_text_from_docx_stream(stream: BytesIO) -> str:
 
 
 @app.post("/extract", response_model=ExtractResponseModel)
-async def extract(file: UploadFile = File(...), request: Request = None):
+async def extract(request: Request, file: UploadFile = File(...)):
+    """
+    NOTE:
+    - Request must be a real dependency param (not Optional default None),
+      otherwise FastAPI will try to treat it as a Pydantic field and crash.
+    """
     filename = file.filename or ""
     ext = os.path.splitext(filename)[1].lower()
 
@@ -229,10 +282,7 @@ async def extract(file: UploadFile = File(...), request: Request = None):
             raise HTTPException(status_code=500, detail="PDF support not installed.")
         safe_name = filename.replace(" ", "_") or "uploaded.pdf"
 
-        storage = request.app.state.providers.storage if request is not None else None
-        if storage is None:
-            raise HTTPException(status_code=500, detail="Storage provider not available")
-
+        storage = request.app.state.providers.storage
         storage.put_object(
             key=safe_name,
             data=contents,
