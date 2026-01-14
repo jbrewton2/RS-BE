@@ -1,4 +1,4 @@
-﻿# backend/reviews/router.py
+# backend/reviews/router.py
 from __future__ import annotations
 
 import json
@@ -9,8 +9,6 @@ from schemas import AnalyzeRequestModel, AnalyzeResponseModel
 from core.llm_client import call_llm_for_review
 from flags.service import scan_text_for_flags
 from core.config import REVIEWS_FILE
-from providers.factory import get_providers
-from providers.factory import get_providers
 from fastapi import Depends
 from auth.jwt import get_current_user
 
@@ -36,7 +34,7 @@ def _read_reviews_file() -> List[Dict[str, Any]]:
 
     # 1) StorageProvider (preferred)
     try:
-        storage = get_providers().storage
+        storage = _providers().storage
         raw = storage.get_object(key).decode("utf-8", errors="ignore")
         data = json.loads(raw) if raw.strip() else []
         return data if isinstance(data, list) else []
@@ -60,7 +58,7 @@ def _write_reviews_file(reviews: List[Dict[str, Any]]) -> None:
     Storage key: stores/reviews.json
     """
     key = "stores/reviews.json"
-    storage = get_providers().storage
+    storage = _providers().storage
     try:
         payload = json.dumps(reviews, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
         storage.put_object(key=key, data=payload, content_type="application/json", metadata=None)
@@ -262,5 +260,6 @@ async def delete_review(review_id: str):
         raise HTTPException(status_code=404, detail="Review not found")
     _write_reviews_file(new_list)
     return {"ok": True}
+
 
 

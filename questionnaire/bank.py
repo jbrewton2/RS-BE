@@ -1,8 +1,7 @@
-ï»¿# backend/questionnaire/bank.py
+# backend/questionnaire/bank.py
 from __future__ import annotations
 
 import json
-from providers.factory import get_providers
 import os
 import unicodedata
 from typing import List, Optional
@@ -13,7 +12,7 @@ from questionnaire.models import QuestionBankEntryModel
 
 def normalize_text(value: Optional[str]) -> str:
     """
-    Normalize text so it renders cleanly in the UI and avoids the 'ï¿½' character.
+    Normalize text so it renders cleanly in the UI and avoids the '?' character.
 
     - Unicode normalize (NFKC)
     - Replace curly quotes with straight quotes
@@ -30,11 +29,11 @@ def normalize_text(value: Optional[str]) -> str:
     # Unicode normalize
     s = unicodedata.normalize("NFKC", s)
 
-    # Curly single quotes (â€˜ â€™ â€š â€›) -> '
+    # Curly single quotes (‘ ’ ‚ ?) -> '
     s = s.replace("\u2018", "'").replace("\u2019", "'") \
          .replace("\u201A", "'").replace("\u201B", "'")
 
-    # Curly double quotes (â€œ â€ â€ž â€Ÿ) -> "
+    # Curly double quotes (“ ” „ ?) -> "
     s = s.replace("\u201C", '"').replace("\u201D", '"') \
          .replace("\u201E", '"').replace("\u201F", '"')
 
@@ -102,7 +101,7 @@ def load_question_bank() -> List[QuestionBankEntryModel]:
     raw = None
     # 1) StorageProvider (preferred)
     try:
-        storage = get_providers().storage
+        storage = _providers().storage
         raw_text = storage.get_object(key).decode("utf-8", errors="ignore")
         candidate = json.loads(raw_text) if raw_text.strip() else []
         if isinstance(candidate, list):
@@ -141,7 +140,7 @@ def save_question_bank(entries: List[QuestionBankEntryModel]) -> None:
 
     # Provider-first store
     key = "stores/question_bank.json"
-    storage = get_providers().storage
+    storage = _providers().storage
     payload = json.dumps(serializable, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
 
     # 1) StorageProvider (preferred)
@@ -154,5 +153,6 @@ def save_question_bank(entries: List[QuestionBankEntryModel]) -> None:
     # 2) Legacy filesystem fallback
     with open(QUESTION_BANK_PATH, "w", encoding="utf-8") as f:
         json.dump(serializable, f, indent=2, ensure_ascii=False)
+
 
 

@@ -1,4 +1,9 @@
-﻿from __future__ import annotations
+﻿# NOTE:
+# This module is a composition root. Avoid importing it from core/* at import-time.
+# Use lazy imports (inside functions) or core/providers_root.py init_providers().
+
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional

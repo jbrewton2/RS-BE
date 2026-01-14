@@ -78,13 +78,15 @@ def _log_llm_event(
 
     try:
         append_llm_event(
-            app=app,
-            endpoint=endpoint,
-            provider=provider,
-            model=model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_usd=cost_usd,
+            event={
+                "app": app,
+                "endpoint": endpoint,
+                "provider": provider,
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_usd": cost_usd,
+            }
         )
     except Exception:
         pass

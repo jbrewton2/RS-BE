@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import uuid
@@ -9,11 +9,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from providers.factory import get_providers
 from questionnaire.models import QuestionnaireQuestionModel
 from questionnaire.bank import normalize_text
 
-# ✅ Auth guard (matches the rest of CSS protected API behavior)
+# ? Auth guard (matches the rest of CSS protected API behavior)
 from auth.jwt import get_current_user
 
 router = APIRouter(
@@ -191,7 +190,7 @@ def _normalize_session_in_place(session: Dict[str, Any]) -> None:
 def _load_sessions() -> List[Dict[str, Any]]:
     # StorageProvider preferred
     try:
-        storage = get_providers().storage
+        storage = _providers().storage
         raw = storage.get_object(STORE_KEY).decode("utf-8", errors="ignore")
         data = json.loads(raw) if raw.strip() else []
         return data if isinstance(data, list) else []
@@ -214,7 +213,7 @@ def _save_sessions(sessions: List[Dict[str, Any]]) -> None:
 
     # StorageProvider preferred
     try:
-        storage = get_providers().storage
+        storage = _providers().storage
         storage.put_object(
             key=STORE_KEY,
             data=payload,
@@ -239,7 +238,7 @@ def _now_iso() -> str:
 def list_questionnaire_sessions() -> List[QuestionnaireSessionModel]:
     sessions = _load_sessions()
 
-    # ✅ Normalize BEFORE Pydantic hydration to prevent list-view blowups on legacy records
+    # ? Normalize BEFORE Pydantic hydration to prevent list-view blowups on legacy records
     normalized: List[Dict[str, Any]] = []
     for s in sessions:
         if isinstance(s, dict):
@@ -328,4 +327,5 @@ def delete_questionnaire_session(session_id: str) -> Dict[str, bool]:
         raise HTTPException(status_code=404, detail="Questionnaire session not found.")
     _save_sessions(new_sessions)
     return {"ok": True}
+
 
