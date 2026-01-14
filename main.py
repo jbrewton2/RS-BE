@@ -255,7 +255,9 @@ def _extract_text_from_docx_stream(stream: BytesIO) -> str:
         raise HTTPException(status_code=500, detail=f"Failed to read DOCX: {exc}")
 
 
+# Provide BOTH routes so the frontend can call /api/extract
 @app.post("/extract", response_model=ExtractResponseModel)
+@app.post("/api/extract", response_model=ExtractResponseModel)
 async def extract(request: Request, file: UploadFile = File(...)):
     """
     NOTE:
@@ -302,7 +304,9 @@ async def extract(request: Request, file: UploadFile = File(...)):
 # Legacy /analyze (direct LLM call) — kept for compatibility
 # ---------------------------------------------------------------------
 
+# Provide BOTH routes so the frontend can call /api/analyze
 @app.post("/analyze", response_model=AnalyzeResponseModel)
+@app.post("/api/analyze", response_model=AnalyzeResponseModel)
 async def analyze(req: AnalyzeRequestModel):
     text = (req.text or "").strip()
     if not text or "no text extracted" in text.lower():
@@ -329,16 +333,19 @@ async def analyze(req: AnalyzeRequestModel):
 # ---------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------
+# Health router stays mounted as-is (it already defines /health AND /api/* db endpoints)
 app.include_router(health_router)
-app.include_router(flags_router)
-app.include_router(reviews_router)
-app.include_router(questionnaire_router)
-app.include_router(question_bank_router)
-app.include_router(knowledge_router)
-app.include_router(llm_config_router)
-app.include_router(pricing_router)
-app.include_router(llm_status_router)
-app.include_router(questionnaire_sessions_router)
+
+# Everything else must be reachable under /api/* for the frontend + AFD routing.
+app.include_router(flags_router, prefix="/api")
+app.include_router(reviews_router, prefix="/api")
+app.include_router(questionnaire_router, prefix="/api")
+app.include_router(question_bank_router, prefix="/api")
+app.include_router(knowledge_router, prefix="/api")
+app.include_router(llm_config_router, prefix="/api")
+app.include_router(pricing_router, prefix="/api")
+app.include_router(llm_status_router, prefix="/api")
+app.include_router(questionnaire_sessions_router, prefix="/api")
 
 
 @app.get("/")
