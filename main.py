@@ -1,15 +1,14 @@
 ﻿from __future__ import annotations
 
 import os
-from pathlib import Path
-import json
 from io import BytesIO
 from typing import Optional, List
 
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, HTMLResponse
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from pydantic import BaseModel
 
 # Core config: PdfReader, docx, FILES_DIR paths
@@ -35,7 +34,7 @@ from questionnaire.sessions_router import (
     router as questionnaire_sessions_router,
 )
 
-# NEW: health router (safe / unauthenticated)
+# Health router (safe / unauthenticated)
 from health.router import router as health_router
 
 # ---------------------------------------------------------------------
@@ -65,10 +64,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # ---------------------------------------------------------------------
 # Startup safety net: seed StorageProvider stores once (future-proof)
 # ---------------------------------------------------------------------
+
 
 def _pg_connect_for_startup():
     """
@@ -84,9 +83,11 @@ def _pg_connect_for_startup():
     # Try psycopg (new) then psycopg2 (old)
     try:
         import psycopg  # type: ignore
+
         return psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw)
     except Exception:
         import psycopg2  # type: ignore
+
         return psycopg2.connect(host=host, port=port, dbname=db, user=user, password=pw)
 
 
@@ -214,6 +215,7 @@ class ExtractResponseModel(BaseModel):
 # /files + /extract
 # ---------------------------------------------------------------------
 
+
 @app.get("/files/{filename}")
 async def get_file(filename: str, request: Request):
     storage = request.app.state.providers.storage
@@ -255,10 +257,7 @@ def _extract_text_from_docx_stream(stream: BytesIO) -> str:
         raise HTTPException(status_code=500, detail=f"Failed to read DOCX: {exc}")
 
 
-# Provide BOTH routes so the frontend can call /api/extract
-@app.post("/extract", response_model=ExtractResponseModel)
-@app.post("/api/extract", response_model=ExtractResponseModel)
-async def extract(request: Request, file: UploadFile = File(...)):
+async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseModel:
     """
     NOTE:
     - Request must be a real dependency param (not Optional default None),
@@ -300,14 +299,23 @@ async def extract(request: Request, file: UploadFile = File(...)):
     return ExtractResponseModel(text=text, type=ext.lstrip(".") or "txt")
 
 
+@app.post("/extract", response_model=ExtractResponseModel)
+async def extract(request: Request, file: UploadFile = File(...)):
+    return await _extract_impl(request=request, file=file)
+
+
+# API alias so Front Door can route everything under /api/*
+@app.post("/api/extract", response_model=ExtractResponseModel, include_in_schema=True)
+async def api_extract(request: Request, file: UploadFile = File(...)):
+    return await _extract_impl(request=request, file=file)
+
+
 # ---------------------------------------------------------------------
 # Legacy /analyze (direct LLM call) — kept for compatibility
 # ---------------------------------------------------------------------
 
-# Provide BOTH routes so the frontend can call /api/analyze
-@app.post("/analyze", response_model=AnalyzeResponseModel)
-@app.post("/api/analyze", response_model=AnalyzeResponseModel)
-async def analyze(req: AnalyzeRequestModel):
+
+async def _analyze_impl(req: AnalyzeRequestModel) -> AnalyzeResponseModel:
     text = (req.text or "").strip()
     if not text or "no text extracted" in text.lower():
         summary = (
@@ -330,13 +338,62 @@ async def analyze(req: AnalyzeRequestModel):
     return AnalyzeResponseModel(summary=summary, risks=[], doc_type=None, deliverables=[])
 
 
+@app.post("/analyze", response_model=AnalyzeResponseModel)
+async def analyze(req: AnalyzeRequestModel):
+    return await _analyze_impl(req)
+
+
+# API alias so Front Door can route everything under /api/*
+@app.post("/api/analyze", response_model=AnalyzeResponseModel, include_in_schema=True)
+async def api_analyze(req: AnalyzeRequestModel):
+    return await _analyze_impl(req)
+
+
+# ---------------------------------------------------------------------
+# Health + OpenAPI helpers (Front Door safe)
+# ---------------------------------------------------------------------
+
+
+@app.get("/api/health", include_in_schema=True)
+def api_health():
+    # Keep this super simple and always unauthenticated
+    return {"ok": True}
+
+
+@app.get("/api/openapi.json", include_in_schema=False)
+def api_openapi():
+    # Front Door should route /api/* to backend; this avoids needing /openapi.json at the root.
+    return app.openapi()
+
+
+@app.get("/api/docs", include_in_schema=False)
+def api_docs() -> HTMLResponse:
+    return get_swagger_ui_html(
+        openapi_url="/api/openapi.json",
+        title="CSS Backend API Docs",
+    )
+
+
+@app.get("/api/redoc", include_in_schema=False)
+def api_redoc() -> HTMLResponse:
+    return get_redoc_html(
+        openapi_url="/api/openapi.json",
+        title="CSS Backend API Docs (ReDoc)",
+    )
+
+
 # ---------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------
-# Health router stays mounted as-is (it already defines /health AND /api/* db endpoints)
+
+# Keep health router at root because it already defines:
+#   /health
+#   /health/llm
+#   /api/db/health
+#   /api/db/vector-health
 app.include_router(health_router)
 
-# Everything else must be reachable under /api/* for the frontend + AFD routing.
+# All functional API routers mounted under /api/*
 app.include_router(flags_router, prefix="/api")
 app.include_router(reviews_router, prefix="/api")
 app.include_router(questionnaire_router, prefix="/api")
