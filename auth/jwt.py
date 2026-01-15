@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Tuple
 
 import httpx
 from fastapi import Depends, HTTPException, status
@@ -12,19 +12,152 @@ from jose.exceptions import JWTError
 
 bearer = HTTPBearer(auto_error=False)
 
-_JWKS_CACHE: Dict[str, Any] = {"jwks": None, "fetched_at": 0}
-_JWKS_TTL_SECONDS = 3600  # cache JWKS for 1 hour
+# Cache JWKS per-url (Keycloak vs Entra have different JWKS endpoints)
+_JWKS_CACHE: Dict[str, Dict[str, Any]] = {}  # url -> {"jwks":..., "fetched_at":...}
+_JWKS_TTL_SECONDS = 3600  # 1 hour
 
 
-def _jwks_issuer() -> str:
+# -----------------------------------------------------------------------------
+# Provider selection
+# -----------------------------------------------------------------------------
+def _auth_provider() -> str:
+    """
+    AUTH_PROVIDER:
+      - "entra"  -> validate Entra-issued access tokens (Azure AD / Entra ID)
+      - default  -> keycloak-compatible behavior (local docker)
+    """
+    return (os.getenv("AUTH_PROVIDER", "keycloak") or "keycloak").strip().lower()
+
+
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+def _split_csv(value: str) -> List[str]:
+    return [x.strip() for x in (value or "").split(",") if x.strip()]
+
+
+def _split_scopes(value: str) -> List[str]:
+    """
+    Accept:
+      - "scope1 scope2"
+      - "scope1,scope2"
+      - "scope1, scope2"
+    """
+    raw = (value or "").replace(",", " ").strip()
+    return [x.strip() for x in raw.split() if x.strip()]
+
+
+# -----------------------------------------------------------------------------
+# Entra configuration (Azure AD)
+# -----------------------------------------------------------------------------
+def _entra_tenant_id() -> str:
+    return (os.getenv("ENTRA_TENANT_ID", "") or "").strip()
+
+
+def _entra_authority() -> str:
+    """
+    For v2 tokens typically:
+      https://login.microsoftonline.com/<tenant_id>/v2.0
+    """
+    raw = (os.getenv("ENTRA_AUTHORITY", "") or "").strip()
+    if raw:
+        return raw.rstrip("/")
+
+    tid = _entra_tenant_id()
+    if tid:
+        return f"https://login.microsoftonline.com/{tid}/v2.0"
+    return ""
+
+
+def _entra_allowed_issuers() -> List[str]:
+    """
+    Issuer allowlist (exact match). Defaults to ENTRA_AUTHORITY if set.
+    Example:
+      ENTRA_ISSUER_ALLOWLIST="https://login.microsoftonline.com/<tid>/v2.0"
+    """
+    raw = (os.getenv("ENTRA_ISSUER_ALLOWLIST", "") or "").strip()
+    if raw:
+        return [x.rstrip("/") for x in _split_csv(raw)]
+
+    auth = _entra_authority()
+    return [auth] if auth else []
+
+
+def _entra_audience_allowlist() -> List[str]:
+    """
+    IMPORTANT: these are identifiers, NOT URLs.
+    Example:
+      ENTRA_AUDIENCE_ALLOWLIST="GUID,api://GUID"
+    """
+    raw = (os.getenv("ENTRA_AUDIENCE_ALLOWLIST", "") or "").strip()
+    return [x.strip() for x in _split_csv(raw)]
+
+
+def _entra_required_scopes() -> List[str]:
+    """
+    Example:
+      ENTRA_REQUIRED_SCOPES="access_as_user"
+    """
+    raw = (os.getenv("ENTRA_REQUIRED_SCOPES", "") or "").strip()
+    return _split_scopes(raw)
+
+
+def _entra_jwks_url() -> str:
+    """
+    Entra v2 JWKS endpoint (no openid-configuration fetch required):
+      https://login.microsoftonline.com/<tenant_id>/discovery/v2.0/keys
+    """
+    tid = _entra_tenant_id()
+    if not tid:
+        # Fall back to parsing tenant from authority if possible
+        auth = _entra_authority()
+        # auth expected: https://login.microsoftonline.com/<tid>/v2.0
+        parts = auth.split("/")
+        if len(parts) >= 4:
+            tid = parts[3]
+    if not tid:
+        return ""
+    return f"https://login.microsoftonline.com/{tid}/discovery/v2.0/keys"
+
+
+def _entra_aud_ok(claims: Dict[str, Any], allowlist: List[str]) -> bool:
+    """
+    Entra access tokens:
+      - aud is usually a string (app id URI or GUID)
+    Accept if aud matches any item in allowlist.
+    """
+    aud = claims.get("aud")
+    if not allowlist:
+        return True  # no allowlist configured = don't block
+    if isinstance(aud, str):
+        return aud in allowlist
+    if isinstance(aud, list):
+        return any(a in allowlist for a in aud if isinstance(a, str))
+    return False
+
+
+def _entra_scopes_ok(claims: Dict[str, Any], required: List[str]) -> bool:
+    """
+    Entra delegated permissions usually arrive in "scp" claim (space-separated).
+    """
+    if not required:
+        return True
+    scp = claims.get("scp") or ""
+    token_scopes = set(_split_scopes(str(scp)))
+    return all(s in token_scopes for s in required)
+
+
+# -----------------------------------------------------------------------------
+# Keycloak configuration (local)
+# -----------------------------------------------------------------------------
+def _keycloak_jwks_issuer() -> str:
     """
     Used ONLY for fetching JWKS from inside docker network.
-    This should usually be the internal docker URL.
     """
     return os.getenv("KEYCLOAK_ISSUER", "http://keycloak:8080/realms/css-local").rstrip("/")
 
 
-def _allowed_issuers() -> List[str]:
+def _keycloak_allowed_issuers() -> List[str]:
     """
     Token issuer must match one of these EXACTLY.
 
@@ -39,49 +172,24 @@ def _allowed_issuers() -> List[str]:
     if raw:
         return [x.strip().rstrip("/") for x in raw.split(",") if x.strip()]
 
-    internal = _jwks_issuer()
+    internal = _keycloak_jwks_issuer()
     external = internal.replace("http://keycloak:8080", "http://localhost:8090")
-    # de-dup and keep stable order
-    out = []
+    out: List[str] = []
     for x in [internal, external]:
         if x and x not in out:
             out.append(x)
     return out
 
 
-def _jwks_url() -> str:
-    return f"{_jwks_issuer()}/protocol/openid-connect/certs"
+def _keycloak_jwks_url() -> str:
+    return f"{_keycloak_jwks_issuer()}/protocol/openid-connect/certs"
 
 
-def _client_id() -> str:
-    # your Keycloak client in realm
+def _keycloak_client_id() -> str:
     return os.getenv("KEYCLOAK_CLIENT_ID", "css-frontend")
 
 
-async def _get_jwks() -> Dict[str, Any]:
-    now = int(time.time())
-    if _JWKS_CACHE["jwks"] and (now - _JWKS_CACHE["fetched_at"] < _JWKS_TTL_SECONDS):
-        return _JWKS_CACHE["jwks"]
-
-    url = _jwks_url()
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        jwks = r.json()
-
-    _JWKS_CACHE["jwks"] = jwks
-    _JWKS_CACHE["fetched_at"] = now
-    return jwks
-
-
-def _pick_key(jwks: Dict[str, Any], kid: str) -> Optional[Dict[str, Any]]:
-    for k in jwks.get("keys", []):
-        if k.get("kid") == kid and k.get("use") == "sig":
-            return k
-    return None
-
-
-def _aud_ok(claims: Dict[str, Any], client_id: str) -> bool:
+def _keycloak_aud_ok(claims: Dict[str, Any], client_id: str) -> bool:
     """
     Keycloak audience patterns vary.
     Accept if:
@@ -101,6 +209,49 @@ def _aud_ok(claims: Dict[str, Any], client_id: str) -> bool:
     return False
 
 
+# -----------------------------------------------------------------------------
+# JWKS fetch + key selection
+# -----------------------------------------------------------------------------
+def _jwks_url_for_provider() -> Tuple[str, str]:
+    """
+    Returns (provider, jwks_url).
+    """
+    prov = _auth_provider()
+    if prov == "entra":
+        url = _entra_jwks_url()
+        return prov, url
+    # default keycloak
+    return "keycloak", _keycloak_jwks_url()
+
+
+async def _get_jwks(jwks_url: str) -> Dict[str, Any]:
+    if not jwks_url:
+        raise HTTPException(status_code=401, detail="Auth error: JWKS URL not configured")
+
+    now = int(time.time())
+    cached = _JWKS_CACHE.get(jwks_url)
+    if cached and cached.get("jwks") and (now - int(cached.get("fetched_at", 0)) < _JWKS_TTL_SECONDS):
+        return cached["jwks"]
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        r = await client.get(jwks_url)
+        r.raise_for_status()
+        jwks = r.json()
+
+    _JWKS_CACHE[jwks_url] = {"jwks": jwks, "fetched_at": now}
+    return jwks
+
+
+def _pick_key(jwks: Dict[str, Any], kid: str) -> Optional[Dict[str, Any]]:
+    for k in jwks.get("keys", []):
+        if k.get("kid") == kid and (k.get("use") == "sig" or k.get("use") is None):
+            return k
+    return None
+
+
+# -----------------------------------------------------------------------------
+# Main auth dependency
+# -----------------------------------------------------------------------------
 async def get_current_user(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
 ) -> Dict[str, Any]:
@@ -111,36 +262,54 @@ async def get_current_user(
         )
 
     token = creds.credentials
-    client_id = _client_id()
-    allowed_issuers = [x.rstrip("/") for x in _allowed_issuers()]
+    provider, jwks_url = _jwks_url_for_provider()
 
     try:
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
         if not kid:
-            raise HTTPException(status_code=401, detail="Token missing kid")
+            raise HTTPException(status_code=401, detail="Invalid token: missing kid")
 
-        jwks = await _get_jwks()
+        jwks = await _get_jwks(jwks_url)
         key = _pick_key(jwks, kid)
         if not key:
-            raise HTTPException(status_code=401, detail="Signing key not found")
+            raise HTTPException(status_code=401, detail="Invalid token: signing key not found")
 
-        # Decode with signature validation, but we enforce issuer ourselves (allowlist)
+        # Verify signature, but enforce issuer/audience ourselves (allowlists).
         claims = jwt.decode(
             token,
             key,
             algorithms=["RS256"],
             options={
-                "verify_aud": False,  # we validate audience ourselves
-                "verify_iss": False,  # we validate issuer ourselves (allowlist)
+                "verify_aud": False,
+                "verify_iss": False,
             },
         )
 
         iss = (claims.get("iss") or "").rstrip("/")
-        if iss not in allowed_issuers:
+
+        if provider == "entra":
+            allowed_issuers = [x.rstrip("/") for x in _entra_allowed_issuers() if x]
+            if allowed_issuers and iss not in allowed_issuers:
+                raise HTTPException(status_code=401, detail=f"Invalid issuer: {iss}")
+
+            audiences = _entra_audience_allowlist()
+            if not _entra_aud_ok(claims, audiences):
+                raise HTTPException(status_code=401, detail="Invalid token audience")
+
+            required_scopes = _entra_required_scopes()
+            if not _entra_scopes_ok(claims, required_scopes):
+                raise HTTPException(status_code=401, detail="Missing required scopes")
+
+            return claims
+
+        # keycloak (default)
+        client_id = _keycloak_client_id()
+        allowed_issuers = [x.rstrip("/") for x in _keycloak_allowed_issuers() if x]
+        if allowed_issuers and iss not in allowed_issuers:
             raise HTTPException(status_code=401, detail=f"Invalid issuer: {iss}")
 
-        if not _aud_ok(claims, client_id):
+        if not _keycloak_aud_ok(claims, client_id):
             raise HTTPException(status_code=401, detail="Invalid token audience")
 
         return claims
@@ -149,5 +318,10 @@ async def get_current_user(
         raise
     except JWTError as e:
         raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=401, detail=f"Auth error: {str(e)}")
     except Exception as e:
+        # If you ever see: "Name or service not known" here, it means the code
+        # is still trying to hit an internal hostname (e.g., keycloak) that
+        # doesn't exist in the current environment.
         raise HTTPException(status_code=401, detail=f"Auth error: {str(e)}")
