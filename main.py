@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from io import BytesIO
@@ -393,6 +393,11 @@ def api_redoc() -> HTMLResponse:
 #   /api/db/vector-health
 app.include_router(health_router)
 
+# Mount questionnaire sessions at root (required for pytest + backwards-compat):
+#   /questionnaires
+#   /questionnaires/{session_id}
+app.include_router(questionnaire_sessions_router)
+
 # All functional API routers mounted under /api/*
 app.include_router(flags_router, prefix="/api")
 app.include_router(reviews_router, prefix="/api")
@@ -402,6 +407,10 @@ app.include_router(knowledge_router, prefix="/api")
 app.include_router(llm_config_router, prefix="/api")
 app.include_router(pricing_router, prefix="/api")
 app.include_router(llm_status_router, prefix="/api")
+
+# Also expose sessions router under /api for Front Door / IL5 routing:
+#   /api/questionnaires
+#   /api/questionnaires/{session_id}
 app.include_router(questionnaire_sessions_router, prefix="/api")
 
 
