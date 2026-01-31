@@ -54,3 +54,4 @@ files/stores/
 files/knowledge_docs/
 # local-only folders
 seed/
+/_artifacts_*/
