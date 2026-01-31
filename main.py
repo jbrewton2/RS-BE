@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from core.settings import get_settings
 from io import BytesIO
 from typing import Optional, List
 
@@ -74,12 +75,12 @@ def _pg_connect_for_startup():
     Short-lived DB connection helper for startup tasks.
     Uses env vars (works for Azure sidecar Postgres).
     """
-    host = os.getenv("PGHOST", "127.0.0.1")
-    port = int(os.getenv("PGPORT", "5432"))
-    db = os.getenv("PGDATABASE", "css")
-    user = os.getenv("PGUSER", "cssadmin")
-    pw = os.getenv("PGPASSWORD", "")
-
+    s = get_settings()
+    host = s.db.host
+    port = int(s.db.port)
+    db = s.db.database
+    user = s.db.user
+    pw = s.db.password
     # Try psycopg (new) then psycopg2 (old)
     try:
         import psycopg  # type: ignore
@@ -97,7 +98,7 @@ def _ensure_pgvector_extension():
     If VECTOR_STORE=pgvector, ensure CREATE EXTENSION IF NOT EXISTS vector; runs once at startup.
     Safe/idempotent. If DB not ready, fail soft.
     """
-    if os.getenv("VECTOR_STORE", "").lower() != "pgvector":
+    if (get_settings().vector.provider or '').lower() != 'pgvector':
         return
 
     try:
@@ -311,7 +312,7 @@ async def api_extract(request: Request, file: UploadFile = File(...)):
 
 
 # ---------------------------------------------------------------------
-# Legacy /analyze (direct LLM call) — kept for compatibility
+# Legacy /analyze (direct LLM call) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â kept for compatibility
 # ---------------------------------------------------------------------
 
 
