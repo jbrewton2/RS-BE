@@ -411,7 +411,7 @@ app.include_router(llm_status_router, prefix="/api")
 # Also expose sessions router under /api for Front Door / IL5 routing:
 #   /api/questionnaires
 #   /api/questionnaires/{session_id}
-app.include_router(questionnaire_sessions_router, prefix="/api")
+
 
 
 @app.get("/")
