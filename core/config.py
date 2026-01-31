@@ -36,8 +36,8 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 FILES_DIR = BASE_DIR / "files"
 FILES_DIR.mkdir(exist_ok=True)
 
-KNOWLEDGE_DOCS_DIR = BASE_DIR / "knowledge_docs"
-KNOWLEDGE_DOCS_DIR.mkdir(exist_ok=True)
+KNOWLEDGE_DOCS_DIR = BASE_DIR / "files" / "seed" / "knowledge_docs"
+KNOWLEDGE_DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
 QUESTION_BANK_PATH = BASE_DIR / "question_bank.json"
 KNOWLEDGE_STORE_FILE = BASE_DIR / "knowledge_store.json"
