@@ -52,3 +52,5 @@ _bak/
 # local runtime seed files (never commit)
 files/stores/
 files/knowledge_docs/
+# local-only folders
+seed/
