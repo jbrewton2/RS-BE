@@ -173,7 +173,7 @@ async def _ensure_storage_seeded():
         except Exception:
             pass
 
-    # 3) Knowledge doc texts: seed from legacy KNOWLEDGE_DOCS_DIR -> storage key knowledge_docs/<filename>
+    # 3) Knowledge doc texts: seed from FILES seed KNOWLEDGE_DOCS_DIR -> storage key knowledge_docs/<filename>
     try:
         legacy_docs_dir = KNOWLEDGE_DOCS_DIR
         if os.path.isdir(legacy_docs_dir):
