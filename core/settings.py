@@ -69,14 +69,46 @@ class StorageSettings:
 class AuthSettings:
     provider: str
 
+@dataclass(frozen=True)
+class DBSettings:
+    host: str
+    port: int
+    user: str
+    password: str
+    database: str
+
+
+@dataclass(frozen=True)
+class VectorSettings:
+    provider: str  # disabled | pgvector | opensearch (future)
+
+
+def _load_db_settings() -> DBSettings:
+    # Canonical env names (keep PG* for compatibility because it's already what you use)
+    host = (_env("PGHOST", "localhost")).strip()
+    port = _env_int("PGPORT", 5432)
+    user = (_env("PGUSER", "postgres")).strip()
+    password = _env("PGPASSWORD", "")
+    database = (_env("PGDATABASE", "postgres")).strip()
+
+    # clamp/sanity
+    if port <= 0:
+        port = 5432
+
+    return DBSettings(host=host, port=int(port), user=user, password=password, database=database)
+
+
+def _load_vector_settings() -> VectorSettings:
+    provider = (_env("VECTOR_STORE", "") or _env("VECTOR_PROVIDER", "") or "disabled").strip().lower()
+    return VectorSettings(provider=provider)
 
 @dataclass(frozen=True)
 class Settings:
     llm: LLMSettings
     storage: StorageSettings
     auth: AuthSettings
-
-
+    db: DBSettings
+    vector: VectorSettings
 def _load_llm_settings() -> LLMSettings:
     # New canonical env names (provider-agnostic)
     provider = (_env("LLM_PROVIDER", "") or _env("OLLAMA_PROVIDER", "") or "ollama").strip().lower()
@@ -138,4 +170,6 @@ def get_settings() -> Settings:
         llm=_load_llm_settings(),
         storage=_load_storage_settings(),
         auth=_load_auth_settings(),
+        db=_load_db_settings(),
+        vector=_load_vector_settings(),
     )
