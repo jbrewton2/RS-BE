@@ -1,18 +1,15 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import json
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import HTTPException
 
-from core.config import (
-    ORG_POSTURE_SUMMARY,
-    KNOWLEDGE_DOCS_DIR,
-)
+from core.config import ORG_POSTURE_SUMMARY, KNOWLEDGE_DOCS_DIR
+from core.settings import get_settings
 
 try:
     from llm_status.store import append_llm_event
@@ -23,14 +20,6 @@ try:
     from pricing.llm_pricing_store import compute_cost_usd
 except Exception:  # pragma: no cover
     compute_cost_usd = None  # type: ignore
-
-
-def _get_ollama_api_url() -> str:
-    return (os.getenv("OLLAMA_API_URL") or "http://localhost:11434/api/generate").strip()
-
-
-def _get_default_model() -> str:
-    return (os.getenv("OLLAMA_MODEL") or "llama3.1").strip()
 
 
 def _is_chat_endpoint(url: str) -> bool:
@@ -49,53 +38,18 @@ def _safe_json_dumps(obj: Any, max_chars: int) -> str:
     return _clip_text(s, max_chars)
 
 
-def _get_timeout_seconds() -> float:
-    raw = (os.getenv("OLLAMA_TIMEOUT_SECONDS") or "").strip()
-    if not raw:
-        return 240.0
+def _build_httpx_timeout(total_timeout: float, connect_timeout: float):
+    # Works across httpx versions
     try:
-        v = float(raw)
-        return max(5.0, v)
-    except Exception:
-        return 240.0
-
-
-def _get_connect_timeout_seconds() -> float:
-    raw = (os.getenv("OLLAMA_CONNECT_TIMEOUT_SECONDS") or "").strip()
-    if not raw:
-        return 10.0
-    try:
-        v = float(raw)
-        return max(1.0, v)
-    except Exception:
-        return 10.0
-
-
-def _get_max_attempts() -> int:
-    raw = (os.getenv("OLLAMA_MAX_ATTEMPTS") or "").strip()
-    if not raw:
-        return 2
-    try:
-        v = int(raw)
-        return max(1, min(v, 5))
-    except Exception:
-        return 2
-
-
-def _get_backoff_seconds() -> List[float]:
-    raw = (os.getenv("OLLAMA_BACKOFF_SECONDS") or "").strip()
-    if not raw:
-        return [0.3]
-    vals: List[float] = []
-    for part in raw.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            vals.append(max(0.0, float(part)))
-        except Exception:
-            continue
-    return vals or [0.3]
+        return httpx.Timeout(
+            timeout=total_timeout,
+            connect=connect_timeout,
+            read=total_timeout,
+            write=connect_timeout,
+            pool=connect_timeout,
+        )
+    except TypeError:
+        return total_timeout
 
 
 def _log_llm_event(
@@ -153,38 +107,16 @@ def _format_http_status_error(exc: httpx.HTTPStatusError) -> str:
     return repr(exc)
 
 
-def _build_httpx_timeout(total_timeout: float, connect_timeout: float):
-    """
-    Build an httpx timeout object that works across httpx versions.
-    Older httpx does not support Timeout(total=...).
-    """
-    # Try modern-ish signature: Timeout(timeout=..., connect=..., read=..., write=..., pool=...)
-    try:
-        return httpx.Timeout(
-            timeout=total_timeout,
-            connect=connect_timeout,
-            read=total_timeout,
-            write=connect_timeout,
-            pool=connect_timeout,
-        )
-    except TypeError:
-        # Fall back to float timeout (applies to all phases)
-        return total_timeout
+async def _llm_post(payload: Dict[str, Any], request_type: str) -> Tuple[str, int, int]:
+    s = get_settings().llm
+    url = s.api_url
+    model = s.model
 
-
-async def _ollama_post(payload: Dict[str, Any], request_type: str) -> Tuple[str, int, int]:
-    url = _get_ollama_api_url()
-    max_attempts = _get_max_attempts()
-    backoff = _get_backoff_seconds()
-
-    total_timeout = _get_timeout_seconds()
-    connect_timeout = _get_connect_timeout_seconds()
-    timeout = _build_httpx_timeout(total_timeout, connect_timeout)
-
+    timeout = _build_httpx_timeout(s.timeout_seconds, s.connect_timeout_seconds)
     last_detail: str = ""
 
     async with httpx.AsyncClient(timeout=timeout) as client:
-        for attempt in range(1, max_attempts + 1):
+        for attempt in range(1, s.max_attempts + 1):
             try:
                 r = await client.post(url, json=payload)
                 r.raise_for_status()
@@ -206,27 +138,18 @@ async def _ollama_post(payload: Dict[str, Any], request_type: str) -> Tuple[str,
 
             except httpx.HTTPStatusError as exc:
                 last_detail = _format_http_status_error(exc)
-                if attempt < max_attempts:
-                    await asyncio.sleep(backoff[min(attempt - 1, len(backoff) - 1)])
-                    continue
-                break
-
             except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.RemoteProtocolError) as exc:
                 last_detail = f"{type(exc).__name__}: {str(exc)}"
-                if attempt < max_attempts:
-                    await asyncio.sleep(backoff[min(attempt - 1, len(backoff) - 1)])
-                    continue
-                break
-
             except HTTPException:
                 raise
-
             except Exception as exc:
                 last_detail = f"{type(exc).__name__}: {str(exc)}"
-                if attempt < max_attempts:
-                    await asyncio.sleep(backoff[min(attempt - 1, len(backoff) - 1)])
-                    continue
-                break
+
+            if attempt < s.max_attempts:
+                backoff = s.backoff_seconds[min(attempt - 1, len(s.backoff_seconds) - 1)]
+                await asyncio.sleep(backoff)
+                continue
+            break
 
     if last_detail:
         raise HTTPException(status_code=502, detail=f"LLM request ({request_type}) failed: {last_detail}")
@@ -248,6 +171,7 @@ async def _load_knowledge_context(knowledge_doc_ids: Optional[List[str]]) -> str
 
 
 async def call_llm_for_review(req) -> str:
+    s = get_settings().llm
     knowledge_context = await _load_knowledge_context(getattr(req, "knowledge_doc_ids", None))
 
     user_payload = {
@@ -258,17 +182,14 @@ async def call_llm_for_review(req) -> str:
         "prompt_override": getattr(req, "prompt_override", None),
     }
 
-    model = _get_default_model()
-    url = _get_ollama_api_url()
-
     system_prompt = (
         "You are an expert contract analyst specializing in DFARS, NIST 800-171, and risk identification. "
         "Be conservative and do not hallucinate."
     )
 
-    if _is_chat_endpoint(url):
+    if _is_chat_endpoint(s.api_url):
         payload = {
-            "model": model,
+            "model": s.model,
             "messages": [
                 {"role": "system", "content": _clip_text(system_prompt, 7000)},
                 {"role": "user", "content": _safe_json_dumps(user_payload, 9000)},
@@ -278,18 +199,18 @@ async def call_llm_for_review(req) -> str:
         }
     else:
         payload = {
-            "model": model,
+            "model": s.model,
             "prompt": f"{_clip_text(system_prompt, 7000)}\n\nUSER_PAYLOAD_JSON:\n{_safe_json_dumps(user_payload, 9000)}\n",
             "temperature": getattr(req, "temperature", None) or 0.2,
             "stream": False,
         }
 
-    content, input_tokens, output_tokens = await _ollama_post(payload, "contract-review")
+    content, input_tokens, output_tokens = await _llm_post(payload, "contract-review")
     _log_llm_event(
         app="contract_review",
         endpoint="/analyze",
-        provider="local_ollama",
-        model=model,
+        provider=s.provider,
+        model=s.model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
     )
@@ -297,6 +218,8 @@ async def call_llm_for_review(req) -> str:
 
 
 async def call_llm_question_single(question: str, similar_bank_entries: list) -> str:
+    s = get_settings().llm
+
     bank_items = [
         {
             "id": getattr(e, "id", None),
@@ -317,12 +240,9 @@ async def call_llm_question_single(question: str, similar_bank_entries: list) ->
         "instructions": "Return ONLY the answer text (no JSON, no explanation).",
     }
 
-    model = _get_default_model()
-    url = _get_ollama_api_url()
-
-    if _is_chat_endpoint(url):
+    if _is_chat_endpoint(s.api_url):
         payload = {
-            "model": model,
+            "model": s.model,
             "messages": [
                 {"role": "system", "content": "Answer conservatively using NIST/DFARS guidance. Return ONLY answer text."},
                 {"role": "user", "content": _safe_json_dumps(user_payload, 7000)},
@@ -332,18 +252,18 @@ async def call_llm_question_single(question: str, similar_bank_entries: list) ->
         }
     else:
         payload = {
-            "model": model,
+            "model": s.model,
             "prompt": f"Answer conservatively using NIST/DFARS guidance. Return ONLY answer text.\n\n{_safe_json_dumps(user_payload, 7000)}",
             "temperature": 0.2,
             "stream": False,
         }
 
-    content, input_tokens, output_tokens = await _ollama_post(payload, "questionnaire-single")
+    content, input_tokens, output_tokens = await _llm_post(payload, "questionnaire-single")
     _log_llm_event(
         app="questionnaire_single",
         endpoint="/questionnaires/analyze",
-        provider="local_ollama",
-        model=model,
+        provider=s.provider,
+        model=s.model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
     )
@@ -351,6 +271,8 @@ async def call_llm_question_single(question: str, similar_bank_entries: list) ->
 
 
 async def call_llm_question_batch(questions_payload: list, knowledge_context: str) -> dict:
+    s = get_settings().llm
+
     user_payload = {
         "questions": questions_payload,
         "knowledge_context": _clip_text(knowledge_context or "", 6000),
@@ -362,12 +284,9 @@ async def call_llm_question_batch(questions_payload: list, knowledge_context: st
         ),
     }
 
-    model = _get_default_model()
-    url = _get_ollama_api_url()
-
-    if _is_chat_endpoint(url):
+    if _is_chat_endpoint(s.api_url):
         payload = {
-            "model": model,
+            "model": s.model,
             "messages": [
                 {"role": "system", "content": "Respond ONLY with strict JSON. No explanations."},
                 {"role": "user", "content": _safe_json_dumps(user_payload, 9000)},
@@ -377,13 +296,13 @@ async def call_llm_question_batch(questions_payload: list, knowledge_context: st
         }
     else:
         payload = {
-            "model": model,
+            "model": s.model,
             "prompt": f"Respond ONLY with strict JSON. No explanations.\n\n{_safe_json_dumps(user_payload, 9000)}",
             "temperature": 0.2,
             "stream": False,
         }
 
-    raw, input_tokens, output_tokens = await _ollama_post(payload, "questionnaire-batch")
+    raw, input_tokens, output_tokens = await _llm_post(payload, "questionnaire-batch")
 
     cleaned = raw.replace("```json", "").replace("```JSON", "").replace("```", "").strip()
     try:
@@ -423,8 +342,8 @@ async def call_llm_question_batch(questions_payload: list, knowledge_context: st
     _log_llm_event(
         app="questionnaire_batch",
         endpoint="/questionnaires/analyze",
-        provider="local_ollama",
-        model=model,
+        provider=s.provider,
+        model=s.model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
     )
