@@ -404,6 +404,7 @@ app.include_router(health_router)
 #   /questionnaires
 #   /questionnaires/{session_id}
 app.include_router(questionnaire_sessions_router)
+app.include_router(questionnaire_sessions_router, prefix="/api")
 
 # All functional API routers mounted under /api/*
 app.include_router(flags_router, prefix="/api")
