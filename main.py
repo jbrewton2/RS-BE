@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import os
 from core.settings import get_settings
 from io import BytesIO
@@ -42,83 +44,8 @@ from health.router import router as health_router
 # FastAPI app
 # ---------------------------------------------------------------------
 
-app = FastAPI(
-    title="Contract Security Studio Backend",
-)
-
-# Providers (Phase 0.5): attach provider container to app.state
-app.state.providers = init_providers()
-
-# CORS:
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ---------------------------------------------------------------------
-# Startup safety net: seed StorageProvider stores once (future-proof)
-# ---------------------------------------------------------------------
-
-
-def _pg_connect_for_startup():
-    """
-    Short-lived DB connection helper for startup tasks.
-    Uses env vars (works for Azure sidecar Postgres).
-    """
-    s = get_settings()
-    host = s.db.host
-    port = int(s.db.port)
-    db = s.db.database
-    user = s.db.user
-    pw = s.db.password
-    # Try psycopg (new) then psycopg2 (old)
-    try:
-        import psycopg  # type: ignore
-
-        return psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw)
-    except Exception:
-        import psycopg2  # type: ignore
-
-        return psycopg2.connect(host=host, port=port, dbname=db, user=user, password=pw)
-
-
-def _ensure_pgvector_extension():
-    """
-    Bulletproof pgvector enablement.
-    If VECTOR_STORE=pgvector, ensure CREATE EXTENSION IF NOT EXISTS vector; runs once at startup.
-    Safe/idempotent. If DB not ready, fail soft.
-    """
-    if (get_settings().vector.provider or '').lower() != 'pgvector':
-        return
-
-    try:
-        conn = _pg_connect_for_startup()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            try:
-                conn.commit()
-            except Exception:
-                pass
-        finally:
-            conn.close()
-    except Exception:
-        # Fail soft: DB may not be ready yet; vector health can still create it later.
-        pass
-
-
-@app.on_event("startup")
-async def _ensure_storage_seeded():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """
     Ensure provider-backed store files exist under:
       - stores/*.json
@@ -202,6 +129,83 @@ async def _ensure_storage_seeded():
                 except Exception:
                     pass
     except Exception:
+        pass
+
+    yield
+
+app = FastAPI(
+    title="Contract Security Studio Backend",
+    lifespan=lifespan,
+)
+
+# Providers (Phase 0.5): attach provider container to app.state
+app.state.providers = init_providers()
+
+# CORS:
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------------------------------------------------------------
+# Startup safety net: seed StorageProvider stores once (future-proof)
+# ---------------------------------------------------------------------
+
+
+def _pg_connect_for_startup():
+    """
+    Short-lived DB connection helper for startup tasks.
+    Uses env vars (works for Azure sidecar Postgres).
+    """
+    s = get_settings()
+    host = s.db.host
+    port = int(s.db.port)
+    db = s.db.database
+    user = s.db.user
+    pw = s.db.password
+    # Try psycopg (new) then psycopg2 (old)
+    try:
+        import psycopg  # type: ignore
+
+        return psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw)
+    except Exception:
+        import psycopg2  # type: ignore
+
+        return psycopg2.connect(host=host, port=port, dbname=db, user=user, password=pw)
+
+
+def _ensure_pgvector_extension():
+    """
+    Bulletproof pgvector enablement.
+    If VECTOR_STORE=pgvector, ensure CREATE EXTENSION IF NOT EXISTS vector; runs once at startup.
+    Safe/idempotent. If DB not ready, fail soft.
+    """
+    if (get_settings().vector.provider or '').lower() != 'pgvector':
+        return
+
+    try:
+        conn = _pg_connect_for_startup()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        finally:
+            conn.close()
+    except Exception:
+        # Fail soft: DB may not be ready yet; vector health can still create it later.
         pass
 
 
@@ -312,7 +316,7 @@ async def api_extract(request: Request, file: UploadFile = File(...)):
 
 
 # ---------------------------------------------------------------------
-# Legacy /analyze (direct LLM call) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â kept for compatibility
+# Legacy /analyze (direct LLM call) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â kept for compatibility
 # ---------------------------------------------------------------------
 
 
