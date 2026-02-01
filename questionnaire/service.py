@@ -8,6 +8,7 @@ from typing import List, Dict, Optional, Any
 
 from datetime import datetime
 from fastapi import HTTPException
+from core.providers import providers_from_request
 
 from questionnaire.models import (
     QuestionnaireQuestionModel,
@@ -312,7 +313,7 @@ async def analyze_questionnaire(
             overall_confidence=None,
         )
 
-    bank_entries = load_question_bank()
+    bank_entries = load_question_bank(storage)
     print(
         "[QUESTIONNAIRE] analyze_questionnaire: loaded "
         f"{len(bank_entries)} bank entries"
@@ -376,7 +377,7 @@ async def analyze_questionnaire(
     )
 
     # Persist bank usage changes
-    save_question_bank(bank_entries)
+    save_question_bank(storage, bank_entries)
 
     # -----------------------------------------------------------------
     # Pass 2: batch LLM (best-effort with timeout)
@@ -574,4 +575,6 @@ async def analyze_questionnaire(
         questions=questions,
         overall_confidence=overall,
     )
+
+
 

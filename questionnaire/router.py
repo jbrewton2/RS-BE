@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends  # ✅ auth
+from core.providers import providers_from_request
 
 from questionnaire.models import (
     QuestionnaireAnalyzeRequest,
@@ -85,7 +86,7 @@ def _upsert_bank_entry(payload: QuestionBankUpsertModel) -> QuestionBankEntryMod
 
     All text fields are normalized before saving.
     """
-    bank = load_question_bank()
+    bank = load_question_bank(storage)
 
     # Normalize incoming payload fields
     text = normalize_text(payload.text or "")
@@ -118,7 +119,7 @@ def _upsert_bank_entry(payload: QuestionBankUpsertModel) -> QuestionBankEntryMod
                     }
                 )
                 bank[idx] = updated
-                save_question_bank(bank)
+                save_question_bank(storage, bank)
                 return updated
 
     # Create new
@@ -133,7 +134,7 @@ def _upsert_bank_entry(payload: QuestionBankUpsertModel) -> QuestionBankEntryMod
         variants=variants,
     )
     bank.append(new_entry)
-    save_question_bank(bank)
+    save_question_bank(storage, bank)
     return new_entry
 
 
@@ -149,7 +150,7 @@ async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest):
 
     All text fields are normalized before being written into the bank.
     """
-    bank = load_question_bank()
+    bank = load_question_bank(storage)
     updated_entry: Optional[QuestionBankEntryModel] = None
 
     # Locate existing bank entry if we have a matched_bank_id
@@ -171,7 +172,7 @@ async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest):
             if reason:
                 existing.rejection_reasons.append(reason)
                 existing.last_feedback = reason
-                save_question_bank(bank)
+                save_question_bank(storage, bank)
         return {"ok": True, "updated_bank_entry": None}
 
     # ------------------------------------------
@@ -181,7 +182,7 @@ async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest):
         if existing:
             existing.usage_count += 1
             existing.last_used_at = now_iso
-            save_question_bank(bank)
+            save_question_bank(storage, bank)
         return {"ok": True, "updated_bank_entry": None}
 
     # ------------------------------------------
@@ -241,7 +242,7 @@ async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest):
             # Do not fail feedback endpoint if variant generation fails
             print("[QUESTIONNAIRE] Failed to generate variants:", exc)
 
-    save_question_bank(bank)
+    save_question_bank(storage, bank)
     return {"ok": True, "updated_bank_entry": updated_entry}
 
 
@@ -252,7 +253,7 @@ async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest):
 
 @router.get("/bank", response_model=List[QuestionBankEntryModel])
 async def get_questionnaire_bank_route():
-    return load_question_bank()
+    return load_question_bank(storage)
 
 
 @router.post("/bank", response_model=QuestionBankEntryModel)
@@ -267,7 +268,7 @@ async def upsert_questionnaire_bank_route(entry: QuestionBankUpsertModel):
 
 @question_bank_router.get("/question-bank", response_model=List[QuestionBankEntryModel])
 async def get_question_bank_route():
-    return load_question_bank()
+    return load_question_bank(storage)
 
 
 @question_bank_router.post("/question-bank", response_model=QuestionBankEntryModel)
@@ -277,10 +278,12 @@ async def upsert_question_bank_route(entry: QuestionBankUpsertModel):
 
 @question_bank_router.delete("/question-bank/{entry_id}")
 async def delete_question_bank_entry_route(entry_id: str):
-    bank = load_question_bank()
+    bank = load_question_bank(storage)
     new_bank = [b for b in bank if b.id != entry_id]
     if len(new_bank) == len(bank):
         raise HTTPException(status_code=404, detail="Bank entry not found")
-    save_question_bank(new_bank)
+    save_question_bank(storage, new_bank)
     return {"ok": True}
+
+
 
