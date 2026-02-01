@@ -47,19 +47,6 @@ AUTH_DEP = _auth_dep()
 # Test hook (DO NOT REMOVE)
 # pytest monkeypatch expects: questionnaire.sessions_router.get_providers
 # ---------------------------------------------------------------------------
-def get_providers(request: Request | None = None):
-    """
-    Test seam + runtime accessor.
-
-    - If request is provided, use request.app.state.providers (runtime truth).
-    - Otherwise fall back to the legacy test seam _real_get_providers() which pytest can monkeypatch.
-    """
-    if request is not None:
-        return providers_from_request(request)
-    return _real_get_providers()
-# ---------------------------------------------------------------------------
-# Legacy normalization helpers
-# ---------------------------------------------------------------------------
 def _normalize_tags(value: Any) -> List[str]:
     """
     Legacy can be:
