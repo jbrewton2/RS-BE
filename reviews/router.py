@@ -1,10 +1,10 @@
-# backend/reviews/router.py
+﻿# backend/reviews/router.py
 from __future__ import annotations
 
 import json
 import os
 from typing import List, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from schemas import AnalyzeRequestModel, AnalyzeResponseModel
 from core.llm_client import call_llm_for_review
 from flags.service import scan_text_for_flags
@@ -24,7 +24,7 @@ router = APIRouter(
 # File helpers
 # ---------------------------------------------------------------------
 
-def _read_reviews_file() -> List[Dict[str, Any]]:
+def _read_reviews_file(storage) -> List[Dict[str, Any]]:
     """Load reviews.json as a list of dicts.
 
     Preferred: StorageProvider key "stores/reviews.json"
@@ -34,7 +34,7 @@ def _read_reviews_file() -> List[Dict[str, Any]]:
 
     # 1) StorageProvider (preferred)
     try:
-        storage = _providers().storage
+    # storage injected by caller (request.app.state.providers.storage)
         raw = storage.get_object(key).decode("utf-8", errors="ignore")
         data = json.loads(raw) if raw.strip() else []
         return data if isinstance(data, list) else []
@@ -52,13 +52,13 @@ def _read_reviews_file() -> List[Dict[str, Any]]:
         return []
 
 
-def _write_reviews_file(reviews: List[Dict[str, Any]]) -> None:
+def _write_reviews_file(reviews: List[Dict[str, Any]], storage) -> None:
     """Persist reviews.json via StorageProvider.
 
     Storage key: stores/reviews.json
     """
     key = "stores/reviews.json"
-    storage = _providers().storage
+    # storage injected by caller (request.app.state.providers.storage)
     try:
         payload = json.dumps(reviews, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
         storage.put_object(key=key, data=payload, content_type="application/json", metadata=None)
@@ -171,7 +171,7 @@ def _attach_auto_flags_to_review(review: Dict[str, Any]) -> Dict[str, Any]:
 @router.get("")
 async def list_reviews():
     """Return the full list of saved reviews."""
-    return _read_reviews_file()
+    return _read_reviews_file(storage)
 
 
 # ---------------------------------------------------------------------
@@ -180,8 +180,9 @@ async def list_reviews():
 
 
 @router.post("")
-async def upsert_review(review: Dict[str, Any]):
+async def upsert_review(request: Request, review: Dict[str, Any]):
     """
+    storage = request.app.state.providers.storage
     Upsert a review AND auto-generate backend flags.
 
     autoFlags structure:
@@ -202,7 +203,7 @@ async def upsert_review(review: Dict[str, Any]):
     review = _attach_auto_flags_to_review(review)
 
     # Upsert into reviews.json
-    reviews = _read_reviews_file()
+    reviews = _read_reviews_file(storage)
     idx = next(
         (i for i, r in enumerate(reviews) if r.get("id") == review["id"]),
         None,
@@ -213,7 +214,7 @@ async def upsert_review(review: Dict[str, Any]):
     else:
         reviews[idx] = review
 
-    _write_reviews_file(reviews)
+    _write_reviews_file(reviews, storage)
     return review
 
 
@@ -254,12 +255,16 @@ async def analyze_review(req: AnalyzeRequestModel):
 
 @router.delete("/{review_id}")
 async def delete_review(review_id: str):
-    reviews = _read_reviews_file()
+    storage = request.app.state.providers.storage
+    reviews = _read_reviews_file(storage)
     new_list = [r for r in reviews if r.get("id") != review_id]
     if len(new_list) == len(reviews):
         raise HTTPException(status_code=404, detail="Review not found")
-    _write_reviews_file(new_list)
+    _write_reviews_file(new_list, storage)
     return {"ok": True}
+
+
+
 
 
 
