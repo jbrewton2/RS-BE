@@ -1,4 +1,4 @@
-﻿# backend/reviews/router.py
+# backend/reviews/router.py
 from __future__ import annotations
 
 import json
@@ -12,6 +12,8 @@ from core.config import REVIEWS_FILE
 from fastapi import Depends
 from auth.jwt import get_current_user
 
+
+from core.providers import providers_from_request
 
 router = APIRouter(
     prefix="/reviews",
@@ -169,11 +171,11 @@ def _attach_auto_flags_to_review(review: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @router.get("")
-async def list_reviews():
+async def list_reviews(request: Request):
+    providers = providers_from_request(request)
+    storage = providers.storage
     """Return the full list of saved reviews."""
     return _read_reviews_file(storage)
-
-
 # ---------------------------------------------------------------------
 # POST /reviews  (UPSERT + autoFlag backend scan)
 # ---------------------------------------------------------------------
@@ -181,6 +183,8 @@ async def list_reviews():
 
 @router.post("")
 async def upsert_review(request: Request, review: Dict[str, Any]):
+    providers = providers_from_request(request)
+    storage = providers.storage
     """
     storage = request.app.state.providers.storage
     Upsert a review AND auto-generate backend flags.
