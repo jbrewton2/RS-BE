@@ -1,4 +1,4 @@
-﻿# backend/knowledge/router.py
+# backend/knowledge/router.py
 from __future__ import annotations
 
 from io import BytesIO
@@ -15,6 +15,8 @@ from knowledge.service import list_docs, get_doc, save_doc
 
 # âœ… AUTH
 from auth.jwt import get_current_user
+
+from core.providers import providers_from_request
 
 router = APIRouter(
     prefix="/knowledge",
@@ -176,8 +178,9 @@ async def upload_knowledge_doc_route(
     if tags:
         parts = [t.strip() for t in tags.split(",")]
         tag_list = [p for p in parts if p]
-
-    meta = save_doc(
+    providers = providers_from_request(request)
+    storage = providers.storage
+    meta = save_doc(storage,
         filename=file.filename or "uploaded",
         text=text,
         doc_type=doc_type,

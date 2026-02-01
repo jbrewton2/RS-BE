@@ -1,4 +1,4 @@
-﻿# backend/knowledge/service.py
+# backend/knowledge/service.py
 from __future__ import annotations
 
 import json
@@ -82,8 +82,7 @@ def get_doc(doc_id: str) -> KnowledgeDocMeta:
     raise HTTPException(status_code=404, detail="Knowledge document not found")
 
 
-def save_doc(
-    filename: str,
+def save_doc(storage, filename: str,
     text: str,
     doc_type: str | None = None,
     tags: List[str] | None = None,
@@ -100,7 +99,7 @@ def save_doc(
     safe_name = f"{new_id}.txt"
 
     # Store extracted text via StorageProvider (preferred)
-    storage = get_providers().storage
+    # storage injected by caller
     key = f"knowledge_docs/{safe_name}"
 
     try:
@@ -160,7 +159,7 @@ def _load_knowledge_doc_text(doc_meta: KnowledgeDocMeta) -> str:
     """
     # 1) StorageProvider (preferred)
     try:
-        storage = get_providers().storage
+    # storage injected by caller
         key = f"knowledge_docs/{doc_meta.filename}"
         data = storage.get_object(key)
         return data.decode("utf-8", errors="ignore")

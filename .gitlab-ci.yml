@@ -85,3 +85,9 @@ build_and_push_backend:
         docker tag "$IMAGE:$SHA_TAG" "$IMAGE:$CI_COMMIT_TAG"
         docker push "$IMAGE:$CI_COMMIT_TAG"
       fi
+provider_drift_guard:
+  stage: test
+  image: alpine:3.20
+  script:
+    - echo "Fail if forbidden provider patterns exist"
+    - '! grep -R --line-number --exclude-dir=.git --exclude-dir=test -E "(_providers\(|get_providers\()" .'
