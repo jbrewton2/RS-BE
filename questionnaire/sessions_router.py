@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from core.providers import providers_from_request
 from fastapi.responses import JSONResponse
 
 # NOTE: get_providers must remain importable for pytest monkeypatch
@@ -137,8 +138,8 @@ def _normalize_session(sess: Dict[str, Any]) -> Dict[str, Any]:
 # Routes
 # ---------------------------------------------------------------------------
 @router.get("/questionnaires", dependencies=[Depends(AUTH_DEP)])
-def list_questionnaires():
-    providers = get_providers()
+def list_questionnaires(request: Request):
+    providers = providers_from_request(request)
     storage = providers.storage
 
     try:
@@ -155,8 +156,8 @@ def list_questionnaires():
 
 
 @router.get("/questionnaires/{session_id}", dependencies=[Depends(AUTH_DEP)])
-def get_questionnaire(session_id: str):
-    providers = get_providers()
+def get_questionnaire(request: Request, session_id: str):
+    providers = providers_from_request(request)
     storage = providers.storage
 
     try:
