@@ -47,6 +47,9 @@ AUTH_DEP = _auth_dep()
 # Test hook (DO NOT REMOVE)
 # pytest monkeypatch expects: questionnaire.sessions_router.get_providers
 # ---------------------------------------------------------------------------
+def get_providers(request: Request | None = None):
+    """
+    Test seam + runtime accessor.
 
     - If request is provided, use request.app.state.providers (runtime truth).
     - Otherwise fall back to the legacy test seam _real_get_providers() which pytest can monkeypatch.
@@ -176,6 +179,5 @@ def get_questionnaire(request: Request, session_id: str):
             return JSONResponse(content=_normalize_session(sess))
 
     return JSONResponse(status_code=404, content={"detail": "Not found"})
-
 
 
