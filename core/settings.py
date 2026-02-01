@@ -47,6 +47,21 @@ def _env_csv_floats(name: str, default: List[float]) -> List[float]:
     return out or default
 
 
+def _split_csv(value: str) -> List[str]:
+    return [x.strip() for x in (value or "").split(",") if x.strip()]
+
+
+def _split_scopes(value: str) -> List[str]:
+    """
+    Accept:
+      - "scope1 scope2"
+      - "scope1,scope2"
+      - "scope1, scope2"
+    """
+    raw = (value or "").replace(",", " ").strip()
+    return [x.strip() for x in raw.split() if x.strip()]
+
+
 @dataclass(frozen=True)
 class LLMSettings:
     # provider is an implementation selector (ollama today, bedrock tomorrow, etc.)
@@ -66,8 +81,27 @@ class StorageSettings:
 
 
 @dataclass(frozen=True)
+class EntraAuthSettings:
+    tenant_id: str
+    authority: str
+    issuer_allowlist: List[str]
+    audience_allowlist: List[str]
+    required_scopes: List[str]
+
+
+@dataclass(frozen=True)
+class KeycloakAuthSettings:
+    issuer: str
+    issuer_allowed: List[str]
+    client_id: str
+
+
+@dataclass(frozen=True)
 class AuthSettings:
     provider: str
+    entra: EntraAuthSettings
+    keycloak: KeycloakAuthSettings
+
 
 @dataclass(frozen=True)
 class DBSettings:
@@ -81,6 +115,15 @@ class DBSettings:
 @dataclass(frozen=True)
 class VectorSettings:
     provider: str  # disabled | pgvector | opensearch (future)
+
+
+@dataclass(frozen=True)
+class Settings:
+    llm: LLMSettings
+    storage: StorageSettings
+    auth: AuthSettings
+    db: DBSettings
+    vector: VectorSettings
 
 
 def _load_db_settings() -> DBSettings:
@@ -102,13 +145,7 @@ def _load_vector_settings() -> VectorSettings:
     provider = (_env("VECTOR_STORE", "") or _env("VECTOR_PROVIDER", "") or "disabled").strip().lower()
     return VectorSettings(provider=provider)
 
-@dataclass(frozen=True)
-class Settings:
-    llm: LLMSettings
-    storage: StorageSettings
-    auth: AuthSettings
-    db: DBSettings
-    vector: VectorSettings
+
 def _load_llm_settings() -> LLMSettings:
     # New canonical env names (provider-agnostic)
     provider = (_env("LLM_PROVIDER", "") or _env("OLLAMA_PROVIDER", "") or "ollama").strip().lower()
@@ -159,9 +196,69 @@ def _load_storage_settings() -> StorageSettings:
     return StorageSettings(provider=provider)
 
 
+def _load_entra_auth_settings() -> EntraAuthSettings:
+    tenant_id = (_env("ENTRA_TENANT_ID", "") or "").strip()
+
+    raw_authority = (_env("ENTRA_AUTHORITY", "") or "").strip()
+    if raw_authority:
+        authority = raw_authority.rstrip("/")
+    elif tenant_id:
+        authority = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
+    else:
+        authority = ""
+
+    raw_issuers = (_env("ENTRA_ISSUER_ALLOWLIST", "") or "").strip()
+    if raw_issuers:
+        issuer_allowlist = [x.rstrip("/") for x in _split_csv(raw_issuers)]
+    else:
+        issuer_allowlist = [authority] if authority else []
+
+    raw_aud = (_env("ENTRA_AUDIENCE_ALLOWLIST", "") or "").strip()
+    audience_allowlist = [x.strip() for x in _split_csv(raw_aud)]
+
+    raw_scopes = (_env("ENTRA_REQUIRED_SCOPES", "") or "").strip()
+    required_scopes = _split_scopes(raw_scopes)
+
+    return EntraAuthSettings(
+        tenant_id=tenant_id,
+        authority=authority,
+        issuer_allowlist=issuer_allowlist,
+        audience_allowlist=audience_allowlist,
+        required_scopes=required_scopes,
+    )
+
+
+def _load_keycloak_auth_settings() -> KeycloakAuthSettings:
+    issuer = (_env("KEYCLOAK_ISSUER", "http://keycloak:8080/realms/css-local") or "").rstrip("/")
+
+    raw_allowed = (_env("KEYCLOAK_ISSUER_ALLOWED", "") or "").strip()
+    if raw_allowed:
+        issuer_allowed = [x.strip().rstrip("/") for x in _split_csv(raw_allowed)]
+    else:
+        internal = issuer
+        external = internal.replace("http://keycloak:8080", "http://localhost:8090")
+        out: List[str] = []
+        for x in [internal, external]:
+            if x and x not in out:
+                out.append(x)
+        issuer_allowed = out
+
+    client_id = (_env("KEYCLOAK_CLIENT_ID", "css-frontend") or "css-frontend").strip()
+
+    return KeycloakAuthSettings(
+        issuer=issuer,
+        issuer_allowed=issuer_allowed,
+        client_id=client_id,
+    )
+
+
 def _load_auth_settings() -> AuthSettings:
     provider = (_env("AUTH_PROVIDER", "") or "keycloak").strip().lower()
-    return AuthSettings(provider=provider)
+    return AuthSettings(
+        provider=provider,
+        entra=_load_entra_auth_settings(),
+        keycloak=_load_keycloak_auth_settings(),
+    )
 
 
 @lru_cache(maxsize=1)
