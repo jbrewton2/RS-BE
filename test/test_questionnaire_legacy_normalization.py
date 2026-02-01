@@ -24,24 +24,31 @@ def fake_storage(monkeypatch):
         def get_object(self, key: str) -> bytes:
             return self.data.get(key, b"[]")
 
-        def put_object(self, key: str, data: bytes, content_type=None, metadata=None):
+        def put_object(self, key: str, data: bytes, content_type: str = "application/json", metadata=None):
             self.data[key] = data
 
-        def head_object(self, key: str):
+        def head_object(self, key: str) -> None:
             if key not in self.data:
                 raise FileNotFoundError(key)
 
         def delete_object(self, key: str) -> None:
-            self.data.pop(key, None)
+            if key in self.data:
+                del self.data[key]
 
     fake = FakeStorage()
 
     class FakeProviders:
         storage = fake
 
-    monkeypatch.setattr("questionnaire.sessions_router.get_providers", lambda: FakeProviders())
-    return fake
+    # Canonical seam: request.app.state.providers (runtime truth)
+    app.state.providers = FakeProviders()
 
+    try:
+        yield fake
+    finally:
+        # Prevent cross-test leakage
+        if hasattr(app.state, "providers"):
+            delattr(app.state, "providers")
 
 def _legacy_session() -> Dict[str, Any]:
     return {
@@ -88,3 +95,5 @@ def test_legacy_questionnaire_session_normalizes_and_loads(fake_storage):
     assert q["status"] == "auto_approved"
     assert isinstance(q["confidence"], float)
     assert q["tags"] == ["encryption", "security"]
+
+
