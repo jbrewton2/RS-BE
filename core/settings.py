@@ -64,7 +64,6 @@ def _split_scopes(value: str) -> List[str]:
 
 @dataclass(frozen=True)
 class LLMSettings:
-    # provider is an implementation selector (ollama today, bedrock tomorrow, etc.)
     provider: str
     api_url: str
     model: str
@@ -76,7 +75,6 @@ class LLMSettings:
 
 @dataclass(frozen=True)
 class StorageSettings:
-    # provider is an implementation selector (local today, object_store tomorrow)
     provider: str
 
 
@@ -97,10 +95,20 @@ class KeycloakAuthSettings:
 
 
 @dataclass(frozen=True)
+class OIDCAuthSettings:
+    issuer: str
+    jwks_url: str
+    issuer_allowlist: List[str]
+    audience_allowlist: List[str]
+    required_scopes: List[str]
+
+
+@dataclass(frozen=True)
 class AuthSettings:
     provider: str
     entra: EntraAuthSettings
     keycloak: KeycloakAuthSettings
+    oidc: OIDCAuthSettings
 
 
 @dataclass(frozen=True)
@@ -127,14 +135,12 @@ class Settings:
 
 
 def _load_db_settings() -> DBSettings:
-    # Canonical env names (keep PG* for compatibility because it's already what you use)
     host = (_env("PGHOST", "localhost")).strip()
     port = _env_int("PGPORT", 5432)
     user = (_env("PGUSER", "postgres")).strip()
     password = _env("PGPASSWORD", "")
     database = (_env("PGDATABASE", "postgres")).strip()
 
-    # clamp/sanity
     if port <= 0:
         port = 5432
 
@@ -147,10 +153,8 @@ def _load_vector_settings() -> VectorSettings:
 
 
 def _load_llm_settings() -> LLMSettings:
-    # New canonical env names (provider-agnostic)
     provider = (_env("LLM_PROVIDER", "") or _env("OLLAMA_PROVIDER", "") or "ollama").strip().lower()
 
-    # Canonical env keys
     api_url = (_env("LLM_API_URL", "") or "").strip()
     model = (_env("LLM_MODEL", "") or "").strip()
 
@@ -159,7 +163,6 @@ def _load_llm_settings() -> LLMSettings:
     max_attempts = _env_int("LLM_MAX_ATTEMPTS", 2)
     backoff_seconds = _env_csv_floats("LLM_BACKOFF_SECONDS", [0.3])
 
-    # 1-release compatibility mapping from OLLAMA_* if LLM_* not set
     if not api_url:
         api_url = (_env("OLLAMA_API_URL", "") or "http://localhost:11434/api/generate").strip()
     if not model:
@@ -174,7 +177,6 @@ def _load_llm_settings() -> LLMSettings:
     if "LLM_CONNECT_TIMEOUT_SECONDS" not in os.environ and "OLLAMA_CONNECT_TIMEOUT_SECONDS" in os.environ:
         connect_timeout_seconds = _env_float("OLLAMA_CONNECT_TIMEOUT_SECONDS", connect_timeout_seconds)
 
-    # clamp/sanity
     timeout_seconds = max(5.0, float(timeout_seconds))
     connect_timeout_seconds = max(1.0, float(connect_timeout_seconds))
     max_attempts = max(1, min(int(max_attempts), 5))
@@ -245,10 +247,31 @@ def _load_keycloak_auth_settings() -> KeycloakAuthSettings:
 
     client_id = (_env("KEYCLOAK_CLIENT_ID", "css-frontend") or "css-frontend").strip()
 
-    return KeycloakAuthSettings(
+    return KeycloakAuthSettings(issuer=issuer, issuer_allowed=issuer_allowed, client_id=client_id)
+
+
+def _load_oidc_auth_settings() -> OIDCAuthSettings:
+    issuer = (_env("OIDC_ISSUER", "") or "").strip().rstrip("/")
+    jwks_url = (_env("OIDC_JWKS_URL", "") or "").strip()
+
+    raw_issuers = (_env("OIDC_ISSUER_ALLOWLIST", "") or "").strip()
+    if raw_issuers:
+        issuer_allowlist = [x.rstrip("/") for x in _split_csv(raw_issuers)]
+    else:
+        issuer_allowlist = [issuer] if issuer else []
+
+    raw_aud = (_env("OIDC_AUDIENCE_ALLOWLIST", "") or "").strip()
+    audience_allowlist = [x.strip() for x in _split_csv(raw_aud)]
+
+    raw_scopes = (_env("OIDC_REQUIRED_SCOPES", "") or "").strip()
+    required_scopes = _split_scopes(raw_scopes)
+
+    return OIDCAuthSettings(
         issuer=issuer,
-        issuer_allowed=issuer_allowed,
-        client_id=client_id,
+        jwks_url=jwks_url,
+        issuer_allowlist=issuer_allowlist,
+        audience_allowlist=audience_allowlist,
+        required_scopes=required_scopes,
     )
 
 
@@ -258,6 +281,7 @@ def _load_auth_settings() -> AuthSettings:
         provider=provider,
         entra=_load_entra_auth_settings(),
         keycloak=_load_keycloak_auth_settings(),
+        oidc=_load_oidc_auth_settings(),
     )
 
 
