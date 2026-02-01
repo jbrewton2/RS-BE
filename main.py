@@ -35,6 +35,8 @@ from questionnaire.sessions_router import (
     router as questionnaire_sessions_router,
 )
 
+from core.auth_validation import validate_auth_config
+
 # Health router (safe / unauthenticated)
 from health.router import router as health_router
 
@@ -312,7 +314,7 @@ async def api_extract(request: Request, file: UploadFile = File(...)):
 
 
 # ---------------------------------------------------------------------
-# Legacy /analyze (direct LLM call) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â kept for compatibility
+# Legacy /analyze (direct LLM call) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â kept for compatibility
 # ---------------------------------------------------------------------
 
 
