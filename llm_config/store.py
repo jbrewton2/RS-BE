@@ -8,6 +8,7 @@ from typing import Dict, Optional
 from pydantic import BaseModel
 
 from core.config import ORG_POSTURE_SUMMARY
+from core.settings import get_settings
 
 LLM_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "llm_config.json")
 
@@ -20,8 +21,9 @@ class LLMProvider(str, Enum):
 class LLMConfig(BaseModel):
     provider: LLMProvider = LLMProvider.LOCAL_OLLAMA
 
-    local_model: str = os.getenv("OLLAMA_MODEL", "llama3.1")
-    local_api_url: str = os.getenv("OLLAMA_API_URL", "http://localhost:11434/api/chat")
+    # Defaults are injected at runtime (load_llm_config) from core.settings to avoid env reads here.
+    local_model: str = "llama3.1"
+    local_api_url: str = "http://localhost:11434/api/chat"
 
     remote_base_url: Optional[str] = None
     remote_path: str = "/v1/chat/completions"
@@ -44,8 +46,18 @@ def _compute_effective_org_posture(org_posture: Optional[str]) -> str:
 
 
 def load_llm_config() -> LLMConfig:
+    """
+    Persisted config is stored in llm_config.json.
+    If the file does not exist, we create it using canonical settings defaults
+    (core.settings.get_settings), preserving the previous intent of env-driven defaults
+    but without reading env from this module.
+    """
     if not os.path.exists(LLM_CONFIG_PATH):
-        cfg = LLMConfig()
+        s = get_settings()
+        cfg = LLMConfig(
+            local_model=(s.llm.model or "llama3.1"),
+            local_api_url=(s.llm.api_url or "http://localhost:11434/api/chat"),
+        )
         cfg.effective_org_posture = _compute_effective_org_posture(cfg.org_posture)
         save_llm_config(cfg)
         return cfg
