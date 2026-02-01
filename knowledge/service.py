@@ -82,8 +82,7 @@ def get_doc(doc_id: str) -> KnowledgeDocMeta:
     raise HTTPException(status_code=404, detail="Knowledge document not found")
 
 
-def save_doc(
-    filename: str,
+def save_doc(storage, filename: str,
     text: str,
     doc_type: str | None = None,
     tags: List[str] | None = None,
