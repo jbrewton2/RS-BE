@@ -55,3 +55,8 @@ files/knowledge_docs/
 # local-only folders
 seed/
 /_artifacts_*/
+
+# local backups
+*.bak
+*.bak2
+
