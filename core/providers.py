@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from fastapi import Request
 
@@ -6,7 +6,7 @@ def providers_from_request(request: Request):
     """
     Canonical provider accessor for ALL routers.
 
-    Routers should never call globals like get_providers() or _providers().
+    Routers should never call globals like legacy provider accessors or legacy provider accessors.
     Providers are attached once during app startup as request.app.state.providers.
     """
     try:
