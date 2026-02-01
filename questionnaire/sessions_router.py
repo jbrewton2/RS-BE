@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from typing import Any, Dict, List
@@ -167,4 +167,35 @@ def get_questionnaire(request: Request, session_id: str):
 
     return JSONResponse(status_code=404, content={"detail": "Not found"})
 
+
+@router.delete("/questionnaires/{session_id}", dependencies=[Depends(AUTH_DEP)])
+def delete_questionnaire(request: Request, session_id: str):
+    """
+    Delete a questionnaire session from stores/questionnaires.json.
+
+    Canonical storage access: request.app.state.providers.storage
+    """
+    storage = providers_from_request(request).storage
+    key = "stores/questionnaires.json"
+
+    # Load
+    raw = []
+    try:
+        raw_text = storage.get_object(key).decode("utf-8", errors="ignore")
+        candidate = json.loads(raw_text) if raw_text.strip() else []
+        raw = candidate if isinstance(candidate, list) else []
+    except Exception:
+        raw = []
+
+    # Filter
+    before = len(raw)
+    raw = [s for s in raw if str(s.get("id", "")) != str(session_id)]
+    if len(raw) == before:
+        raise HTTPException(status_code=404, detail="Questionnaire not found")
+
+    # Persist
+    payload = json.dumps(raw, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
+    storage.put_object(key=key, data=payload, content_type="application/json", metadata=None)
+
+    return {"ok": True}
 
