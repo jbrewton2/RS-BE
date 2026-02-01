@@ -37,6 +37,8 @@ from questionnaire.sessions_router import (
     router as questionnaire_sessions_router,
 )
 
+from core.auth_validation import validate_auth_config
+
 # Health router (safe / unauthenticated)
 from health.router import router as health_router
 
