@@ -20,7 +20,7 @@ from core.config import PdfReader, docx, FILES_DIR, KNOWLEDGE_DOCS_DIR
 # Schemas & LLM review handler (legacy /analyze)
 from schemas import AnalyzeRequestModel, AnalyzeResponseModel
 from core.llm_client import call_llm_for_review
-from core.providers_root import init_providers
+from core.providers import init_providers
 
 # Routers
 from flags.router import router as flags_router
@@ -141,8 +141,7 @@ app = FastAPI(
 )
 
 # Providers (Phase 0.5): attach provider container to app.state
-app.state.providers = init_providers()
-
+app.state.providers = init_providers(app)
 # CORS:
 origins = [
     "http://localhost:5173",
@@ -434,4 +433,6 @@ if __name__ == "__main__":
         port=8000,
         reload=True,
     )
+
+
 

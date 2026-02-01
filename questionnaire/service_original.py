@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from fastapi import HTTPException
+from core.providers import providers_from_request
 
 from .models import (
     QuestionnaireQuestionModel,
@@ -34,7 +35,7 @@ async def analyze_questionnaire(body: QuestionnaireAnalyzeRequest) -> AnalyzeQue
     if not questions:
         return AnalyzeQuestionnaireResponse(raw_text=text, questions=[], overall_confidence=None)
 
-    bank_entries = load_question_bank()
+    bank_entries = load_question_bank(storage)
     BANK_STRONG_THRESHOLD = 0.7
     BANK_WEAK_THRESHOLD = 0.4
 
@@ -115,3 +116,5 @@ async def analyze_questionnaire(body: QuestionnaireAnalyzeRequest) -> AnalyzeQue
         questions=questions,
         overall_confidence=overall_conf if overall_conf > 0 else None,
     )
+
+

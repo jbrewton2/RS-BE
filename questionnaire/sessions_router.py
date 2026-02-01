@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from typing import Any, Dict, List
@@ -46,13 +46,6 @@ AUTH_DEP = _auth_dep()
 # ---------------------------------------------------------------------------
 # Test hook (DO NOT REMOVE)
 # pytest monkeypatch expects: questionnaire.sessions_router.get_providers
-# ---------------------------------------------------------------------------
-def get_providers():
-    return _real_get_providers()
-
-
-# ---------------------------------------------------------------------------
-# Legacy normalization helpers
 # ---------------------------------------------------------------------------
 def _normalize_tags(value: Any) -> List[str]:
     """
@@ -173,3 +166,5 @@ def get_questionnaire(request: Request, session_id: str):
             return JSONResponse(content=_normalize_session(sess))
 
     return JSONResponse(status_code=404, content={"detail": "Not found"})
+
+

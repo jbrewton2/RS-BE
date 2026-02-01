@@ -1,4 +1,4 @@
-# backend/questionnaire/bank.py
+ï»¿# backend/questionnaire/bank.py
 from __future__ import annotations
 
 import json
@@ -29,11 +29,11 @@ def normalize_text(value: Optional[str]) -> str:
     # Unicode normalize
     s = unicodedata.normalize("NFKC", s)
 
-    # Curly single quotes (‘ ’ ‚ ?) -> '
+    # Curly single quotes (â€˜ â€™ â€š ?) -> '
     s = s.replace("\u2018", "'").replace("\u2019", "'") \
          .replace("\u201A", "'").replace("\u201B", "'")
 
-    # Curly double quotes (“ ” „ ?) -> "
+    # Curly double quotes (â€œ â€ â€ž ?) -> "
     s = s.replace("\u201C", '"').replace("\u201D", '"') \
          .replace("\u201E", '"').replace("\u201F", '"')
 
@@ -90,7 +90,7 @@ def _normalize_entry_in_place(entry: QuestionBankEntryModel) -> None:
         entry.status = normalize_text(entry.status)
 
 
-def load_question_bank() -> List[QuestionBankEntryModel]:
+def load_question_bank(storage) -> List[QuestionBankEntryModel]:
     """Load question_bank.json.
 
     Preferred: StorageProvider key "stores/question_bank.json"
@@ -101,7 +101,7 @@ def load_question_bank() -> List[QuestionBankEntryModel]:
     raw = None
     # 1) StorageProvider (preferred)
     try:
-        storage = _providers().storage
+        # storage injected by caller
         raw_text = storage.get_object(key).decode("utf-8", errors="ignore")
         candidate = json.loads(raw_text) if raw_text.strip() else []
         if isinstance(candidate, list):
@@ -131,7 +131,7 @@ def load_question_bank() -> List[QuestionBankEntryModel]:
 
     return entries
 
-def save_question_bank(entries: List[QuestionBankEntryModel]) -> None:
+def save_question_bank(storage, entries: List[QuestionBankEntryModel]) -> None:
     # Normalize before saving (so any updates are also cleaned)
     for e in entries:
         _normalize_entry_in_place(e)
@@ -140,7 +140,7 @@ def save_question_bank(entries: List[QuestionBankEntryModel]) -> None:
 
     # Provider-first store
     key = "stores/question_bank.json"
-    storage = _providers().storage
+        # storage injected by caller
     payload = json.dumps(serializable, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
 
     # 1) StorageProvider (preferred)
@@ -153,6 +153,8 @@ def save_question_bank(entries: List[QuestionBankEntryModel]) -> None:
     # 2) Legacy filesystem fallback
     with open(QUESTION_BANK_PATH, "w", encoding="utf-8") as f:
         json.dump(serializable, f, indent=2, ensure_ascii=False)
+
+
 
 
 
