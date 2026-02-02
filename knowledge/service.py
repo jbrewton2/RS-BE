@@ -205,7 +205,7 @@ def build_context_for_question(
     scored: List[tuple[float, KnowledgeDocMeta]] = []
 
     for meta in docs:
-        text = _load_knowledge_doc_text(meta)
+        text = _load_knowledge_doc_text(meta, storage)
         if not text.strip():
             continue
         doc_tokens = set(text.lower().split())
@@ -223,7 +223,7 @@ def build_context_for_question(
 
     results: List[dict] = []
     for score, meta in top:
-        text = _load_knowledge_doc_text(meta)
+        text = _load_knowledge_doc_text(meta, storage)
         excerpt = text[:1000]  # keep it short; you can refine later
         results.append(
             {

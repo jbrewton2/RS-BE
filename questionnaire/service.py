@@ -1,4 +1,4 @@
-﻿# backend/questionnaire/service.py
+# backend/questionnaire/service.py
 from __future__ import annotations
 
 import asyncio
@@ -348,7 +348,7 @@ async def analyze_questionnaire(
             if best_entry.frameworks:
                 bank_tags.extend(best_entry.frameworks)
 
-        # Strong match → use bank only, no LLM
+        # Strong match ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ use bank only, no LLM
         if best_entry and best_score >= BANK_STRONG:
             q.suggested_answer = best_entry.answer
             q.answer_source = "bank"
@@ -360,14 +360,14 @@ async def analyze_questionnaire(
             best_entry.last_used_at = datetime.utcnow().isoformat() + "Z"
             continue
 
-        # Weak match but LLM disabled → just link bank and tags
+        # Weak match but LLM disabled ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ just link bank and tags
         if not llm_enabled:
             if best_entry and best_score >= BANK_WEAK:
                 q.matched_bank_id = best_entry.id
                 q.tags = _merge_tags(q.tags, bank_tags)
             continue
 
-        # Otherwise we’ll send this one to LLM
+        # Otherwise weÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ll send this one to LLM
         remaining_for_llm.append(q)
 
     print(
