@@ -1,4 +1,4 @@
-# backend/health/router.py
+﻿# backend/health/router.py
 from fastapi import APIRouter
 import httpx
 
@@ -11,14 +11,14 @@ router = APIRouter(tags=["health"])
 # Basic Health
 # ----------------------------
 
-@router.get("/health")
+@router.get("/health", operation_id="health_root")
 def health():
     # Keep this super simple and always unauthenticated
     return {"ok": True}
 
 
 # ALIAS for hosted routing expectations (Front Door routes /api/*)
-@router.get("/api/health")
+@router.get("/api/health", operation_id="health_api_health")
 def api_health():
     # Same response as /health
     return {"ok": True}
