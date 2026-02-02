@@ -1,14 +1,17 @@
-﻿# backend/flags_store.py
+﻿# flags/store.py
 from __future__ import annotations
 
 import json
 import os
 import uuid
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel
 
 FLAGS_FILE = os.path.join(os.path.dirname(__file__), "flags.json")
+
+# Canonical object-store key (MinIO / S3-compatible)
+FLAGS_KEY = "stores/flags.json"
 
 
 class FlagRule(BaseModel):
@@ -89,28 +92,20 @@ def _coerce_flag_dict(raw: dict, group_fallback: Literal["clause", "context"]) -
     return data
 
 
-def load_flags() -> FlagsPayload:
+def _parse_flags_json(raw_text: str) -> FlagsPayload:
     """
-    Load flags from flags.json.
-
-    If file missing/empty/invalid -> return empty buckets.
-    The UI can seed defaults or you can ship a pre-populated flags.json.
+    Parse JSON into FlagsPayload (tolerant).
     """
-    if not os.path.exists(FLAGS_FILE):
+    raw_text = (raw_text or "").strip()
+    if not raw_text:
         return FlagsPayload(clause=[], context=[])
 
     try:
-        with open(FLAGS_FILE, "r", encoding="utf-8") as f:
-            raw = f.read().strip()
+        data = json.loads(raw_text)
     except Exception:
         return FlagsPayload(clause=[], context=[])
 
-    if not raw:
-        return FlagsPayload(clause=[], context=[])
-
-    try:
-        data = json.loads(raw)
-    except Exception:
+    if not isinstance(data, dict):
         return FlagsPayload(clause=[], context=[])
 
     clause_rules: List[FlagRule] = []
@@ -133,16 +128,80 @@ def load_flags() -> FlagsPayload:
     return FlagsPayload(clause=clause_rules, context=context_rules)
 
 
-def save_flags(payload: FlagsPayload) -> None:
-    """
-    Persist flags.json with the given payload.
-    """
+def _load_local_flags() -> FlagsPayload:
+    if not os.path.exists(FLAGS_FILE):
+        return FlagsPayload(clause=[], context=[])
+
+    try:
+        with open(FLAGS_FILE, "r", encoding="utf-8") as f:
+            raw = f.read().strip()
+    except Exception:
+        return FlagsPayload(clause=[], context=[])
+
+    return _parse_flags_json(raw)
+
+
+def _save_local_flags(payload: FlagsPayload) -> None:
     data = {
         "clause": [f.model_dump() for f in (payload.clause or [])],
         "context": [f.model_dump() for f in (payload.context or [])],
     }
     with open(FLAGS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def load_flags(storage: Optional[Any] = None) -> FlagsPayload:
+    """
+    Load flags.
+
+    Preferred (if storage provided): StorageProvider key "stores/flags.json"
+    Fallback: local flags.json packaged with the repo
+    """
+    # 1) StorageProvider (preferred when passed)
+    if storage is not None:
+        try:
+            raw_bytes = storage.get_object(FLAGS_KEY)
+            raw_text = (raw_bytes or b"").decode("utf-8", errors="ignore")
+            parsed = _parse_flags_json(raw_text)
+            # If storage exists but is empty-ish, fall back to local
+            if (parsed.clause or parsed.context):
+                return parsed
+        except Exception:
+            pass
+
+    # 2) Local fallback
+    return _load_local_flags()
+
+
+def save_flags(payload: FlagsPayload, storage: Optional[Any] = None) -> None:
+    """
+    Persist flags.
+
+    Canonical write (if storage provided): write to StorageProvider at stores/flags.json
+    Also best-effort write to local flags.json for backward compatibility.
+    """
+    payload = payload or FlagsPayload(clause=[], context=[])
+
+    data = {
+        "clause": [f.model_dump() for f in (payload.clause or [])],
+        "context": [f.model_dump() for f in (payload.context or [])],
+    }
+    raw = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8", errors="ignore")
+
+    # 1) StorageProvider
+    if storage is not None:
+        storage.put_object(
+            key=FLAGS_KEY,
+            data=raw,
+            content_type="application/json",
+            metadata=None,
+        )
+
+    # 2) Local best-effort
+    try:
+        _save_local_flags(payload)
+    except Exception:
+        pass
 
 
 def new_flag_id() -> str:

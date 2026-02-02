@@ -1,4 +1,5 @@
 ﻿from __future__ import annotations
+from core.deps import get_storage
 
 import csv
 import io
@@ -174,10 +175,10 @@ def _find_hit(
 # GET /flags
 # ---------------------------------------------------------------------
 @router.get("", response_model=FlagsPayload)
-async def get_flags():
+async def get_flags(storage=Depends(get_storage)):
     """Return the current clause/context flag rules."""
     try:
-        return load_flags()
+        return load_flags(storage)
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -189,11 +190,11 @@ async def get_flags():
 # PUT /flags
 # ---------------------------------------------------------------------
 @router.put("", response_model=FlagsPayload)
-async def update_flags(payload: FlagsPayload):
+async def update_flags(payload: FlagsPayload, storage=Depends(get_storage)):
     """Replace the entire flags.json payload."""
     try:
         cleaned = _sanitize_flags_payload(payload)
-        save_flags(cleaned)
+        save_flags(cleaned, storage)
         return cleaned
     except Exception as exc:
         raise HTTPException(
@@ -222,7 +223,7 @@ async def test_flags(payload: Dict[str, object]):
 # POST /flags/import-csv
 # ---------------------------------------------------------------------
 @router.post("/import-csv", response_model=FlagsPayload)
-async def import_flags_from_csv(file: UploadFile = File(...)):
+async def import_flags_from_csv(file: UploadFile = File(...), storage=Depends(get_storage)):
     try:
         data = await file.read()
     except Exception as exc:
@@ -233,7 +234,7 @@ async def import_flags_from_csv(file: UploadFile = File(...)):
 
     text = data.decode("utf-8", errors="ignore")
     reader = csv.DictReader(io.StringIO(text))
-    flags_payload = load_flags()
+    flags_payload = load_flags(storage)
 
     for row in reader:
         group_raw = (row.get("group") or "clause").strip().lower()
@@ -270,7 +271,7 @@ async def import_flags_from_csv(file: UploadFile = File(...)):
         (flags_payload.clause if group == "clause" else flags_payload.context).append(rule)
 
     flags_payload = _sanitize_flags_payload(flags_payload)
-    save_flags(flags_payload)
+    save_flags(flags_payload, storage)
     return flags_payload
 
 
@@ -302,7 +303,7 @@ class FlagExplainResponse(BaseModel):
 
 
 @router.post("/explain", response_model=FlagExplainResponse)
-async def explain_flag_hit(body: FlagExplainRequest):
+async def explain_flag_hit(body: FlagExplainRequest, storage=Depends(get_storage)):
     """
     Deterministic explain path.
 
@@ -335,7 +336,7 @@ async def explain_flag_hit(body: FlagExplainRequest):
         hit_index=body.hit_index,
     )
 
-    flags_payload = load_flags()
+    flags_payload = load_flags(storage)
     rule = next(
         (r for r in (flags_payload.clause + flags_payload.context) if r.id == hit.get("id")),
         None,
@@ -372,5 +373,18 @@ async def explain_flag_hit(body: FlagExplainRequest):
         flaggedText=matched,
         reasoning=reasoning,
     )
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
