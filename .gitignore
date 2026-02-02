@@ -60,3 +60,9 @@ seed/
 *.bak
 *.bak2
 
+
+out/
+
+
+scripts/inspect-providers.ps1
+
