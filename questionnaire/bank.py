@@ -1,18 +1,42 @@
+# questionnaire/bank.py
 from __future__ import annotations
 
 import json
 import os
 import re
+import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
-from core.config import QUESTION_BANK_PATH
 from questionnaire.models import QuestionBankEntryModel
 
-# Canonical storage key (MinIO / S3 via StorageProvider)
+# ---------------------------------------------------------------------
+# Storage key (canonical)
+# ---------------------------------------------------------------------
 QUESTION_BANK_KEY = "stores/question_bank.json"
-SCHEMA_VERSION = 1
+
+# ---------------------------------------------------------------------
+# Legacy filesystem location (used by older builds / seed / fallback)
+#
+# In your container you observed: /app/files/stores/question_bank.json
+# so we mirror that relative layout from repo root.
+# ---------------------------------------------------------------------
+THIS_DIR = os.path.dirname(__file__)
+REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
+LEGACY_BANK_PATH = os.path.abspath(os.path.join(REPO_ROOT, "files", "stores", "question_bank.json"))
+
+# Some older code referenced a path from core.config; if it exists, use it.
+try:
+    from core.config import QUESTION_BANK_PATH as CONFIG_BANK_PATH  # type: ignore
+except Exception:
+    CONFIG_BANK_PATH = None
+
+# Prefer config path if defined and points somewhere (keeps older envs working)
+if isinstance(CONFIG_BANK_PATH, str) and CONFIG_BANK_PATH.strip():
+    QUESTION_BANK_PATH = CONFIG_BANK_PATH
+else:
+    QUESTION_BANK_PATH = LEGACY_BANK_PATH
 
 
 # ---------------------------------------------------------------------
@@ -39,187 +63,212 @@ def normalize_tag(s: str) -> str:
 
 
 # ---------------------------------------------------------------------
-# Internal: parse the store file (supports legacy list OR wrapped schema)
+# Internal helpers
 # ---------------------------------------------------------------------
-def _now_utc_iso() -> str:
+def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _coerce_items(candidate: Any) -> List[Dict[str, Any]]:
-    """
-    Returns a list of item dicts from either:
-      - legacy list: [ {...}, {...} ]
-      - wrapper: { ..., "items": [ {...}, ... ] }
-    """
-    if candidate is None:
-        return []
+def _log(msg: str) -> None:
+    # Keep logs lightweight; only prints when something is off
+    print(f"[QUESTION_BANK] {msg}", file=sys.stderr)
 
-    # legacy list
-    if isinstance(candidate, list):
-        return [x for x in candidate if isinstance(x, dict)]
 
-    # wrapper
+def _parse_bank_json(raw_text: str) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Parses either:
+      A) Wrapper dict: {"schema_version":1, "updated_at":"...", "item_count":N, "items":[...]}
+      B) Legacy list: [{...}, {...}]
+    Returns: (items_list, detected_format)
+    """
+    raw_text = (raw_text or "").strip()
+    if not raw_text:
+        return ([], "empty")
+
+    try:
+        candidate = json.loads(raw_text)
+    except Exception:
+        return ([], "invalid-json")
+
     if isinstance(candidate, dict):
         items = candidate.get("items")
         if isinstance(items, list):
-            return [x for x in items if isinstance(x, dict)]
-        # some older wrappers may have "data" -> list
+            return (items, "wrapper")
+        # Some older shapes used data/items; be tolerant
         data = candidate.get("data")
-        if isinstance(data, list):
-            return [x for x in data if isinstance(x, dict)]
+        if isinstance(data, dict) and isinstance(data.get("items"), list):
+            return (data["items"], "wrapper-data-items")
+        return ([], "dict-unknown")
 
-    return []
+    if isinstance(candidate, list):
+        return (candidate, "legacy-list")
 
-
-def _decode_json_text(raw_text: str) -> Any:
-    if not raw_text or not raw_text.strip():
-        return []
-    # handle accidental UTF-8 BOM
-    raw_text = raw_text.lstrip("\ufeff")
-    return json.loads(raw_text)
+    return ([], "unknown")
 
 
-def _read_from_storage(storage: Any) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """
-    Returns (items, source_note)
-    """
-    try:
-        raw_bytes = storage.get_object(QUESTION_BANK_KEY)
-        raw_text = raw_bytes.decode("utf-8", errors="ignore") if raw_bytes else ""
-        candidate = _decode_json_text(raw_text)
-        return (_coerce_items(candidate), f"storage:{QUESTION_BANK_KEY}")
-    except Exception:
-        return ([], None)
-
-
-def _read_from_filesystem() -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """
-    Legacy filesystem fallback.
-    Expected to be a JSON list OR wrapped schema (we support both).
-    """
-    if not os.path.exists(QUESTION_BANK_PATH):
-        return ([], None)
-
-    try:
-        with open(QUESTION_BANK_PATH, "r", encoding="utf-8") as f:
-            raw_text = f.read()
-        candidate = _decode_json_text(raw_text)
-        return (_coerce_items(candidate), f"file:{QUESTION_BANK_PATH}")
-    except Exception:
-        return ([], None)
-
-
-def load_question_bank(storage: Any) -> List[QuestionBankEntryModel]:
-    """
-    Load Question Bank entries.
-
-    Preferred: StorageProvider key "stores/question_bank.json"
-    Fallback: legacy filesystem QUESTION_BANK_PATH
-
-    Supports two on-disk formats:
-      1) legacy list: [ {...}, {...} ]
-      2) canonical wrapper:
-         {
-           "schema_version": 1,
-           "updated_at": "...Z",
-           "item_count": N,
-           "items": [ {...}, {...} ]
-         }
-    """
-    items: List[Dict[str, Any]] = []
-    source = None
-
-    # 1) StorageProvider (preferred)
-    if storage is not None:
-        items, source = _read_from_storage(storage)
-
-    # 2) Legacy filesystem fallback
-    if not items:
-        items, source2 = _read_from_filesystem()
-        source = source or source2
-
-    entries: List[QuestionBankEntryModel] = []
-    for item in items:
+def _items_to_models(items: List[Dict[str, Any]]) -> List[QuestionBankEntryModel]:
+    out: List[QuestionBankEntryModel] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
         try:
-            entries.append(QuestionBankEntryModel(**item))
+            # tolerate older snake/camel variations
+            # (your models expect snake_case per OpenAPI)
+            normalized = dict(item)
+
+            # common fallbacks
+            if "primaryTag" in normalized and "primary_tag" not in normalized:
+                normalized["primary_tag"] = normalized.get("primaryTag")
+            if "rejectionReasons" in normalized and "rejection_reasons" not in normalized:
+                normalized["rejection_reasons"] = normalized.get("rejectionReasons")
+            if "lastFeedback" in normalized and "last_feedback" not in normalized:
+                normalized["last_feedback"] = normalized.get("lastFeedback")
+            if "usageCount" in normalized and "usage_count" not in normalized:
+                normalized["usage_count"] = normalized.get("usageCount")
+            if "lastUsedAt" in normalized and "last_used_at" not in normalized:
+                normalized["last_used_at"] = normalized.get("lastUsedAt")
+
+            # required fields for model: id, text, answer
+            if not normalized.get("id") or not normalized.get("text") or not normalized.get("answer"):
+                continue
+
+            out.append(QuestionBankEntryModel(**normalized))
         except Exception:
-            # Skip bad entries rather than failing the whole load
+            # skip bad rows, don't crash the app
             continue
 
-    # (Optional) deterministic sort for stability
-    entries.sort(key=lambda e: (e.id or "", normalize_text(getattr(e, "text", ""))[:120]))
-    return entries
+    # Dedup by id (keep the last occurrence)
+    merged: Dict[str, QuestionBankEntryModel] = {}
+    for e in out:
+        merged[e.id] = e
+    return list(merged.values())
 
 
-def _wrap_entries(entries: List[QuestionBankEntryModel]) -> Dict[str, Any]:
-    serializable_items: List[Dict[str, Any]] = []
+def _models_to_wrapper(entries: List[QuestionBankEntryModel]) -> Dict[str, Any]:
+    items = []
     for e in entries:
-        # Pydantic v2 models support model_dump; v1 uses dict()
+        # Pydantic v2 model_dump; fallback to dict
         if hasattr(e, "model_dump"):
-            serializable_items.append(e.model_dump())
-        elif hasattr(e, "dict"):
-            serializable_items.append(e.dict())
+            items.append(e.model_dump())
         else:
-            serializable_items.append(asdict(e))  # unlikely, but safe
+            items.append(asdict(e))  # type: ignore
 
     return {
-        "schema_version": SCHEMA_VERSION,
-        "updated_at": _now_utc_iso(),
-        "item_count": len(serializable_items),
-        "items": serializable_items,
+        "schema_version": 1,
+        "updated_at": _utc_now_iso(),
+        "item_count": len(items),
+        "items": items,
     }
 
 
-def save_question_bank(storage: Any, entries: List[QuestionBankEntryModel]) -> None:
+def _write_local_bank(entries: List[QuestionBankEntryModel]) -> None:
     """
-    Persist Question Bank entries.
-
-    Canonical write:
-      - StorageProvider: writes WRAPPED schema to stores/question_bank.json
-
-    Compatibility write:
-      - Filesystem: writes legacy list to QUESTION_BANK_PATH
-        (helps older code paths / dev debugging)
+    Write a legacy LIST file locally for backward compatibility.
+    This keeps /app/files/stores/question_bank.json refreshed for older tooling.
     """
-    wrapped = _wrap_entries(entries)
-
-    wrapped_bytes = json.dumps(wrapped, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
-    legacy_list_bytes = json.dumps(wrapped["items"], indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
-
-    storage_ok = False
-
-    # 1) StorageProvider write (preferred)
-    if storage is not None:
-        try:
-            storage.put_object(
-                key=QUESTION_BANK_KEY,
-                data=wrapped_bytes,
-                content_type="application/json",
-                metadata=None,
-            )
-            storage_ok = True
-        except Exception:
-            storage_ok = False
-
-    # 2) Filesystem fallback (always try; helpful even when storage works)
     try:
         os.makedirs(os.path.dirname(QUESTION_BANK_PATH), exist_ok=True)
-        with open(QUESTION_BANK_PATH, "wb") as f:
-            f.write(legacy_list_bytes)
+        payload = [e.model_dump() if hasattr(e, "model_dump") else asdict(e) for e in entries]  # type: ignore
+        with open(QUESTION_BANK_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        _log(f"local write failed: {e!r}")
+
+
+# ---------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------
+def load_question_bank(storage) -> List[QuestionBankEntryModel]:
+    """
+    Load question bank.
+
+    Preferred: StorageProvider key "stores/question_bank.json"
+      - supports wrapper schema OR legacy list
+    Fallback: local filesystem (QUESTION_BANK_PATH) legacy list
+
+    Bridge behavior:
+      If storage object exists but contains 0 items AND local file contains items,
+      automatically seed storage with local entries (one-time migration).
+    """
+    storage_items: List[Dict[str, Any]] = []
+    storage_fmt = "none"
+    storage_raw = None
+
+    # 1) StorageProvider (preferred)
+    try:
+        raw_bytes = storage.get_object(QUESTION_BANK_KEY)
+        storage_raw = (raw_bytes or b"").decode("utf-8", errors="ignore")
+        storage_items, storage_fmt = _parse_bank_json(storage_raw)
+    except Exception as e:
+        storage_items, storage_fmt = ([], "storage-miss")
+        # do not spam logs on normal dev cold-starts
+        # _log(f"storage read failed ({QUESTION_BANK_KEY}): {e!r}")
+
+    storage_entries = _items_to_models(storage_items)
+
+    # 2) Local filesystem fallback (legacy list)
+    local_entries: List[QuestionBankEntryModel] = []
+    try:
+        if os.path.exists(QUESTION_BANK_PATH):
+            with open(QUESTION_BANK_PATH, "r", encoding="utf-8") as f:
+                candidate = json.load(f)
+            if isinstance(candidate, list):
+                local_entries = _items_to_models(candidate)
+            elif isinstance(candidate, dict) and isinstance(candidate.get("items"), list):
+                local_entries = _items_to_models(candidate["items"])
     except Exception:
-        pass
+        local_entries = []
 
-    # If storage was expected and failed, don't silently lie.
-    # We don't throw (to avoid breaking runtime), but we at least surface a hint.
-    if storage is not None and not storage_ok:
-        # Keeping this as print to avoid introducing new logging dependencies.
-        print(f"[QUESTION_BANK] WARNING: failed to write to storage key={QUESTION_BANK_KEY}; wrote filesystem fallback only.")
+    # 3) Bridge/migrate if storage is empty but local is not
+    if len(storage_entries) == 0 and len(local_entries) > 0:
+        _log(
+            f"storage bank empty (fmt={storage_fmt}); seeding from local file "
+            f"({len(local_entries)} entries) -> {QUESTION_BANK_KEY}"
+        )
+        try:
+            save_question_bank(storage, local_entries)
+            return local_entries
+        except Exception as e:
+            _log(f"seed to storage failed: {e!r}")
+            # still return local so app functions
+            return local_entries
+
+    # 4) Normal return: prefer storage if it has anything, else local
+    if len(storage_entries) > 0:
+        return storage_entries
+    return local_entries
 
 
-# Convenience: some code paths expect a simple export
-def export_question_bank(storage: Any) -> Dict[str, Any]:
+def save_question_bank(storage, entries: List[QuestionBankEntryModel]) -> None:
     """
-    Returns canonical wrapped schema (same shape we persist).
+    Persist question bank.
+
+    Canonical write:
+      - Write WRAPPER schema to MinIO at stores/question_bank.json
+
+    Also write a legacy LIST to local file for backward compatibility.
     """
-    entries = load_question_bank(storage)
-    return _wrap_entries(entries)
+    # Ensure stable
+    entries = entries or []
+
+    wrapper = _models_to_wrapper(entries)
+    payload_bytes = json.dumps(wrapper, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
+
+    # 1) StorageProvider (preferred)
+    storage_ok = False
+    try:
+        storage.put_object(
+            key=QUESTION_BANK_KEY,
+            data=payload_bytes,
+            content_type="application/json",
+            metadata=None,
+        )
+        storage_ok = True
+    except Exception as e:
+        _log(f"storage write failed ({QUESTION_BANK_KEY}): {e!r}")
+
+    # 2) Local write (legacy list), regardless of storage result
+    _write_local_bank(entries)
+
+    if storage_ok:
+        _log(f"saved {len(entries)} entries to storage key={QUESTION_BANK_KEY} (and local legacy file)")
