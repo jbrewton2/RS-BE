@@ -3,7 +3,8 @@
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends  # ✅ auth
+from fastapi import APIRouter, HTTPException, Depends  # âœ… auth, Request
+from core.deps import StorageDep
 from core.providers import providers_from_request
 
 from questionnaire.models import (
@@ -21,7 +22,7 @@ from questionnaire.bank import (
 )
 from questionnaire.generator import generate_question_variants
 
-# ✅ AUTH
+# âœ… AUTH
 from auth.jwt import get_current_user
 
 # ---------------------------------------------------------------------
@@ -31,12 +32,12 @@ from auth.jwt import get_current_user
 router = APIRouter(
     prefix="/questionnaire",
     tags=["questionnaire"],
-    dependencies=[Depends(get_current_user)],  # ✅ protect all /questionnaire/*
+    dependencies=[Depends(get_current_user)],  # âœ… protect all /questionnaire/*
 )
 
 question_bank_router = APIRouter(
     tags=["question-bank"],
-    dependencies=[Depends(get_current_user)],  # ✅ protect /question-bank/* routes too
+    dependencies=[Depends(get_current_user)],  # âœ… protect /question-bank/* routes too
 )
 
 # ---------------------------------------------------------------------
@@ -45,7 +46,7 @@ question_bank_router = APIRouter(
 
 
 @router.post("/analyze", response_model=AnalyzeQuestionnaireResponse)
-async def questionnaire_analyze_route(body: QuestionnaireAnalyzeRequest):
+async def questionnaire_analyze_route(body: QuestionnaireAnalyzeRequest, storage=StorageDep):
     """
     Analyze a questionnaire body.
 
@@ -144,7 +145,7 @@ def _upsert_bank_entry(payload: QuestionBankUpsertModel) -> QuestionBankEntryMod
 
 
 @router.post("/feedback")
-async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest):
+async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest, storage=StorageDep):
     """
     Record approval / rejection feedback for a single questionnaire answer.
 
@@ -176,7 +177,7 @@ async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest):
         return {"ok": True, "updated_bank_entry": None}
 
     # ------------------------------------------
-    # APPROVED — but user did NOT choose promote
+    # APPROVED â€” but user did NOT choose promote
     # ------------------------------------------
     if payload.approved and not payload.promote_to_bank:
         if existing:
@@ -252,12 +253,12 @@ async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest):
 
 
 @router.get("/bank", response_model=List[QuestionBankEntryModel])
-async def get_questionnaire_bank_route():
+async def get_questionnaire_bank_route(storage=StorageDep):
     return load_question_bank(storage)
 
 
 @router.post("/bank", response_model=QuestionBankEntryModel)
-async def upsert_questionnaire_bank_route(entry: QuestionBankUpsertModel):
+async def upsert_questionnaire_bank_route(entry: QuestionBankUpsertModel, storage=StorageDep):
     return _upsert_bank_entry(entry)
 
 
@@ -267,12 +268,12 @@ async def upsert_questionnaire_bank_route(entry: QuestionBankUpsertModel):
 
 
 @question_bank_router.get("/question-bank", response_model=List[QuestionBankEntryModel])
-async def get_question_bank_route():
+async def get_question_bank_route(storage=StorageDep):
     return load_question_bank(storage)
 
 
 @question_bank_router.post("/question-bank", response_model=QuestionBankEntryModel)
-async def upsert_question_bank_route(entry: QuestionBankUpsertModel):
+async def upsert_question_bank_route(entry: QuestionBankUpsertModel, storage=StorageDep):
     return _upsert_bank_entry(entry)
 
 
@@ -284,6 +285,8 @@ async def delete_question_bank_entry_route(entry_id: str):
         raise HTTPException(status_code=404, detail="Bank entry not found")
     save_question_bank(storage, new_bank)
     return {"ok": True}
+
+
 
 
 
