@@ -1,10 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends  # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ auth, Request
-from core.deps import StorageDep
+from fastapi import APIRouter, HTTPException, Depends  # ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ auth, Request
+from core.deps import StorageDep, get_storage
+from providers.storage import StorageProvider
 from core.providers import providers_from_request
 
 from questionnaire.models import (
@@ -22,7 +23,7 @@ from questionnaire.bank import (
 )
 from questionnaire.generator import generate_question_variants
 
-# ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ AUTH
+# ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ AUTH
 from auth.jwt import get_current_user
 
 # ---------------------------------------------------------------------
@@ -32,12 +33,12 @@ from auth.jwt import get_current_user
 router = APIRouter(
     prefix="/questionnaire",
     tags=["questionnaire"],
-    dependencies=[Depends(get_current_user)],  # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ protect all /questionnaire/*
+    dependencies=[Depends(get_current_user)],  # ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ protect all /questionnaire/*
 )
 
 question_bank_router = APIRouter(
     tags=["question-bank"],
-    dependencies=[Depends(get_current_user)],  # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ protect /question-bank/* routes too
+    dependencies=[Depends(get_current_user)],  # ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ protect /question-bank/* routes too
 )
 
 # ---------------------------------------------------------------------
@@ -144,7 +145,7 @@ def _upsert_bank_entry(payload: QuestionBankUpsertModel, storage: StorageDep) ->
 
 
 @router.post("/feedback")
-async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest, storage=StorageDep):
+async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest, storage=Depends(get_storage)):
     """
     Record approval / rejection feedback for a single questionnaire answer.
 
@@ -176,7 +177,7 @@ async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest, storage=
         return {"ok": True, "updated_bank_entry": None}
 
     # ------------------------------------------
-    # APPROVED ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â but user did NOT choose promote
+    # APPROVED ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â but user did NOT choose promote
     # ------------------------------------------
     if payload.approved and not payload.promote_to_bank:
         if existing:
@@ -252,12 +253,12 @@ async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest, storage=
 
 
 @router.get("/bank", response_model=List[QuestionBankEntryModel])
-async def get_questionnaire_bank_route(storage=StorageDep):
+async def get_questionnaire_bank_route(storage=Depends(get_storage)):
     return load_question_bank(storage)
 
 
 @router.post("/bank", response_model=QuestionBankEntryModel)
-async def upsert_questionnaire_bank_route(entry: QuestionBankUpsertModel, storage=StorageDep):
+async def upsert_questionnaire_bank_route(entry: QuestionBankUpsertModel, storage=Depends(get_storage)):
     return _upsert_bank_entry(entry, storage)
 # ---------------------------------------------------------------------
 # Top-level /question-bank endpoints (for older callers)
@@ -265,12 +266,12 @@ async def upsert_questionnaire_bank_route(entry: QuestionBankUpsertModel, storag
 
 
 @question_bank_router.get("/question-bank", response_model=List[QuestionBankEntryModel])
-async def get_question_bank_route(storage=StorageDep):
+async def get_question_bank_route(storage=Depends(get_storage)):
     return load_question_bank(storage)
 
 
 @question_bank_router.post("/question-bank", response_model=QuestionBankEntryModel)
-async def upsert_question_bank_route(entry: QuestionBankUpsertModel, storage=StorageDep):
+async def upsert_question_bank_route(entry: QuestionBankUpsertModel, storage=Depends(get_storage)):
     return _upsert_bank_entry(entry, storage)
 @question_bank_router.delete("/question-bank/{entry_id}")
 async def delete_question_bank_entry_route(entry_id: str, storage: StorageDep):
@@ -280,6 +281,11 @@ async def delete_question_bank_entry_route(entry_id: str, storage: StorageDep):
         raise HTTPException(status_code=404, detail="Bank entry not found")
     save_question_bank(storage, new_bank)
     return {"ok": True}
+
+
+
+
+
 
 
 
