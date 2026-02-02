@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends  # âœ… auth, Request
+from fastapi import APIRouter, HTTPException, Depends  # Ã¢Å“â€¦ auth, Request
 from core.deps import StorageDep
 from core.providers import providers_from_request
 
@@ -22,7 +22,7 @@ from questionnaire.bank import (
 )
 from questionnaire.generator import generate_question_variants
 
-# âœ… AUTH
+# Ã¢Å“â€¦ AUTH
 from auth.jwt import get_current_user
 
 # ---------------------------------------------------------------------
@@ -32,12 +32,12 @@ from auth.jwt import get_current_user
 router = APIRouter(
     prefix="/questionnaire",
     tags=["questionnaire"],
-    dependencies=[Depends(get_current_user)],  # âœ… protect all /questionnaire/*
+    dependencies=[Depends(get_current_user)],  # Ã¢Å“â€¦ protect all /questionnaire/*
 )
 
 question_bank_router = APIRouter(
     tags=["question-bank"],
-    dependencies=[Depends(get_current_user)],  # âœ… protect /question-bank/* routes too
+    dependencies=[Depends(get_current_user)],  # Ã¢Å“â€¦ protect /question-bank/* routes too
 )
 
 # ---------------------------------------------------------------------
@@ -177,7 +177,7 @@ async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest, storage=
         return {"ok": True, "updated_bank_entry": None}
 
     # ------------------------------------------
-    # APPROVED â€” but user did NOT choose promote
+    # APPROVED Ã¢â‚¬â€ but user did NOT choose promote
     # ------------------------------------------
     if payload.approved and not payload.promote_to_bank:
         if existing:
@@ -259,9 +259,7 @@ async def get_questionnaire_bank_route(storage=StorageDep):
 
 @router.post("/bank", response_model=QuestionBankEntryModel)
 async def upsert_questionnaire_bank_route(entry: QuestionBankUpsertModel, storage=StorageDep):
-    return _upsert_bank_entry(entry)
-
-
+    return _upsert_bank_entry(entry, storage)
 # ---------------------------------------------------------------------
 # Top-level /question-bank endpoints (for older callers)
 # ---------------------------------------------------------------------
@@ -274,9 +272,7 @@ async def get_question_bank_route(storage=StorageDep):
 
 @question_bank_router.post("/question-bank", response_model=QuestionBankEntryModel)
 async def upsert_question_bank_route(entry: QuestionBankUpsertModel, storage=StorageDep):
-    return _upsert_bank_entry(entry)
-
-
+    return _upsert_bank_entry(entry, storage)
 @question_bank_router.delete("/question-bank/{entry_id}")
 async def delete_question_bank_entry_route(entry_id: str, storage: StorageDep):
     bank = load_question_bank(storage)

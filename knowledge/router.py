@@ -14,7 +14,7 @@ from core.config import PdfReader, docx, KNOWLEDGE_STORE_FILE, KNOWLEDGE_DOCS_DI
 from knowledge.models import KnowledgeDocMeta, KnowledgeDocListResponse
 from knowledge.service import list_docs, get_doc, save_doc
 
-# ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ AUTH
+# ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ AUTH
 from auth.jwt import get_current_user
 
 from core.providers import providers_from_request
@@ -22,7 +22,7 @@ from core.providers import providers_from_request
 router = APIRouter(
     prefix="/knowledge",
     tags=["knowledge"],
-    # ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Enforce JWT on all /knowledge endpoints
+    # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ Enforce JWT on all /knowledge endpoints
     dependencies=[Depends(get_current_user)],
 )
 
@@ -116,7 +116,7 @@ def _extract_text_from_upload(file: UploadFile, data: bytes) -> str:
 
 
 # ---------------------------------------------------------------------
-# GET /knowledge/docs   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â list docs
+# GET /knowledge/docs   ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â list docs
 # ---------------------------------------------------------------------
 
 @router.get("/docs", response_model=KnowledgeDocListResponse)
@@ -131,7 +131,7 @@ async def list_knowledge_docs_route():
 
 
 # ---------------------------------------------------------------------
-# GET /knowledge/docs/{doc_id}   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â get one doc meta
+# GET /knowledge/docs/{doc_id}   ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â get one doc meta
 # ---------------------------------------------------------------------
 
 @router.get("/docs/{doc_id}", response_model=KnowledgeDocMeta)
@@ -143,7 +143,7 @@ async def get_knowledge_doc_route(doc_id: str):
 
 
 # ---------------------------------------------------------------------
-# POST /knowledge/docs   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â upload & ingest a doc
+# POST /knowledge/docs   ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â upload & ingest a doc
 # ---------------------------------------------------------------------
 
 @router.post("/docs", response_model=KnowledgeDocMeta)
@@ -178,7 +178,6 @@ async def upload_knowledge_doc_route(request: Request, file: UploadFile = File(.
     if tags:
         parts = [t.strip() for t in tags.split(",")]
         tag_list = [p for p in parts if p]
-    storage = providers.storage
     meta = save_doc(storage,
         filename=file.filename or "uploaded",
         text=text,
@@ -190,11 +189,11 @@ async def upload_knowledge_doc_route(request: Request, file: UploadFile = File(.
 
 
 # ---------------------------------------------------------------------
-# GET /knowledge/docs/{doc_id}/text ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â inline extracted text for viewer
+# GET /knowledge/docs/{doc_id}/text ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â inline extracted text for viewer
 # ---------------------------------------------------------------------
 
 @router.get("/docs/{doc_id}/text", response_class=PlainTextResponse)
-async def get_knowledge_doc_text(doc_id: str, storage=StorageDep):
+async def get_knowledge_doc_text(doc_id: str, storage: StorageDep):
     """
     Return the extracted text for a knowledge document as plain text.
 
@@ -232,11 +231,11 @@ async def get_knowledge_doc_text(doc_id: str, storage=StorageDep):
         raise HTTPException(status_code=500, detail=f"Failed to read text file: {exc}")
 
     return PlainTextResponse(content, media_type="text/plain")# ---------------------------------------------------------------------
-# GET /knowledge/docs/{doc_id}/file ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â download extracted text file
+# GET /knowledge/docs/{doc_id}/file ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â download extracted text file
 # ---------------------------------------------------------------------
 
 @router.get("/docs/{doc_id}/file")
-async def get_knowledge_doc_file(doc_id: str, storage=StorageDep):
+async def get_knowledge_doc_file(doc_id: str, storage: StorageDep):
     """
     Serve the extracted text file as a download (.txt).
 
@@ -273,7 +272,7 @@ async def get_knowledge_doc_file(doc_id: str, storage=StorageDep):
     )
 
 @router.delete("/docs/{doc_id}")
-async def delete_knowledge_doc_route(doc_id: str, storage=StorageDep):
+async def delete_knowledge_doc_route(doc_id: str, storage: StorageDep):
     """
     Delete a knowledge document's metadata and extracted text file.
     """
