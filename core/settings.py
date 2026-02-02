@@ -62,6 +62,10 @@ def _split_scopes(value: str) -> List[str]:
     return [x.strip() for x in raw.split() if x.strip()]
 
 
+# ---------------------------------------------------------------------
+# Settings models
+# ---------------------------------------------------------------------
+
 @dataclass(frozen=True)
 class LLMSettings:
     provider: str
@@ -75,7 +79,23 @@ class LLMSettings:
 
 @dataclass(frozen=True)
 class StorageSettings:
+    """
+    Storage provider configuration.
+
+    provider:
+      - "local"  -> LocalFilesStorageProvider
+      - "minio"  -> MinIO/S3-compatible object store provider (if enabled in providers.factory)
+    """
     provider: str
+
+    # Local
+    local_dir: str = "./data"
+
+    # MinIO / S3-compatible (used when provider == "minio")
+    minio_endpoint: str = "http://minio:9000"
+    minio_bucket: str = "css"
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -133,6 +153,10 @@ class Settings:
     db: DBSettings
     vector: VectorSettings
 
+
+# ---------------------------------------------------------------------
+# Loaders
+# ---------------------------------------------------------------------
 
 def _load_db_settings() -> DBSettings:
     host = (_env("PGHOST", "localhost")).strip()
@@ -193,9 +217,43 @@ def _load_llm_settings() -> LLMSettings:
     )
 
 
+def _normalize_storage_provider(raw: str) -> str:
+    v = (raw or "").strip().lower()
+    if v in ("minio", "s3", "object_store", "objectstore"):
+        return "minio"
+    if v in ("local", "file", "files", "filesystem"):
+        return "local"
+    # Default safe fallback
+    return "local"
+
+
 def _load_storage_settings() -> StorageSettings:
-    provider = (_env("STORAGE_PROVIDER", "") or "local").strip().lower()
-    return StorageSettings(provider=provider)
+    """
+    Storage precedence (DO NOT break this):
+      1) STORAGE_MODE (deployment/runtime truth)  <-- must win
+      2) STORAGE_PROVIDER (legacy override)
+      3) default local
+    """
+    raw_mode = (_env("STORAGE_MODE", "") or "").strip()
+    raw_provider = (_env("STORAGE_PROVIDER", "") or "").strip()
+    provider = _normalize_storage_provider(raw_mode or raw_provider or "local")
+
+    local_dir = (_env("STORAGE_LOCAL_DIR", "") or _env("LOCAL_STORAGE_DIR", "") or "./data").strip()
+
+    # MinIO env vars (present even if provider is local; harmless)
+    minio_endpoint = (_env("MINIO_ENDPOINT", "") or "http://minio:9000").strip().rstrip("/")
+    minio_bucket = (_env("MINIO_BUCKET", "") or "css").strip()
+    minio_access_key = (_env("MINIO_ACCESS_KEY", "") or "").strip()
+    minio_secret_key = (_env("MINIO_SECRET_KEY", "") or "").strip()
+
+    return StorageSettings(
+        provider=provider,
+        local_dir=local_dir,
+        minio_endpoint=minio_endpoint,
+        minio_bucket=minio_bucket,
+        minio_access_key=minio_access_key,
+        minio_secret_key=minio_secret_key,
+    )
 
 
 def _load_entra_auth_settings() -> EntraAuthSettings:
