@@ -1,9 +1,12 @@
 from __future__ import annotations
+from datetime import datetime
+import uuid
 
 import json
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, HTTPException
+from core.deps import StorageDep
 from core.providers import providers_from_request
 from fastapi.responses import JSONResponse
 
@@ -132,9 +135,7 @@ def _normalize_session(sess: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 @router.get("/questionnaires", dependencies=[Depends(AUTH_DEP)])
 def list_questionnaires(request: Request):
-    providers = providers_from_request(request)
-    storage = providers.storage
-
+    storage = providers_from_request(request).storage
     try:
         raw = storage.get_object("stores/questionnaires.json")
         sessions = json.loads(raw.decode("utf-8"))
@@ -149,10 +150,8 @@ def list_questionnaires(request: Request):
 
 
 @router.get("/questionnaires/{session_id}", dependencies=[Depends(AUTH_DEP)])
-def get_questionnaire(request: Request, session_id: str):
-    providers = providers_from_request(request)
-    storage = providers.storage
-
+def get_questionnaire(session_id: str, request: Request):
+    storage = providers_from_request(request).storage
     try:
         raw = storage.get_object("stores/questionnaires.json")
         sessions = json.loads(raw.decode("utf-8"))
@@ -169,13 +168,13 @@ def get_questionnaire(request: Request, session_id: str):
 
 
 @router.delete("/questionnaires/{session_id}", dependencies=[Depends(AUTH_DEP)])
-def delete_questionnaire(request: Request, session_id: str):
+def delete_questionnaire(session_id: str, request: Request):
+    storage = providers_from_request(request).storage
     """
     Delete a questionnaire session from stores/questionnaires.json.
 
-    Canonical storage access: request.app.state.providers.storage
+    Canonical storage access: StorageDep
     """
-    storage = providers_from_request(request).storage
     key = "stores/questionnaires.json"
 
     # Load
@@ -198,4 +197,53 @@ def delete_questionnaire(request: Request, session_id: str):
     storage.put_object(key=key, data=payload, content_type="application/json", metadata=None)
 
     return {"ok": True}
+
+@router.post("/questionnaires", dependencies=[Depends(AUTH_DEP)])
+def create_questionnaire(request: Request, payload: Dict[str, Any]):
+    """
+    Create a questionnaire session and persist to stores/questionnaires.json.
+    Canonical storage: StorageDep
+    """
+    key = "stores/questionnaires.json"
+
+    # Load existing
+    try:
+        raw_text = storage.get_object(key).decode("utf-8", errors="ignore")
+        sessions = json.loads(raw_text) if raw_text.strip() else []
+        if not isinstance(sessions, list):
+            sessions = []
+    except Exception:
+        sessions = []
+
+    new_id = uuid.uuid4().hex
+    now = datetime.utcnow().isoformat() + "Z"
+
+    session = {
+        "id": new_id,
+        "name": str(payload.get("name") or "Untitled questionnaire"),
+        "customer": str(payload.get("customer") or ""),
+        "reviewer": str(payload.get("reviewer") or ""),
+        "date": str(payload.get("date") or ""),
+        "status": str(payload.get("status") or "In Progress"),
+        "raw_text": str(payload.get("raw_text") or ""),
+        "questions": payload.get("questions") or [],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    sessions.append(session)
+
+    try:
+        storage.put_object(
+            key=key,
+            data=json.dumps(sessions, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore"),
+            content_type="application/json",
+            metadata=None,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save questionnaire: {exc}")
+
+    return session
+
+
 

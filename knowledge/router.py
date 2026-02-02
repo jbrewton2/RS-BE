@@ -7,13 +7,14 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Request
+from core.deps import StorageDep
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 
 from core.config import PdfReader, docx, KNOWLEDGE_STORE_FILE, KNOWLEDGE_DOCS_DIR
 from knowledge.models import KnowledgeDocMeta, KnowledgeDocListResponse
 from knowledge.service import list_docs, get_doc, save_doc
 
-# âœ… AUTH
+# ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ AUTH
 from auth.jwt import get_current_user
 
 from core.providers import providers_from_request
@@ -21,7 +22,7 @@ from core.providers import providers_from_request
 router = APIRouter(
     prefix="/knowledge",
     tags=["knowledge"],
-    # âœ… Enforce JWT on all /knowledge endpoints
+    # ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Enforce JWT on all /knowledge endpoints
     dependencies=[Depends(get_current_user)],
 )
 
@@ -115,7 +116,7 @@ def _extract_text_from_upload(file: UploadFile, data: bytes) -> str:
 
 
 # ---------------------------------------------------------------------
-# GET /knowledge/docs   â€” list docs
+# GET /knowledge/docs   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â list docs
 # ---------------------------------------------------------------------
 
 @router.get("/docs", response_model=KnowledgeDocListResponse)
@@ -130,7 +131,7 @@ async def list_knowledge_docs_route():
 
 
 # ---------------------------------------------------------------------
-# GET /knowledge/docs/{doc_id}   â€” get one doc meta
+# GET /knowledge/docs/{doc_id}   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â get one doc meta
 # ---------------------------------------------------------------------
 
 @router.get("/docs/{doc_id}", response_model=KnowledgeDocMeta)
@@ -142,12 +143,11 @@ async def get_knowledge_doc_route(doc_id: str):
 
 
 # ---------------------------------------------------------------------
-# POST /knowledge/docs   â€” upload & ingest a doc
+# POST /knowledge/docs   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â upload & ingest a doc
 # ---------------------------------------------------------------------
 
 @router.post("/docs", response_model=KnowledgeDocMeta)
-async def upload_knowledge_doc_route(
-    file: UploadFile = File(...),
+async def upload_knowledge_doc_route(request: Request, file: UploadFile = File(...),
     doc_type: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
 ):
@@ -178,7 +178,6 @@ async def upload_knowledge_doc_route(
     if tags:
         parts = [t.strip() for t in tags.split(",")]
         tag_list = [p for p in parts if p]
-    providers = providers_from_request(request)
     storage = providers.storage
     meta = save_doc(storage,
         filename=file.filename or "uploaded",
@@ -191,11 +190,11 @@ async def upload_knowledge_doc_route(
 
 
 # ---------------------------------------------------------------------
-# GET /knowledge/docs/{doc_id}/text â€” inline extracted text for viewer
+# GET /knowledge/docs/{doc_id}/text ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â inline extracted text for viewer
 # ---------------------------------------------------------------------
 
 @router.get("/docs/{doc_id}/text", response_class=PlainTextResponse)
-async def get_knowledge_doc_text(doc_id: str, request: Request):
+async def get_knowledge_doc_text(doc_id: str, storage=StorageDep):
     """
     Return the extracted text for a knowledge document as plain text.
 
@@ -210,7 +209,6 @@ async def get_knowledge_doc_text(doc_id: str, request: Request):
 
     # 1) StorageProvider (preferred)
     try:
-        storage = request.app.state.providers.storage
         data = storage.get_object(key)
         content = data.decode("utf-8", errors="ignore")
         return PlainTextResponse(content, media_type="text/plain")
@@ -234,11 +232,11 @@ async def get_knowledge_doc_text(doc_id: str, request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to read text file: {exc}")
 
     return PlainTextResponse(content, media_type="text/plain")# ---------------------------------------------------------------------
-# GET /knowledge/docs/{doc_id}/file â€” download extracted text file
+# GET /knowledge/docs/{doc_id}/file ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â download extracted text file
 # ---------------------------------------------------------------------
 
 @router.get("/docs/{doc_id}/file")
-async def get_knowledge_doc_file(doc_id: str, request: Request):
+async def get_knowledge_doc_file(doc_id: str, storage=StorageDep):
     """
     Serve the extracted text file as a download (.txt).
 
@@ -254,7 +252,6 @@ async def get_knowledge_doc_file(doc_id: str, request: Request):
 
     # 1) StorageProvider (preferred)
     try:
-        storage = request.app.state.providers.storage
         data = storage.get_object(key)
         headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
         return Response(content=data, media_type="text/plain", headers=headers)
@@ -276,7 +273,7 @@ async def get_knowledge_doc_file(doc_id: str, request: Request):
     )
 
 @router.delete("/docs/{doc_id}")
-async def delete_knowledge_doc_route(doc_id: str, request: Request):
+async def delete_knowledge_doc_route(doc_id: str, storage=StorageDep):
     """
     Delete a knowledge document's metadata and extracted text file.
     """
@@ -300,7 +297,6 @@ async def delete_knowledge_doc_route(doc_id: str, request: Request):
 
     # Best-effort delete from StorageProvider (preferred)
     try:
-        storage = request.app.state.providers.storage
         storage.delete_object(f"knowledge_docs/{doc_id}.txt")
     except Exception:
         pass
@@ -312,6 +308,9 @@ async def delete_knowledge_doc_route(doc_id: str, request: Request):
         pass
 
     return {"ok": True}
+
+
+
 
 
 

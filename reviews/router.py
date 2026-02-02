@@ -13,6 +13,8 @@ from fastapi import Depends
 from auth.jwt import get_current_user
 
 
+from core.deps import StorageDep
+
 from core.providers import providers_from_request
 
 router = APIRouter(
@@ -36,7 +38,7 @@ def _read_reviews_file(storage) -> List[Dict[str, Any]]:
 
     # 1) StorageProvider (preferred)
     try:
-    # storage injected by caller (request.app.state.providers.storage)
+    # storage injected by caller (StorageDep)
         raw = storage.get_object(key).decode("utf-8", errors="ignore")
         data = json.loads(raw) if raw.strip() else []
         return data if isinstance(data, list) else []
@@ -60,7 +62,7 @@ def _write_reviews_file(reviews: List[Dict[str, Any]], storage) -> None:
     Storage key: stores/reviews.json
     """
     key = "stores/reviews.json"
-    # storage injected by caller (request.app.state.providers.storage)
+    # storage injected by caller (StorageDep)
     try:
         payload = json.dumps(reviews, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
         storage.put_object(key=key, data=payload, content_type="application/json", metadata=None)
@@ -171,15 +173,13 @@ def _attach_auto_flags_to_review(review: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @router.get("")
-async def list_reviews(request: Request):
+async def list_reviews(storage=StorageDep):
     """Return the full list of saved reviews."""
-    storage = providers_from_request(request).storage
     return _read_reviews_file(storage)
 
 @router.post("")
-async def upsert_review(request: Request, review: Dict[str, Any]):
+async def upsert_review(review: Dict[str, Any], storage=StorageDep):
     """
-    storage = request.app.state.providers.storage
     Upsert a review AND auto-generate backend flags.
 
     autoFlags structure:
@@ -251,14 +251,14 @@ async def analyze_review(req: AnalyzeRequestModel):
 
 
 @router.delete("/{review_id}")
-async def delete_review(review_id: str):
-    storage = request.app.state.providers.storage
+async def delete_review(request: Request, review_id: str):
     reviews = _read_reviews_file(storage)
     new_list = [r for r in reviews if r.get("id") != review_id]
     if len(new_list) == len(reviews):
         raise HTTPException(status_code=404, detail="Review not found")
     _write_reviews_file(new_list, storage)
     return {"ok": True}
+
 
 
 
