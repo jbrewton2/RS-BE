@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends  # Ã¢Å“â€¦ auth, Request
+from fastapi import APIRouter, HTTPException, Depends  # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ auth, Request
 from core.deps import StorageDep
 from core.providers import providers_from_request
 
@@ -22,7 +22,7 @@ from questionnaire.bank import (
 )
 from questionnaire.generator import generate_question_variants
 
-# Ã¢Å“â€¦ AUTH
+# ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ AUTH
 from auth.jwt import get_current_user
 
 # ---------------------------------------------------------------------
@@ -32,12 +32,12 @@ from auth.jwt import get_current_user
 router = APIRouter(
     prefix="/questionnaire",
     tags=["questionnaire"],
-    dependencies=[Depends(get_current_user)],  # Ã¢Å“â€¦ protect all /questionnaire/*
+    dependencies=[Depends(get_current_user)],  # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ protect all /questionnaire/*
 )
 
 question_bank_router = APIRouter(
     tags=["question-bank"],
-    dependencies=[Depends(get_current_user)],  # Ã¢Å“â€¦ protect /question-bank/* routes too
+    dependencies=[Depends(get_current_user)],  # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ protect /question-bank/* routes too
 )
 
 # ---------------------------------------------------------------------
@@ -46,7 +46,7 @@ question_bank_router = APIRouter(
 
 
 @router.post("/analyze", response_model=AnalyzeQuestionnaireResponse)
-async def questionnaire_analyze_route(body: QuestionnaireAnalyzeRequest, storage=StorageDep):
+async def questionnaire_analyze_route(body: QuestionnaireAnalyzeRequest, storage: StorageDep):
     """
     Analyze a questionnaire body.
 
@@ -63,8 +63,7 @@ async def questionnaire_analyze_route(body: QuestionnaireAnalyzeRequest, storage
         f"knowledge_doc_ids={knowledge_doc_ids}"
     )
 
-    resp = await analyze_questionnaire(body)
-
+    resp = await analyze_questionnaire(body, storage)
     print(
         "[QUESTIONNAIRE] /questionnaire/analyze route: done "
         f"returning {len(resp.questions)} questions"
@@ -177,7 +176,7 @@ async def questionnaire_feedback(payload: QuestionnaireFeedbackRequest, storage=
         return {"ok": True, "updated_bank_entry": None}
 
     # ------------------------------------------
-    # APPROVED Ã¢â‚¬â€ but user did NOT choose promote
+    # APPROVED ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â but user did NOT choose promote
     # ------------------------------------------
     if payload.approved and not payload.promote_to_bank:
         if existing:

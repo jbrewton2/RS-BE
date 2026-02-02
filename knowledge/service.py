@@ -150,7 +150,7 @@ def _load_knowledge_docs_meta() -> List[KnowledgeDocMeta]:
     return docs
 
 
-def _load_knowledge_doc_text(doc_meta: KnowledgeDocMeta) -> str:
+def _load_knowledge_doc_text(doc_meta: KnowledgeDocMeta, storage) -> str:
     """
     Internal helper: load text for a given knowledge doc.
 
@@ -177,10 +177,7 @@ def _load_knowledge_doc_text(doc_meta: KnowledgeDocMeta) -> str:
         return ""
 
 
-def build_context_for_question(
-    question_text: str,
-    max_docs: int = 3,
-) -> List[dict]:
+def build_context_for_question(question_text: str, max_docs: int = 3, storage=None) -> List[dict]:
     """
     Very simple retrieval: compute crude token overlap between the question
     text and each knowledge doc's text, and return the top few docs.
