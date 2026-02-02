@@ -147,3 +147,4 @@ def db_vector_health():
         return {"ok": True, "pgvector": True, "sample_vector": str(row[0]) if row else None}
     except Exception as e:
         return {"ok": False, "pgvector": False, "error": str(e)}
+
