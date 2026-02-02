@@ -1,4 +1,4 @@
-﻿# backend/questionnaire/service.py
+# backend/questionnaire/service.py
 from __future__ import annotations
 
 import asyncio
@@ -279,9 +279,7 @@ def build_knowledge_context_from_ids(
 # ---------------------------------------------------------------------
 
 
-async def analyze_questionnaire(
-    body: QuestionnaireAnalyzeRequest,
-) -> AnalyzeQuestionnaireResponse:
+async def analyze_questionnaire(body: QuestionnaireAnalyzeRequest, storage=None) -> AnalyzeQuestionnaireResponse:
     # Defensive handling + logging
     raw = (body.raw_text or "").strip()
     llm_enabled = getattr(body, "llm_enabled", True)
@@ -348,7 +346,7 @@ async def analyze_questionnaire(
             if best_entry.frameworks:
                 bank_tags.extend(best_entry.frameworks)
 
-        # Strong match → use bank only, no LLM
+        # Strong match ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ use bank only, no LLM
         if best_entry and best_score >= BANK_STRONG:
             q.suggested_answer = best_entry.answer
             q.answer_source = "bank"
@@ -360,14 +358,14 @@ async def analyze_questionnaire(
             best_entry.last_used_at = datetime.utcnow().isoformat() + "Z"
             continue
 
-        # Weak match but LLM disabled → just link bank and tags
+        # Weak match but LLM disabled ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ just link bank and tags
         if not llm_enabled:
             if best_entry and best_score >= BANK_WEAK:
                 q.matched_bank_id = best_entry.id
                 q.tags = _merge_tags(q.tags, bank_tags)
             continue
 
-        # Otherwise we’ll send this one to LLM
+        # Otherwise weÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ll send this one to LLM
         remaining_for_llm.append(q)
 
     print(

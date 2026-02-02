@@ -200,6 +200,7 @@ def delete_questionnaire(session_id: str, request: Request):
 
 @router.post("/questionnaires", dependencies=[Depends(AUTH_DEP)])
 def create_questionnaire(request: Request, payload: Dict[str, Any]):
+    storage = providers_from_request(request).storage
     """
     Create a questionnaire session and persist to stores/questionnaires.json.
     Canonical storage: StorageDep

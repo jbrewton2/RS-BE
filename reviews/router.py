@@ -14,9 +14,6 @@ from auth.jwt import get_current_user
 
 
 from core.deps import StorageDep
-
-from core.providers import providers_from_request
-
 router = APIRouter(
     prefix="/reviews",
     tags=["reviews"],
@@ -173,12 +170,12 @@ def _attach_auto_flags_to_review(review: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @router.get("")
-async def list_reviews(storage=StorageDep):
+async def list_reviews(storage: StorageDep):
     """Return the full list of saved reviews."""
     return _read_reviews_file(storage)
 
 @router.post("")
-async def upsert_review(review: Dict[str, Any], storage=StorageDep):
+async def upsert_review(review: Dict[str, Any], storage: StorageDep):
     """
     Upsert a review AND auto-generate backend flags.
 
@@ -251,17 +248,10 @@ async def analyze_review(req: AnalyzeRequestModel):
 
 
 @router.delete("/{review_id}")
-async def delete_review(request: Request, review_id: str):
+async def delete_review(review_id: str, storage: StorageDep):
     reviews = _read_reviews_file(storage)
     new_list = [r for r in reviews if r.get("id") != review_id]
     if len(new_list) == len(reviews):
         raise HTTPException(status_code=404, detail="Review not found")
     _write_reviews_file(new_list, storage)
     return {"ok": True}
-
-
-
-
-
-
-
