@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime
 from typing import List, Optional
@@ -78,7 +78,7 @@ async def questionnaire_analyze_route(body: QuestionnaireAnalyzeRequest, storage
 # ---------------------------------------------------------------------
 
 
-def _upsert_bank_entry(payload: QuestionBankUpsertModel) -> QuestionBankEntryModel:
+def _upsert_bank_entry(payload: QuestionBankUpsertModel, storage: StorageDep) -> QuestionBankEntryModel:
     """
     Add or update a QuestionBankEntryModel.
 
@@ -278,7 +278,7 @@ async def upsert_question_bank_route(entry: QuestionBankUpsertModel, storage=Sto
 
 
 @question_bank_router.delete("/question-bank/{entry_id}")
-async def delete_question_bank_entry_route(entry_id: str):
+async def delete_question_bank_entry_route(entry_id: str, storage: StorageDep):
     bank = load_question_bank(storage)
     new_bank = [b for b in bank if b.id != entry_id]
     if len(new_bank) == len(bank):
