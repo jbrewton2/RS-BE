@@ -1,160 +1,200 @@
-﻿# backend/questionnaire/bank.py
-from __future__ import annotations
-
 import json
 import os
-import unicodedata
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from core.config import QUESTION_BANK_PATH
 from questionnaire.models import QuestionBankEntryModel
 
 
-def normalize_text(value: Optional[str]) -> str:
+STORE_KEY = "stores/question_bank.json"
+SCHEMA_VERSION = 1
+
+
+def _unwrap_bank_payload(candidate: Any) -> List[Dict[str, Any]]:
     """
-    Normalize text so it renders cleanly in the UI and avoids the '?' character.
-
-    - Unicode normalize (NFKC)
-    - Replace curly quotes with straight quotes
-    - Replace en/em dashes with hyphen
-    - Replace non-breaking space with normal space
-    - Remove replacement chars and control chars
-    - Trim and collapse multiple spaces
+    Accept both:
+      A) legacy list format: [ {entry}, {entry}, ... ]
+      B) wrapped format: { "schema_version": 1, "item_count": N, "items": [ ... ] }
+    Return a list of dict entries.
     """
-    if value is None:
-        return ""
+    if candidate is None:
+        return []
 
-    s = str(value)
+    if isinstance(candidate, list):
+        # legacy list
+        return [x for x in candidate if isinstance(x, dict)]
 
-    # Unicode normalize
-    s = unicodedata.normalize("NFKC", s)
+    if isinstance(candidate, dict):
+        items = candidate.get("items")
+        if isinstance(items, list):
+            return [x for x in items if isinstance(x, dict)]
 
-    # Curly single quotes (‘ ’ ‚ ?) -> '
-    s = s.replace("\u2018", "'").replace("\u2019", "'") \
-         .replace("\u201A", "'").replace("\u201B", "'")
-
-    # Curly double quotes (“ ” „ ?) -> "
-    s = s.replace("\u201C", '"').replace("\u201D", '"') \
-         .replace("\u201E", '"').replace("\u201F", '"')
-
-    # En dash / em dash -> hyphen
-    s = s.replace("\u2013", "-").replace("\u2014", "-")
-
-    # Non-breaking space -> normal space
-    s = s.replace("\u00A0", " ")
-
-    # Remove replacement char and other control chars (except \n and \t)
-    s = s.replace("\uFFFD", "")
-    s = "".join(
-        ch for ch in s
-        if ch == "\n"
-        or ch == "\t"
-        or (0x20 <= ord(ch) != 0x7F)
-    )
-
-    # Collapse multiple spaces
-    while "  " in s:
-        s = s.replace("  ", " ")
-
-    return s.strip()
+    return []
 
 
-def _normalize_entry_in_place(entry: QuestionBankEntryModel) -> None:
+def _parse_json_text(raw_text: str) -> List[Dict[str, Any]]:
+    raw_text = (raw_text or "").strip()
+    if not raw_text:
+        return []
+    try:
+        candidate = json.loads(raw_text)
+    except Exception:
+        return []
+    return _unwrap_bank_payload(candidate)
+
+
+def load_question_bank(storage: Any) -> List[QuestionBankEntryModel]:
     """
-    Normalize all string fields of a QuestionBankEntryModel in-place.
-    """
-    entry.text = normalize_text(entry.text)
-    entry.answer = normalize_text(entry.answer)
-    entry.primary_tag = normalize_text(entry.primary_tag) or None
-
-    # Frameworks / variants / rejection_reasons as cleaned lists
-    entry.frameworks = [
-        normalize_text(f) for f in (entry.frameworks or [])
-        if normalize_text(f)
-    ]
-    entry.variants = [
-        normalize_text(v) for v in (getattr(entry, "variants", []) or [])
-        if normalize_text(v)
-    ]
-    entry.rejection_reasons = [
-        normalize_text(r) for r in (getattr(entry, "rejection_reasons", []) or [])
-        if normalize_text(r)
-    ]
-
-    # last_feedback is optional string
-    if getattr(entry, "last_feedback", None) is not None:
-        entry.last_feedback = normalize_text(entry.last_feedback) or None
-
-    # status should stay simple but normalize just in case
-    if entry.status:
-        entry.status = normalize_text(entry.status)
-
-
-def load_question_bank(storage) -> List[QuestionBankEntryModel]:
-    """Load question_bank.json.
+    Load question bank entries.
 
     Preferred: StorageProvider key "stores/question_bank.json"
     Fallback: legacy filesystem QUESTION_BANK_PATH
     """
-    key = "stores/question_bank.json"
 
-    raw = None
+    raw_items: List[Dict[str, Any]] = []
+
     # 1) StorageProvider (preferred)
     try:
         # storage injected by caller
-        raw_text = storage.get_object(key).decode("utf-8", errors="ignore")
-        candidate = json.loads(raw_text) if raw_text.strip() else []
-        if isinstance(candidate, list):
-            raw = candidate
+        raw_bytes = storage.get_object(STORE_KEY)
+        raw_text = raw_bytes.decode("utf-8", errors="ignore") if raw_bytes else ""
+        raw_items = _parse_json_text(raw_text)
     except Exception:
-        pass
+        raw_items = []
 
-    # 2) Legacy filesystem fallback
-    if raw is None:
-        if not os.path.exists(QUESTION_BANK_PATH):
-            return []
+    # 2) Legacy filesystem fallback if storage read produced nothing
+    if not raw_items:
         try:
-            with open(QUESTION_BANK_PATH, "r", encoding="utf-8") as f:
-                candidate = json.load(f)
-            raw = candidate if isinstance(candidate, list) else []
+            if os.path.exists(QUESTION_BANK_PATH):
+                with open(QUESTION_BANK_PATH, "r", encoding="utf-8") as f:
+                    candidate = json.load(f)
+                raw_items = _unwrap_bank_payload(candidate)
         except Exception:
-            return []
+            raw_items = []
 
     entries: List[QuestionBankEntryModel] = []
-    for item in raw:
+    for item in raw_items:
         try:
-            entry = QuestionBankEntryModel(**item)
+            # tolerate older/alt field names
+            normalized: Dict[str, Any] = dict(item)
+
+            # Some past code used primaryTag instead of primary_tag
+            if "primary_tag" not in normalized and "primaryTag" in normalized:
+                normalized["primary_tag"] = normalized.get("primaryTag")
+
+            # frameworks may be null
+            fw = normalized.get("frameworks")
+            if fw is None:
+                normalized["frameworks"] = []
+            elif isinstance(fw, str):
+                normalized["frameworks"] = [fw]
+            elif not isinstance(fw, list):
+                normalized["frameworks"] = [str(fw)]
+            else:
+                normalized["frameworks"] = [str(x) for x in fw if str(x).strip()]
+
+            # variants may be null
+            v = normalized.get("variants")
+            if v is None:
+                normalized["variants"] = []
+            elif isinstance(v, str):
+                normalized["variants"] = [v]
+            elif not isinstance(v, list):
+                normalized["variants"] = [str(v)]
+            else:
+                normalized["variants"] = [str(x) for x in v if str(x).strip()]
+
+            # status default
+            if not normalized.get("status"):
+                normalized["status"] = "approved"
+
+            # Ensure required fields exist for model validation
+            if not normalized.get("id"):
+                # If an entry somehow lacks id, skip it (bank ids matter for matching)
+                continue
+            if "text" not in normalized or "answer" not in normalized:
+                continue
+
+            entries.append(QuestionBankEntryModel(**normalized))
         except Exception:
+            # skip malformed entries rather than failing the whole bank
             continue
-        _normalize_entry_in_place(entry)
-        entries.append(entry)
 
     return entries
 
-def save_question_bank(storage, entries: List[QuestionBankEntryModel]) -> None:
-    # Normalize before saving (so any updates are also cleaned)
-    for e in entries:
-        _normalize_entry_in_place(e)
 
-    serializable = [e.model_dump() for e in entries]
+def save_question_bank(storage: Any, entries: List[QuestionBankEntryModel]) -> None:
+    """
+    Persist the bank in WRAPPED canonical format to:
+      - StorageProvider key "stores/question_bank.json"
+      - Legacy filesystem fallback QUESTION_BANK_PATH (best-effort)
+    """
+    # Serialize entries
+    serializable: List[Dict[str, Any]] = []
+    for e in entries or []:
+        try:
+            serializable.append(e.model_dump())
+        except Exception:
+            # last resort
+            serializable.append(
+                {
+                    "id": getattr(e, "id", None),
+                    "text": getattr(e, "text", None),
+                    "answer": getattr(e, "answer", None),
+                }
+            )
 
-    # Provider-first store
-    key = "stores/question_bank.json"
-        # storage injected by caller
-    payload = json.dumps(serializable, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
+    wrapper: Dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "item_count": len(serializable),
+        "items": serializable,
+    }
+
+    payload = json.dumps(wrapper, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
 
     # 1) StorageProvider (preferred)
     try:
-        storage.put_object(key=key, data=payload, content_type="application/json", metadata=None)
-        return
+        storage.put_object(
+            key=STORE_KEY,
+            data=payload,
+            content_type="application/json",
+            metadata=None,
+        )
     except Exception:
         pass
 
-    # 2) Legacy filesystem fallback
-    with open(QUESTION_BANK_PATH, "w", encoding="utf-8") as f:
-        json.dump(serializable, f, indent=2, ensure_ascii=False)
+    # 2) Legacy filesystem fallback (best-effort)
+    try:
+        os.makedirs(os.path.dirname(QUESTION_BANK_PATH), exist_ok=True)
+        with open(QUESTION_BANK_PATH, "w", encoding="utf-8") as f:
+            json.dump(wrapper, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
 
 
+# ---------------------------------------------------------------------
+# Legacy helpers required by other modules (router/service)
+# NOTE: keep these here to avoid import breakage during refactors.
+# ---------------------------------------------------------------------
+import re
 
+def normalize_text(s: str) -> str:
+    """
+    Normalizes free-text for stable matching and storage.
+    - Converts None to ""
+    - Strips leading/trailing whitespace
+    - Collapses internal whitespace to single spaces
+    """
+    if s is None:
+        return ""
+    s = str(s)
+    s = s.replace("\u00A0", " ")   # NBSP -> space
+    s = s.strip()
+    s = re.sub(r"\s+", " ", s)
+    return s
 
-
+# Some older code paths refer to normalize_tag; keep it equivalent.
+def normalize_tag(s: str) -> str:
+    return normalize_text(s)
