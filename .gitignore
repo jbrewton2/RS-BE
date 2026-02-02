@@ -63,3 +63,6 @@ seed/
 
 out/
 
+
+scripts/inspect-providers.ps1
+
