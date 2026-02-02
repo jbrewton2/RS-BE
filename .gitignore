@@ -60,3 +60,6 @@ seed/
 *.bak
 *.bak2
 
+
+out/
+
