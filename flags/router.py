@@ -337,12 +337,23 @@ async def explain_flag_hit(body: FlagExplainRequest, storage=Depends(get_storage
     )
 
     flags_payload = load_flags(storage)
-    rule = next(
-        (r for r in (flags_payload.clause + flags_payload.context) if r.id == hit.get("id")),
-        None,
-    )
+    rules = (flags_payload.clause + flags_payload.context)
+
+    # Prefer the hit's id, but fall back to provided flag_id / stored flag_id for older hits
+    rule_id = hit.get("id") or hit.get("flag_id") or body.flag_id
+
+    rule = None
+    if rule_id:
+        rule = next((r for r in rules if r.id == rule_id), None)
+
+    # Fallback: match by label if ids drifted
     if not rule:
-        raise HTTPException(status_code=404, detail="Flag rule not found")
+        hit_label = (hit.get("label") or "").strip()
+        if hit_label:
+            rule = next((r for r in rules if (getattr(r, "label", "") or "").strip() == hit_label), None)
+
+    if not rule:
+        raise HTTPException(status_code=404, detail=f"Flag rule not found (rule_id={rule_id})")
 
     matched = (hit.get("matched_text") or hit.get("snippet") or "").strip() or None
     hit_key = hit.get("hit_key")
@@ -373,6 +384,7 @@ async def explain_flag_hit(body: FlagExplainRequest, storage=Depends(get_storage
         flaggedText=matched,
         reasoning=reasoning,
     )
+
 
 
 
