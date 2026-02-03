@@ -39,6 +39,7 @@ class FlagRule(BaseModel):
     severity: Optional[Literal["Low", "Medium", "High", "Critical"]] = "Medium"
     enabled: bool = True
     category: Optional[str] = None
+    ownerTeam: Optional[str] = "Unassigned"
     scopeHint: Optional[Literal["enterprise", "project", "unknown"]] = None
     examples: Optional[List[str]] = None
 
@@ -206,3 +207,5 @@ def save_flags(payload: FlagsPayload, storage: Optional[Any] = None) -> None:
 
 def new_flag_id() -> str:
     return str(uuid.uuid4())
+
+
