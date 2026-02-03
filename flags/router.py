@@ -342,6 +342,10 @@ async def explain_flag_hit(body: FlagExplainRequest, storage=Depends(get_storage
     # Prefer the hit's id, but fall back to provided flag_id / stored flag_id for older hits
     rule_id = hit.get("id") or hit.get("flag_id") or body.flag_id
 
+    # Deterministic legacy id mapping (old autoFlags used cyber_dfars_* ids)
+    if rule_id and str(rule_id).startswith("cyber_dfars_"):
+        rule_id = "clause-dfars-" + str(rule_id).replace("cyber_dfars_", "")
+
     rule = None
     if rule_id:
         rule = next((r for r in rules if r.id == rule_id), None)
@@ -384,6 +388,7 @@ async def explain_flag_hit(body: FlagExplainRequest, storage=Depends(get_storage
         flaggedText=matched,
         reasoning=reasoning,
     )
+
 
 
 
