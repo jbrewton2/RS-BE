@@ -315,7 +315,7 @@ async def explain_flag_hit(body: FlagExplainRequest, storage=Depends(get_storage
 
     NOTE: This is Phase 1 stabilization. Phase 2 will require hit_key (hit_id) always.
     """
-    reviews = _read_reviews_file()
+    reviews = _read_reviews_file(storage)
     review = next((r for r in reviews if r.get("id") == body.review_id), None)
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
@@ -373,6 +373,7 @@ async def explain_flag_hit(body: FlagExplainRequest, storage=Depends(get_storage
         flaggedText=matched,
         reasoning=reasoning,
     )
+
 
 
 
