@@ -45,7 +45,6 @@ from rag.router import router as rag_router
 
 # Health router (safe / unauthenticated)
 from health.router import router as health_router
-from vector.router import router as vector_router
 
 
 # ---------------------------------------------------------------------
@@ -551,7 +550,6 @@ app.include_router(knowledge_router, prefix="/api")
 app.include_router(llm_config_router, prefix="/api")
 app.include_router(pricing_router, prefix="/api")
 app.include_router(llm_status_router, prefix="/api")
-app.include_router(vector_router, prefix="/api")
 app.include_router(rag_router, prefix="/api")
 @app.get("/")
 async def root():

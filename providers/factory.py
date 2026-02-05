@@ -1,19 +1,31 @@
 ﻿from __future__ import annotations
+import os
 
 from dataclasses import dataclass
+import os
 from functools import lru_cache
+import os
 from typing import Optional
+import os
 
 from core.settings import get_settings, Settings
+import os
 
 from providers.storage import StorageProvider
+import os
 from providers.vectorstore import VectorStore
+import os
 from providers.jobs import JobRunner
+import os
 from providers.llm import LLMProvider
+import os
 
 from providers.impl.storage_local_files import LocalFilesStorageProvider
+import os
 from providers.impl.vector_disabled import DisabledVectorStore
+import os
 from providers.impl.jobs_local_inline import LocalInlineJobRunner
+import os
 
 # Optional impls
 try:
@@ -168,9 +180,20 @@ def _build_jobs(settings: Settings) -> JobRunner:
 
 
 def _build_llm(settings: Settings) -> Optional[LLMProvider]:
-    # optional – not required for RAG endpoints below (they call HTTP directly)
-    if getattr(settings.llm, "provider", "") == "ollama" and OllamaLLMProvider is not None:
+    """
+    LLM provider factory (authoritative).
+    Honors settings first, then env overrides for local/dev parity.
+    """
+    provider = (getattr(settings.llm, "provider", "") or "").strip().lower()
+
+    # Env overrides (keep compatibility with older naming)
+    env_provider = (os.environ.get("LLM_PROVIDER") or os.environ.get("OLLAMA_PROVIDER") or "").strip().lower()
+    if env_provider:
+        provider = env_provider
+
+    if provider == "ollama" and OllamaLLMProvider is not None:
         return OllamaLLMProvider()
+
     return None
 
 
@@ -184,3 +207,5 @@ def get_providers() -> Providers:
         jobs=_build_jobs(s),
         llm=_build_llm(s),
     )
+
+

@@ -109,6 +109,14 @@ class PgVectorStore(VectorStore):
             where.append("document_id = %s")
             params.append(str(doc_id))
 
+        # Review scoping (RAG safety boundary)
+        review_id = None
+        if filters:
+            review_id = filters.get("review_id") or filters.get("reviewId")
+        if review_id:
+            where.append("meta->>'review_id' = %s")
+            params.append(str(review_id))
+
         where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
         # cosine distance operator: <=>  (lower = closer)
@@ -151,3 +159,4 @@ class PgVectorStore(VectorStore):
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM css_doc_chunks WHERE document_id = %s", (document_id,))
+
