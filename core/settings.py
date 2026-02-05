@@ -84,14 +84,14 @@ class StorageSettings:
 
     provider:
       - "local"  -> LocalFilesStorageProvider
-      - "minio"  -> MinIO/S3-compatible object store provider (if enabled in providers.factory)
+      - "minio"  -> MinIO/S3-compatible object store provider
     """
     provider: str
 
     # Local
     local_dir: str = "./data"
 
-    # MinIO / S3-compatible (used when provider == "minio")
+    # S3-compatible (used when provider == "minio")
     minio_endpoint: str = "http://minio:9000"
     minio_bucket: str = "css"
     minio_access_key: str = ""
@@ -112,6 +112,7 @@ class KeycloakAuthSettings:
     issuer: str
     issuer_allowed: List[str]
     client_id: str
+    client_id_allowlist: List[str]
 
 
 @dataclass(frozen=True)
@@ -223,7 +224,6 @@ def _normalize_storage_provider(raw: str) -> str:
         return "minio"
     if v in ("local", "file", "files", "filesystem"):
         return "local"
-    # Default safe fallback
     return "local"
 
 
@@ -240,7 +240,6 @@ def _load_storage_settings() -> StorageSettings:
 
     local_dir = (_env("STORAGE_LOCAL_DIR", "") or _env("LOCAL_STORAGE_DIR", "") or "./data").strip()
 
-    # MinIO env vars (present even if provider is local; harmless)
     minio_endpoint = (_env("MINIO_ENDPOINT", "") or "http://minio:9000").strip().rstrip("/")
     minio_bucket = (_env("MINIO_BUCKET", "") or "css").strip()
     minio_access_key = (_env("MINIO_ACCESS_KEY", "") or "").strip()
@@ -289,23 +288,67 @@ def _load_entra_auth_settings() -> EntraAuthSettings:
 
 
 def _load_keycloak_auth_settings() -> KeycloakAuthSettings:
-    issuer = (_env("KEYCLOAK_ISSUER", "http://keycloak:8080/realms/css-local") or "").rstrip("/")
+    issuer = (
+        (_env("AUTH_ISSUER", "") or _env("KEYCLOAK_ISSUER", "http://keycloak:8080/realms/css-local") or "")
+    ).rstrip("/")
 
-    raw_allowed = (_env("KEYCLOAK_ISSUER_ALLOWED", "") or "").strip()
-    if raw_allowed:
-        issuer_allowed = [x.strip().rstrip("/") for x in _split_csv(raw_allowed)]
-    else:
+    # Allowlist from env (optional)
+    raw_allowed = (_env("AUTH_ISSUER_ALLOWED", "") or _env("KEYCLOAK_ISSUER_ALLOWED", "") or "").strip()
+    issuer_allowed = [x.rstrip("/") for x in _split_csv(raw_allowed) if x]
+
+    # Always allow BOTH internal + external forms in local dev
+    internal = ""
+    external = ""
+
+    if issuer.startswith("http://keycloak:8080"):
         internal = issuer
-        external = internal.replace("http://keycloak:8080", "http://localhost:8090")
-        out: List[str] = []
-        for x in [internal, external]:
-            if x and x not in out:
-                out.append(x)
-        issuer_allowed = out
+        external = issuer.replace("http://keycloak:8080", "http://localhost:8090")
+    elif issuer.startswith("http://localhost:8090"):
+        external = issuer
+        internal = issuer.replace("http://localhost:8090", "http://keycloak:8080")
+    elif issuer:
+        internal = issuer  # unknown host, still allow it
 
-    client_id = (_env("KEYCLOAK_CLIENT_ID", "css-frontend") or "css-frontend").strip()
+    for cand in [internal, external]:
+        if cand and cand not in issuer_allowed:
+            issuer_allowed.append(cand)
 
-    return KeycloakAuthSettings(issuer=issuer, issuer_allowed=issuer_allowed, client_id=client_id)
+    client_id = (_env("AUTH_CLIENT_ID", "") or _env("KEYCLOAK_CLIENT_ID", "css-frontend") or "css-frontend").strip()
+
+    raw_allow = (_env("AUTH_CLIENT_ID_ALLOWLIST", "") or _env("KEYCLOAK_CLIENT_ID_ALLOWLIST", "") or "").strip()
+    client_id_allowlist = [x.strip() for x in raw_allow.split(",") if x.strip()]
+
+    return KeycloakAuthSettings(
+        issuer=issuer,
+        issuer_allowed=issuer_allowed,
+        client_id=client_id,
+        client_id_allowlist=client_id_allowlist,
+    )
+
+
+    # Issuer allowlist (service-agnostic preferred)
+    raw_allowed = (_env("AUTH_ISSUER_ALLOWED", "") or _env("KEYCLOAK_ISSUER_ALLOWED", "") or "").strip()
+    issuer_allowed = [x.rstrip("/") for x in _split_csv(raw_allowed) if x.strip()]
+
+    # Dev convenience: if internal issuer is used, allow localhost issuer too
+    if issuer and issuer.startswith("http://keycloak:8080"):
+        external = issuer.replace("http://keycloak:8080", "http://localhost:8090")
+        if external not in issuer_allowed:
+            issuer_allowed.append(external)
+
+    # Primary client id expected by backend (service-agnostic preferred)
+    client_id = (_env("AUTH_CLIENT_ID", "") or _env("KEYCLOAK_CLIENT_ID", "css-frontend") or "css-frontend").strip()
+
+    # Allowlist of additional client ids (e.g., SPA client)
+    raw_allow = (_env("AUTH_CLIENT_ID_ALLOWLIST", "") or _env("KEYCLOAK_CLIENT_ID_ALLOWLIST", "") or "").strip()
+    client_id_allowlist = [x.strip() for x in raw_allow.split(",") if x.strip()]
+
+    return KeycloakAuthSettings(
+        issuer=issuer,
+        issuer_allowed=issuer_allowed,
+        client_id=client_id,
+        client_id_allowlist=client_id_allowlist,
+    )
 
 
 def _load_oidc_auth_settings() -> OIDCAuthSettings:

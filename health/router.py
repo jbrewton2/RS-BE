@@ -136,7 +136,7 @@ def db_vector_health():
                 pass
 
             # Prove the type exists
-            cur.execute("SELECT ''[1,2,3]''::vector;")
+            cur.execute("SELECT '[1,2,3]'::vector;")
             row = cur.fetchone()
         finally:
             try:
@@ -147,4 +147,5 @@ def db_vector_health():
         return {"ok": True, "pgvector": True, "sample_vector": str(row[0]) if row else None}
     except Exception as e:
         return {"ok": False, "pgvector": False, "error": str(e)}
+
 

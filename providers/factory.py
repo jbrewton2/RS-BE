@@ -1,32 +1,48 @@
-from __future__ import annotations
+﻿from __future__ import annotations
+import os
 
 from dataclasses import dataclass
+import os
 from functools import lru_cache
+import os
 from typing import Optional
+import os
 
 from core.settings import get_settings, Settings
+import os
 
 from providers.storage import StorageProvider
+import os
 from providers.vectorstore import VectorStore
+import os
 from providers.jobs import JobRunner
+import os
 from providers.llm import LLMProvider
+import os
 
-# Existing impls (DO NOT rename classes unless you change the impl files too)
 from providers.impl.storage_local_files import LocalFilesStorageProvider
+import os
 from providers.impl.vector_disabled import DisabledVectorStore
+import os
 from providers.impl.jobs_local_inline import LocalInlineJobRunner
+import os
 
-# Optional: LLM provider
-try:
-    from providers.impl.llm_ollama import OllamaLLMProvider
-except Exception:  # pragma: no cover
-    OllamaLLMProvider = None  # type: ignore
-
-# Optional: MinIO storage provider (only if you have it in your repo)
+# Optional impls
 try:
     from providers.impl.storage_minio import MinioStorageProvider  # type: ignore
 except Exception:  # pragma: no cover
     MinioStorageProvider = None  # type: ignore
+
+try:
+    from providers.impl.llm_ollama import OllamaLLMProvider  # type: ignore
+except Exception:  # pragma: no cover
+    OllamaLLMProvider = None  # type: ignore
+
+# ✅ pgvector impl (this MUST exist if VECTOR_STORE=pgvector)
+try:
+    from providers.impl.vector_pgvector import PgVectorStore  # type: ignore
+except Exception:  # pragma: no cover
+    PgVectorStore = None  # type: ignore
 
 
 @dataclass(frozen=True)
@@ -35,7 +51,7 @@ class Providers:
     storage: StorageProvider
     vector: VectorStore
     jobs: JobRunner
-    llm: Optional[LLMProvider]  # core.llm_client still drives LLM calls today
+    llm: Optional[LLMProvider]  # optional path; most routes still use core.llm_client
 
 
 def _get_attr(obj, name: str, default=None):
@@ -46,9 +62,10 @@ def _get_attr(obj, name: str, default=None):
 
 
 def _env(name: str, default: Optional[str] = None) -> Optional[str]:
-    v = default
     try:
-        v = __import__("os").environ.get(name, default)
+        import os
+
+        v = os.environ.get(name, default)
     except Exception:
         v = default
     if v is None:
@@ -59,14 +76,12 @@ def _env(name: str, default: Optional[str] = None) -> Optional[str]:
 
 def _build_storage(settings: Settings) -> StorageProvider:
     """
-    Storage selection is SETTINGS-DRIVEN.
-    This fixes the current behavior where env says STORAGE_MODE=minio but factory always returns LocalFilesStorageProvider.
+    Storage selection is SETTINGS/ENV driven.
 
-    Expected settings shape (best effort):
-      settings.storage.provider: "local" | "minio" | "object_store"
-      settings.storage.minio_endpoint / bucket / access_key / secret_key (optional)
+    Supported:
+      - local
+      - minio (S3-compatible)
     """
-
     storage_cfg = _get_attr(settings, "storage", None)
     provider = _get_attr(storage_cfg, "provider", None) or _get_attr(storage_cfg, "mode", None) or "local"
     provider = str(provider).strip().lower()
@@ -75,21 +90,18 @@ def _build_storage(settings: Settings) -> StorageProvider:
     if provider in ("files", "local_files", "localfiles"):
         provider = "local"
     if provider in ("objectstore", "object_store", "s3", "blob"):
-        # treat as minio-compatible object store in local dev
         provider = "minio"
 
     if provider == "local":
-        # default behavior as before
         return LocalFilesStorageProvider()
 
     if provider == "minio":
         if MinioStorageProvider is None:
             raise RuntimeError(
                 "settings.storage.provider=minio but providers.impl.storage_minio.MinioStorageProvider "
-                "could not be imported. Ensure providers/impl/storage_minio.py exists and deps are installed."
+                "could not be imported."
             )
 
-        # Pull from Settings if present, else env (supports your infra manifest/env)
         endpoint = (
             _get_attr(storage_cfg, "minio_endpoint", None)
             or _get_attr(storage_cfg, "endpoint", None)
@@ -123,14 +135,8 @@ def _build_storage(settings: Settings) -> StorageProvider:
         }.items() if not v]
 
         if missing:
-            raise RuntimeError(
-                "MinIO storage selected but required config is missing: "
-                + ", ".join(missing)
-                + ". Provide via settings.storage.* or env vars."
-            )
+            raise RuntimeError("MinIO storage selected but missing config: " + ", ".join(missing))
 
-        # Constructor signature is assumed to be endpoint/bucket/access_key/secret_key
-        # (matches what we�ve been using in infra)
         return MinioStorageProvider(
             endpoint=endpoint,
             bucket=bucket,
@@ -142,20 +148,52 @@ def _build_storage(settings: Settings) -> StorageProvider:
 
 
 def _build_vector(settings: Settings) -> VectorStore:
-    # today: disabled unless you add a vector implementation
+    """
+    Vector selection is SETTINGS/ENV driven.
+
+    - VECTOR_STORE=pgvector  -> PgVectorStore (local dev)
+    - otherwise              -> DisabledVectorStore
+    """
+    import os
+
+    provider = ""
+    try:
+        provider = (getattr(getattr(settings, "vector", None), "provider", "") or "").strip().lower()
+    except Exception:
+        provider = ""
+
+    env_provider = (os.environ.get("VECTOR_STORE") or os.environ.get("VECTOR_PROVIDER") or "").strip().lower()
+    if env_provider:
+        provider = env_provider
+
+    if provider == "pgvector":
+        if PgVectorStore is None:
+            raise RuntimeError("VECTOR_STORE=pgvector but PgVectorStore could not be imported.")
+        return PgVectorStore()
+
     return DisabledVectorStore()
 
 
+
 def _build_jobs(settings: Settings) -> JobRunner:
-    # today: inline placeholder
     return LocalInlineJobRunner()
 
 
 def _build_llm(settings: Settings) -> Optional[LLMProvider]:
-    # Leave None for now (core.llm_client is the active path)
-    # If you want to start using a provider object, enable this:
-    if settings.llm.provider == "ollama" and OllamaLLMProvider is not None:
+    """
+    LLM provider factory (authoritative).
+    Honors settings first, then env overrides for local/dev parity.
+    """
+    provider = (getattr(settings.llm, "provider", "") or "").strip().lower()
+
+    # Env overrides (keep compatibility with older naming)
+    env_provider = (os.environ.get("LLM_PROVIDER") or os.environ.get("OLLAMA_PROVIDER") or "").strip().lower()
+    if env_provider:
+        provider = env_provider
+
+    if provider == "ollama" and OllamaLLMProvider is not None:
         return OllamaLLMProvider()
+
     return None
 
 
@@ -169,3 +207,5 @@ def get_providers() -> Providers:
         jobs=_build_jobs(s),
         llm=_build_llm(s),
     )
+
+

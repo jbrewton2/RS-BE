@@ -66,8 +66,12 @@ def get_llm(request: Request) -> Any:
     Canonical LLM provider dependency.
     EXPECTS: providers.llm
     """
-    return getattr(get_providers(request), "llm")
-
+    p = get_providers(request)
+    llm = getattr(p, "llm", None)
+    if not llm:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="LLM provider not available (providers.llm is None)")
+    return llm
 
 LLMDep = Annotated[Any, Depends(get_llm)]
 
