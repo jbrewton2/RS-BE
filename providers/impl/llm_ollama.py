@@ -1,21 +1,75 @@
 ﻿from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+import os
+import httpx
 
 from providers.llm import LLMProvider
 
 
+def _env(name: str, default: str = "") -> str:
+    v = os.getenv(name)
+    return default if v is None else str(v)
+
+
+def _derive_ollama_embeddings_url(api_url: str) -> str:
+    """
+    Common:
+      generate:   http://.../api/generate
+      embeddings: http://.../api/embeddings
+    """
+    u = (api_url or "").strip()
+    if not u:
+        return "http://localhost:11434/api/embeddings"
+    if u.endswith("/api/generate"):
+        return u.replace("/api/generate", "/api/embeddings")
+    if u.endswith("/api/chat"):
+        return u.replace("/api/chat", "/api/embeddings")
+    # If user already pointed to embeddings, keep it
+    return u
+
+
 class OllamaLLMProvider(LLMProvider):
     """
-    Local provider wrapper.
+    Local provider wrapper (Ollama).
 
-    Phase 0.75:
-    - embed_texts is not wired yet (we don't have embeddings plumbing in current backend)
-    - generate is intentionally NOT used yet by routes (no behavior change)
+    We now implement embeddings so pgvector can work.
     """
 
     def embed_texts(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
-        raise NotImplementedError("Embeddings not wired yet (Phase 0.75).")
+        if not texts:
+            return []
+
+        # Model: prefer explicit EMBED_MODEL, else fall back to LLM_MODEL, else a sane default
+        embed_model = (
+            (model or "").strip()
+            or _env("EMBED_MODEL", "").strip()
+            or _env("LLM_EMBED_MODEL", "").strip()
+            or _env("LLM_MODEL", "").strip()
+            or "nomic-embed-text"
+        )
+
+        # Endpoint: prefer explicit, else derive from LLM_API_URL / OLLAMA_API_URL
+        base_generate_url = (_env("LLM_API_URL", "").strip() or _env("OLLAMA_API_URL", "").strip() or "http://localhost:11434/api/generate")
+        embed_url = (_env("EMBED_API_URL", "").strip() or _derive_ollama_embeddings_url(base_generate_url))
+
+        timeout = float(_env("EMBED_TIMEOUT_SECONDS", _env("LLM_TIMEOUT_SECONDS", "240") or "240") or "240")
+
+        out: List[List[float]] = []
+
+        # Call per text (Ollama embeddings endpoint is single-input in many builds)
+        with httpx.Client(timeout=timeout) as client:
+            for t in texts:
+                payload = {"model": embed_model, "prompt": t}
+                r = client.post(embed_url, json=payload)
+                r.raise_for_status()
+                data = r.json()
+                vec = data.get("embedding") or data.get("data") or None
+                if not isinstance(vec, list):
+                    raise RuntimeError(f"Ollama embeddings response missing 'embedding' list. keys={list(data.keys())}")
+                out.append([float(x) for x in vec])
+
+        return out
 
     def generate(
         self,
@@ -23,9 +77,8 @@ class OllamaLLMProvider(LLMProvider):
         model: Optional[str] = None,
         params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        # Not used yet by any route; placeholder for later.
+        # Leaving this as a non-wired placeholder; core.llm_client currently owns generation.
         return {
             "text": "",
             "metadata": {"provider": "ollama", "model": model, "params": params or {}},
         }
-

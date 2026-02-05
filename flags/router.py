@@ -1,5 +1,4 @@
 ﻿from __future__ import annotations
-from core.deps import get_storage
 
 import csv
 import io
@@ -9,6 +8,8 @@ from typing import List, Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
 from pydantic import BaseModel
+
+from core.deps import get_storage
 
 from flags.store import (
     FlagRule,
@@ -23,6 +24,7 @@ from reviews.router import _read_reviews_file
 # AUTH: JWT dependency
 from auth.jwt import get_current_user
 
+
 # ---------------------------------------------------------------------
 # Router (AUTH ENFORCED HERE)
 # ---------------------------------------------------------------------
@@ -32,6 +34,7 @@ router = APIRouter(
     tags=["flags"],
     dependencies=[Depends(get_current_user)],
 )
+
 
 # ---------------------------------------------------------------------
 # Internal helper: sanitize all patterns in FlagsPayload
@@ -63,15 +66,6 @@ def _stable_str(x: Any) -> str:
 def _make_hit_key(*, rule_id: str, doc_id: str, start: Any, end: Any, snippet: str) -> str:
     """
     Deterministic, stable ID for a specific hit.
-
-    Inputs chosen to remain stable across reloads:
-      - rule_id (flag rule id)
-      - doc_id
-      - match bounds (start/end if present)
-      - snippet hash (anchors content)
-
-    Output:
-      hit_<sha1prefix>
     """
     snippet_norm = (snippet or "").strip()
     snippet_hash = hashlib.sha1(snippet_norm.encode("utf-8", errors="ignore")).hexdigest()[:12]
@@ -82,9 +76,6 @@ def _make_hit_key(*, rule_id: str, doc_id: str, start: Any, end: Any, snippet: s
 def _ensure_hit_keys(hits: List[dict]) -> List[dict]:
     """
     Ensure every hit includes a deterministic hit_key.
-
-    This is safe to call on old stored data because it will only add hit_key
-    if missing.
     """
     out: List[dict] = []
     for h in hits:
@@ -119,14 +110,7 @@ def _find_hit(
     hit_index: Optional[int],
 ) -> dict:
     """
-    Deterministically select a hit, in priority order:
-
-      1) hit_key exact match
-      2) (doc_id + flag_id + snippet) match (best-effort stable)
-      3) hit_index if valid
-      4) fallback first hit
-
-    This prevents "always hits[0]" behavior.
+    Deterministically select a hit.
     """
     if not hits:
         raise HTTPException(status_code=404, detail="No auto flag hits")
@@ -180,10 +164,7 @@ async def get_flags(storage=Depends(get_storage)):
     try:
         return load_flags(storage)
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to load flags: {exc}",
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to load flags: {exc}")
 
 
 # ---------------------------------------------------------------------
@@ -197,10 +178,7 @@ async def update_flags(payload: FlagsPayload, storage=Depends(get_storage)):
         save_flags(cleaned, storage)
         return cleaned
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save flags: {exc}",
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to save flags: {exc}")
 
 
 # ---------------------------------------------------------------------
@@ -210,10 +188,7 @@ async def update_flags(payload: FlagsPayload, storage=Depends(get_storage)):
 async def test_flags(payload: Dict[str, object]):
     text = (payload.get("text") or "").strip()
     if not text:
-        raise HTTPException(
-            status_code=400,
-            detail="Payload must include non-empty 'text'.",
-        )
+        raise HTTPException(status_code=400, detail="Payload must include non-empty 'text'.")
 
     record_usage = bool(payload.get("record_usage", True))
     return scan_text_for_flags(text, record_usage=record_usage)
@@ -284,7 +259,7 @@ async def get_flags_usage():
 
 
 # ---------------------------------------------------------------------
-# POST /flags/explain
+# POST /flags/explain  (Option A)
 # ---------------------------------------------------------------------
 
 class FlagExplainRequest(BaseModel):
@@ -302,18 +277,54 @@ class FlagExplainResponse(BaseModel):
     reasoning: Optional[str] = None
 
 
+def _normalize_rule_id(rule_id: Optional[str]) -> Optional[str]:
+    if not rule_id:
+        return None
+    rid = str(rule_id)
+
+    # Deterministic legacy id mapping (old autoFlags used cyber_dfars_* ids)
+    if rid.startswith("cyber_dfars_"):
+        return "clause-dfars-" + rid.replace("cyber_dfars_", "")
+    return rid
+
+
+def _build_explanation(
+    *,
+    rule_id: Optional[str],
+    rule_label: str,
+    rule_severity: Optional[str],
+    rule_category: Optional[str],
+    rule_tip: Optional[str],
+    hit_key: Optional[str],
+    matched: Optional[str],
+    doc_id: Optional[str],
+) -> str:
+    return (
+        "WHY THIS FLAG TRIGGERED\n"
+        f"- Flag: {rule_label or (rule_id or 'Unknown rule')}\n"
+        f"- Severity: {rule_severity or 'Unknown'}\n"
+        f"- Category: {rule_category or 'Unknown'}\n"
+        f"- doc_id: {doc_id or 'Unknown'}\n"
+        f"- hit_key: {hit_key or 'Unknown'}\n\n"
+        "EVIDENCE (MATCHED TEXT)\n"
+        f"- {matched or 'Not available'}\n\n"
+        "WHY IT MATTERS\n"
+        f"- {rule_tip or 'This language may impose operational, compliance, or delivery obligations.'}\n\n"
+        "WHAT TO DO NEXT\n"
+        "- Confirm applicability with the contract section and surrounding context.\n"
+        "- Capture required actions/owners in your risk register.\n"
+        "- If unclear, route to the appropriate owner team for disposition.\n"
+    )
+
+
 @router.post("/explain", response_model=FlagExplainResponse)
 async def explain_flag_hit(body: FlagExplainRequest, storage=Depends(get_storage)):
     """
     Deterministic explain path.
 
-    Priority:
-      1) hit_key exact match
-      2) (doc_id + flag_id + snippet) best-effort match
-      3) hit_index
-      4) fallback first hit
-
-    NOTE: This is Phase 1 stabilization. Phase 2 will require hit_key (hit_id) always.
+    Option A behavior:
+      - If rule metadata is missing, DO NOT 404.
+      - Return a safe, deterministic explanation using hit fields as fallback.
     """
     reviews = _read_reviews_file(storage)
     review = next((r for r in reviews if r.get("id") == body.review_id), None)
@@ -324,7 +335,6 @@ async def explain_flag_hit(body: FlagExplainRequest, storage=Depends(get_storage
     if not hits:
         raise HTTPException(status_code=404, detail="No auto flag hits")
 
-    # Ensure hit_key exists for older stored hits
     hits = _ensure_hit_keys(hits)
 
     hit = _find_hit(
@@ -339,12 +349,9 @@ async def explain_flag_hit(body: FlagExplainRequest, storage=Depends(get_storage
     flags_payload = load_flags(storage)
     rules = (flags_payload.clause + flags_payload.context)
 
-    # Prefer the hit's id, but fall back to provided flag_id / stored flag_id for older hits
-    rule_id = hit.get("id") or hit.get("flag_id") or body.flag_id
-
-    # Deterministic legacy id mapping (old autoFlags used cyber_dfars_* ids)
-    if rule_id and str(rule_id).startswith("cyber_dfars_"):
-        rule_id = "clause-dfars-" + str(rule_id).replace("cyber_dfars_", "")
+    # Prefer hit id, then stored flag_id, then request flag_id
+    raw_rule_id = hit.get("id") or hit.get("flag_id") or body.flag_id
+    rule_id = _normalize_rule_id(raw_rule_id)
 
     rule = None
     if rule_id:
@@ -356,53 +363,53 @@ async def explain_flag_hit(body: FlagExplainRequest, storage=Depends(get_storage
         if hit_label:
             rule = next((r for r in rules if (getattr(r, "label", "") or "").strip() == hit_label), None)
 
-    if not rule:
-        raise HTTPException(status_code=404, detail=f"Flag rule not found (rule_id={rule_id})")
-
-    matched = (hit.get("matched_text") or hit.get("snippet") or "").strip() or None
+    matched = (hit.get("matched_text") or hit.get("snippet") or hit.get("match") or "").strip() or None
     hit_key = hit.get("hit_key")
+    doc_id = (hit.get("doc_id") or hit.get("docId") or body.doc_id or "").strip() or None
 
-    # Deterministic explanation template (no LLM here yet)
-    explanation = (
-        "WHY THIS FLAG TRIGGERED\n"
-        f"- Flag: {rule.label}\n"
-        f"- Severity: {getattr(rule, 'severity', None)}\n"
-        f"- Category: {getattr(rule, 'category', None)}\n"
-        f"- hit_key: {hit_key}\n\n"
-        "EVIDENCE (MATCHED TEXT)\n"
-        f"- {matched or 'Not available'}\n\n"
-        "WHY IT MATTERS\n"
-        f"- {rule.tip or 'This clause may impose security/compliance obligations.'}\n\n"
-        "WHAT TO DO NEXT\n"
-        "- Confirm applicability with the contract section and surrounding context.\n"
-        "- Capture any required actions/controls in your compliance plan.\n"
+    # ---- Option A: Never 404 due to missing rule ----
+    if not rule:
+        fallback_label = (hit.get("label") or "").strip() or (rule_id or "Unknown rule")
+        fallback_sev = (hit.get("severity") or "").strip() or None
+        fallback_cat = (hit.get("category") or "").strip() or None
+        fallback_tip = (
+            "Rule metadata was not found in the flags library for this hit. "
+            "Treat this as a deterministic finding based on matched text; validate the contract context."
+        )
+
+        explanation = _build_explanation(
+            rule_id=rule_id,
+            rule_label=fallback_label,
+            rule_severity=fallback_sev,
+            rule_category=fallback_cat,
+            rule_tip=fallback_tip,
+            hit_key=hit_key,
+            matched=matched,
+            doc_id=doc_id,
+        )
+
+        reasoning = (
+            f"rule_not_found_fallback: rule_id={rule_id}, hit_key={hit_key}. "
+            f"Returned deterministic explanation using hit fields."
+        )
+
+        return FlagExplainResponse(
+            explanation=explanation,
+            flaggedText=matched,
+            reasoning=reasoning,
+        )
+
+    # ---- Normal path with rule metadata ----
+    explanation = _build_explanation(
+        rule_id=rule.id,
+        rule_label=rule.label or rule.id,
+        rule_severity=getattr(rule, "severity", None),
+        rule_category=getattr(rule, "category", None),
+        rule_tip=getattr(rule, "tip", None),
+        hit_key=hit_key,
+        matched=matched,
+        doc_id=doc_id,
     )
 
-    reasoning = (
-        f"Selected hit via hit_key/doc_id/flag_id matching. "
-        f"rule_id={rule.id}, hit_key={hit_key}"
-    )
-
-    return FlagExplainResponse(
-        explanation=explanation,
-        flaggedText=matched,
-        reasoning=reasoning,
-    )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    reasoning = f"resolved_rule: rule_id={rule.id}, hit_key={hit_key}"
+    return FlagExplainResponse(explanation=explanation, flaggedText=matched, reasoning=reasoning)

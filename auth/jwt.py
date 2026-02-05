@@ -180,12 +180,16 @@ async def get_current_user(
 
             return claims
 
+        # Keycloak (default)
         client_id = s.auth.keycloak.client_id
+        extra = getattr(s.auth.keycloak, "client_id_allowlist", []) or []
+        allowed_client_ids = [client_id] + [x for x in extra if isinstance(x, str) and x.strip()]
+
         allowed_issuers = [x.rstrip("/") for x in (s.auth.keycloak.issuer_allowed or []) if x]
         if allowed_issuers and iss not in allowed_issuers:
             raise HTTPException(status_code=401, detail=f"Invalid issuer: {iss}")
 
-        if not _keycloak_aud_ok(claims, client_id):
+        if not any(_keycloak_aud_ok(claims, cid) for cid in allowed_client_ids if cid):
             raise HTTPException(status_code=401, detail="Invalid token audience")
 
         return claims

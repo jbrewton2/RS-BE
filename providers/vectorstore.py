@@ -8,12 +8,11 @@ class VectorStore(Protocol):
     """
     Vector index abstraction.
 
-    Phase 0: interface only (not wired).
+    We store *chunks with embeddings* as the single write path.
+    This avoids split-phase ingestion (chunks vs embeddings) and prevents drift.
     """
 
     def upsert_chunks(self, document_id: str, chunks: List[Dict[str, Any]]) -> None: ...
-
-    def upsert_embeddings(self, embeddings: List[Dict[str, Any]]) -> None: ...
 
     def query(
         self,

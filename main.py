@@ -1,18 +1,23 @@
 ﻿from __future__ import annotations
 
 from contextlib import asynccontextmanager
-
-import os
-from core.settings import get_settings
 from io import BytesIO
 from typing import Optional, List
+
+import os
+import re
+import tempfile
+import subprocess
+import uuid
 
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, HTMLResponse
+from fastapi.responses import Response, HTMLResponse, JSONResponse
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from pydantic import BaseModel
+
+from core.settings import get_settings
 
 # Core config: PdfReader, docx, FILES_DIR paths
 from core.config import PdfReader, docx, FILES_DIR, KNOWLEDGE_DOCS_DIR
@@ -36,14 +41,204 @@ from llm_status.router import router as llm_status_router
 from questionnaire.sessions_router import (
     router as questionnaire_sessions_router,
 )
-
-from core.auth_validation import validate_auth_config
+from rag.router import router as rag_router
 
 # Health router (safe / unauthenticated)
 from health.router import router as health_router
+from vector.router import router as vector_router
+
 
 # ---------------------------------------------------------------------
-# FastAPI app
+# Helpers
+# ---------------------------------------------------------------------
+
+def _guess_media_type(key: str) -> str:
+    """
+    Best-effort Content-Type based on key extension.
+    """
+    k = (key or "").lower()
+    if k.endswith(".pdf"):
+        return "application/pdf"
+    if k.endswith(".docx"):
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if k.endswith(".txt"):
+        return "text/plain; charset=utf-8"
+    if k.endswith(".json"):
+        return "application/json; charset=utf-8"
+    return "application/octet-stream"
+
+
+def _safe_filename(name: str) -> str:
+    """
+    Sanitize filename for logging/metadata purposes only.
+    We do NOT use filename as a storage key (avoids collisions).
+    """
+    name = (name or "upload").strip()
+    name = name.replace("\\", "/").split("/")[-1]
+    name = re.sub(r"[^A-Za-z0-9\.\-_# ]+", "_", name).strip("_")
+    return name[:180] or "upload"
+
+
+def _extract_text_from_pdf_stream(stream: BytesIO) -> str:
+    if PdfReader is None:
+        raise HTTPException(status_code=500, detail="PDF support not installed.")
+    try:
+        reader = PdfReader(stream)
+        texts: List[str] = []
+        for page in reader.pages:
+            try:
+                page_text = page.extract_text() or ""
+            except Exception:
+                page_text = ""
+            if page_text.strip():
+                texts.append(page_text)
+        return "\n".join(texts).strip() or "(No text extracted.)"
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read PDF: {exc}")
+
+
+def _extract_text_from_docx_stream(stream: BytesIO) -> str:
+    if docx is None:
+        raise HTTPException(status_code=500, detail="DOCX support not installed.")
+    try:
+        document = docx.Document(stream)
+        paras = [p.text for p in document.paragraphs]
+        return "\n".join(paras).strip() or "(No text extracted.)"
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read DOCX: {exc}")
+
+
+def _convert_docx_bytes_to_pdf_bytes(
+    docx_bytes: bytes,
+    *,
+    timeout_seconds: int = 120,
+    work_root: str = "/tmp/css-doc-conversion",
+) -> Optional[bytes]:
+    """
+    Convert DOCX bytes -> PDF bytes using LibreOffice (soffice).
+    Returns None if conversion fails.
+    SAFE + NON-BLOCKING: conversion failure must NOT break extraction.
+    """
+    soffice = os.environ.get("SOFFICE_PATH", "soffice")
+
+    # fast-fail if soffice not present
+    try:
+        subprocess.run([soffice, "--version"], capture_output=True, text=True, check=False)
+    except Exception:
+        return None
+
+    # Ensure work root exists (fall back to system temp if not)
+    try:
+        os.makedirs(work_root, exist_ok=True)
+        td_parent = work_root
+    except Exception:
+        td_parent = None
+
+    with tempfile.TemporaryDirectory(prefix="css-docx2pdf-", dir=td_parent) as td:
+        in_path = os.path.join(td, "input.docx")
+        out_dir = os.path.join(td, "out")
+        os.makedirs(out_dir, exist_ok=True)
+
+        with open(in_path, "wb") as f:
+            f.write(docx_bytes)
+
+        cmd = [
+            soffice,
+            "--headless",
+            "--nologo",
+            "--nofirststartwizard",
+            "--norestore",
+            "--nolockcheck",
+            "--nodefault",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            out_dir,
+            in_path,
+        ]
+
+        # Harden LO runtime so it writes profiles/temp inside the temp directory
+        env = os.environ.copy()
+        env["HOME"] = td
+        env["TMPDIR"] = td
+
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds, check=False, env=env)
+        except subprocess.TimeoutExpired:
+            return None
+        except Exception:
+            return None
+
+        if proc.returncode != 0:
+            return None
+
+        # LibreOffice writes output with same basename
+        pdf_path = os.path.join(out_dir, "input.pdf")
+        if not os.path.exists(pdf_path):
+            # Sometimes different naming; find any PDF
+            candidates = [p for p in os.listdir(out_dir) if p.lower().endswith(".pdf")]
+            if not candidates:
+                return None
+            pdf_path = os.path.join(out_dir, candidates[0])
+
+        try:
+            with open(pdf_path, "rb") as f:
+                return f.read()
+        except Exception:
+            return None
+
+
+# ---------------------------------------------------------------------
+# pgvector startup tasks
+# ---------------------------------------------------------------------
+
+def _pg_connect_for_startup():
+    """
+    Short-lived DB connection helper for startup tasks.
+    Uses env vars / settings.
+    """
+    s = get_settings()
+    host = s.db.host
+    port = int(s.db.port)
+    db = s.db.database
+    user = s.db.user
+    pw = s.db.password
+    try:
+        import psycopg  # type: ignore
+        return psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw)
+    except Exception:
+        import psycopg2  # type: ignore
+        return psycopg2.connect(host=host, port=port, dbname=db, user=user, password=pw)
+
+
+def _ensure_pgvector_extension():
+    """
+    If VECTOR provider is pgvector, ensure extension exists.
+    Safe/idempotent; fail-soft if DB isn't ready.
+    """
+    try:
+        if (get_settings().vector.provider or "").lower() != "pgvector":
+            return
+    except Exception:
+        return
+
+    try:
+        conn = _pg_connect_for_startup()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------
+# Lifespan (seed storage)
 # ---------------------------------------------------------------------
 
 @asynccontextmanager
@@ -52,15 +247,17 @@ async def lifespan(app: FastAPI):
     Ensure provider-backed store files exist under:
       - stores/*.json
       - knowledge_docs/*.txt
+    Seed once from FILES_DIR/seed + KNOWLEDGE_DOCS_DIR.
 
-    If missing, seed from legacy filesystem locations once.
+    IMPORTANT:
+    - This does NOT define the storage backend.
+    - Storage is selected ONLY by core.settings + init_providers().
     """
     storage = app.state.providers.storage
 
     # 1) Ensure pgvector is available (idempotent)
     _ensure_pgvector_extension()
 
-    # 2) JSON stores: (storage_key, seed_path, empty_default)
     seed_dir = os.path.join(FILES_DIR, "seed")
 
     stores = [
@@ -94,16 +291,11 @@ async def lifespan(app: FastAPI):
             data = empty_default.encode("utf-8")
 
         try:
-            storage.put_object(
-                key=key,
-                data=data,
-                content_type="application/json",
-                metadata=None,
-            )
+            storage.put_object(key=key, data=data, content_type="application/json", metadata=None)
         except Exception:
             pass
 
-    # 3) Knowledge doc texts: seed from FILES seed KNOWLEDGE_DOCS_DIR -> storage key knowledge_docs/<filename>
+    # Knowledge docs (.txt) seed
     try:
         legacy_docs_dir = KNOWLEDGE_DOCS_DIR
         if os.path.isdir(legacy_docs_dir):
@@ -122,12 +314,7 @@ async def lifespan(app: FastAPI):
                 try:
                     with open(legacy_file, "rb") as f:
                         b = f.read()
-                    storage.put_object(
-                        key=storage_key,
-                        data=b,
-                        content_type="text/plain",
-                        metadata=None,
-                    )
+                    storage.put_object(key=storage_key, data=b, content_type="text/plain", metadata=None)
                 except Exception:
                     pass
     except Exception:
@@ -135,21 +322,27 @@ async def lifespan(app: FastAPI):
 
     yield
 
+
+# ---------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------
+
 app = FastAPI(
     title="Contract Security Studio Backend",
     lifespan=lifespan,
 )
 
-# Providers (Phase 0.5): attach provider container to app.state
+# Providers: attach provider container to app.state.
+# SINGLE SOURCE OF TRUTH: core.settings.get_settings() drives init_providers().
 app.state.providers = init_providers(app)
-# CORS:
+
+# CORS (dev only; in prod we use same-origin proxy)
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:8080",
     "http://127.0.0.1:8080",
 ]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -158,119 +351,59 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # ---------------------------------------------------------------------
-# Startup safety net: seed StorageProvider stores once (future-proof)
+# Models
 # ---------------------------------------------------------------------
-
-
-def _pg_connect_for_startup():
-    """
-    Short-lived DB connection helper for startup tasks.
-    Uses env vars (works for Azure sidecar Postgres).
-    """
-    s = get_settings()
-    host = s.db.host
-    port = int(s.db.port)
-    db = s.db.database
-    user = s.db.user
-    pw = s.db.password
-    # Try psycopg (new) then psycopg2 (old)
-    try:
-        import psycopg  # type: ignore
-
-        return psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw)
-    except Exception:
-        import psycopg2  # type: ignore
-
-        return psycopg2.connect(host=host, port=port, dbname=db, user=user, password=pw)
-
-
-def _ensure_pgvector_extension():
-    """
-    Bulletproof pgvector enablement.
-    If VECTOR_STORE=pgvector, ensure CREATE EXTENSION IF NOT EXISTS vector; runs once at startup.
-    Safe/idempotent. If DB not ready, fail soft.
-    """
-    if (get_settings().vector.provider or '').lower() != 'pgvector':
-        return
-
-    try:
-        conn = _pg_connect_for_startup()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            try:
-                conn.commit()
-            except Exception:
-                pass
-        finally:
-            conn.close()
-    except Exception:
-        # Fail soft: DB may not be ready yet; vector health can still create it later.
-        pass
-
 
 class ExtractResponseModel(BaseModel):
     text: str
     type: str
     pdf_url: Optional[str] = None
     pages: Optional[List[dict]] = None
+    doc_id: Optional[str] = None
+    filename: Optional[str] = None
 
 
 # ---------------------------------------------------------------------
-# /files + /extract
+# Files + Extract
 # ---------------------------------------------------------------------
 
+@app.get("/files/{key:path}")
+async def get_file(key: str, request: Request):
+    """
+    Serve stored files from the StorageProvider.
 
-@app.get("/files/{filename}")
-async def get_file(filename: str, request: Request):
+    IMPORTANT:
+    - This reads from the active StorageProvider (MinIO now, S3 later).
+    - No local filesystem reads occur here.
+    """
     storage = request.app.state.providers.storage
+    if not key:
+        raise HTTPException(status_code=400, detail="Missing key")
+
     try:
-        data = storage.get_object(filename)
+        data = storage.get_object(key)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="File not found")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to read file: {exc}")
-    return Response(content=data, media_type="application/pdf")
+
+    if not data:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return Response(content=data, media_type=_guess_media_type(key))
 
 
-def _extract_text_from_pdf_stream(stream: BytesIO) -> str:
-    if PdfReader is None:
-        raise HTTPException(status_code=500, detail="PDF support not installed.")
-    try:
-        reader = PdfReader(stream)
-        texts: List[str] = []
-        for page in reader.pages:
-            try:
-                page_text = page.extract_text() or ""
-            except Exception:
-                page_text = ""
-            if page_text.strip():
-                texts.append(page_text)
-        return "\n".join(texts).strip() or "(No text extracted.)"
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read PDF: {exc}")
-
-
-def _extract_text_from_docx_stream(stream: BytesIO) -> str:
-    if docx is None:
-        raise HTTPException(status_code=500, detail="DOCX support not installed.")
-    try:
-        document = docx.Document(stream)
-        paras = [p.text for p in document.paragraphs]
-        return "\n".join(paras).strip() or "(No text extracted.)"
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read DOCX: {exc}")
+def _pdf_key_for_doc_id(doc_id: str) -> str:
+    # Canonical: do not use filename as key (avoids collision)
+    return f"review_pdfs/{doc_id}.pdf"
 
 
 async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseModel:
-    """
-    NOTE:
-    - Request must be a real dependency param (not Optional default None),
-      otherwise FastAPI will try to treat it as a Pydantic field and crash.
-    """
-    filename = file.filename or ""
-    ext = os.path.splitext(filename)[1].lower()
+    filename_raw = file.filename or "upload"
+    filename = _safe_filename(filename_raw)
+    ext = os.path.splitext(filename_raw)[1].lower()
 
     try:
         contents = await file.read()
@@ -280,29 +413,51 @@ async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseMo
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
+    storage = request.app.state.providers.storage
+    doc_id = str(uuid.uuid4())
+
+    # -------------------------
+    # DOCX: extract text + convert to PDF (non-blocking)
+    # -------------------------
     if ext == ".docx":
         text = _extract_text_from_docx_stream(BytesIO(contents))
-        return ExtractResponseModel(text=text, type="docx")
 
+        pdf_bytes = _convert_docx_bytes_to_pdf_bytes(contents)
+        pdf_url = None
+
+        if pdf_bytes:
+            pdf_key = _pdf_key_for_doc_id(doc_id)
+            try:
+                storage.put_object(key=pdf_key, data=pdf_bytes, content_type="application/pdf", metadata=None)
+                pdf_url = f"/files/{pdf_key}"
+            except Exception:
+                # Non-blocking by design
+                pdf_url = None
+
+        return ExtractResponseModel(text=text, type="docx", pdf_url=pdf_url, pages=None, doc_id=doc_id, filename=filename)
+
+    # -------------------------
+    # PDF: store PDF + extract text
+    # -------------------------
     if ext == ".pdf":
-        if PdfReader is None:
-            raise HTTPException(status_code=500, detail="PDF support not installed.")
-        safe_name = filename.replace(" ", "_") or "uploaded.pdf"
+        pdf_key = _pdf_key_for_doc_id(doc_id)
+        try:
+            storage.put_object(key=pdf_key, data=contents, content_type="application/pdf", metadata=None)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to store PDF: {exc}")
 
-        storage = request.app.state.providers.storage
-        storage.put_object(
-            key=safe_name,
-            data=contents,
-            content_type="application/pdf",
-            metadata=None,
-        )
-
-        pdf_url = f"/files/{safe_name}"
+        pdf_url = f"/files/{pdf_key}"
         text = _extract_text_from_pdf_stream(BytesIO(contents))
-        return ExtractResponseModel(text=text, type="pdf", pdf_url=pdf_url, pages=None)
+        return ExtractResponseModel(text=text, type="pdf", pdf_url=pdf_url, pages=None, doc_id=doc_id, filename=filename)
 
-    text = contents.decode("utf-8", errors="ignore")
-    return ExtractResponseModel(text=text, type=ext.lstrip(".") or "txt")
+    # -------------------------
+    # TXT or fallback
+    # -------------------------
+    try:
+        text = contents.decode("utf-8", errors="replace").strip()
+    except Exception:
+        text = ""
+    return ExtractResponseModel(text=text, type=ext.lstrip(".") or "txt", pdf_url=None, pages=None, doc_id=doc_id, filename=filename)
 
 
 @app.post("/extract", response_model=ExtractResponseModel)
@@ -310,16 +465,14 @@ async def extract(request: Request, file: UploadFile = File(...)):
     return await _extract_impl(request=request, file=file)
 
 
-# API alias so Front Door can route everything under /api/*
 @app.post("/api/extract", response_model=ExtractResponseModel, include_in_schema=True)
 async def api_extract(request: Request, file: UploadFile = File(...)):
     return await _extract_impl(request=request, file=file)
 
 
 # ---------------------------------------------------------------------
-# Legacy /analyze (direct LLM call) ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â kept for compatibility
+# Legacy /analyze (compat)
 # ---------------------------------------------------------------------
-
 
 async def _analyze_impl(req: AnalyzeRequestModel) -> AnalyzeResponseModel:
     text = (req.text or "").strip()
@@ -349,63 +502,47 @@ async def analyze(req: AnalyzeRequestModel):
     return await _analyze_impl(req)
 
 
-# API alias so Front Door can route everything under /api/*
 @app.post("/api/analyze", response_model=AnalyzeResponseModel, include_in_schema=True)
 async def api_analyze(req: AnalyzeRequestModel):
     return await _analyze_impl(req)
 
 
 # ---------------------------------------------------------------------
-# Health + OpenAPI helpers (Front Door safe)
+# Health + OpenAPI helpers
 # ---------------------------------------------------------------------
-
 
 @app.get("/api/health", include_in_schema=True)
 def api_health():
-    # Keep this super simple and always unauthenticated
     return {"ok": True}
 
 
 @app.get("/api/openapi.json", include_in_schema=False)
 def api_openapi():
-    # Front Door should route /api/* to backend; this avoids needing /openapi.json at the root.
     return app.openapi()
 
 
 @app.get("/api/docs", include_in_schema=False)
 def api_docs() -> HTMLResponse:
-    return get_swagger_ui_html(
-        openapi_url="/api/openapi.json",
-        title="CSS Backend API Docs",
-    )
+    return get_swagger_ui_html(openapi_url="/api/openapi.json", title="CSS Backend API Docs")
 
 
 @app.get("/api/redoc", include_in_schema=False)
 def api_redoc() -> HTMLResponse:
-    return get_redoc_html(
-        openapi_url="/api/openapi.json",
-        title="CSS Backend API Docs (ReDoc)",
-    )
+    return get_redoc_html(openapi_url="/api/openapi.json", title="CSS Backend API Docs (ReDoc)")
 
 
 # ---------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------
 
-# Keep health router at root because it already defines:
-#   /health
-#   /health/llm
-#   /api/db/health
-#   /api/db/vector-health
+# Health router at root (already defines /health and /api/db/*)
 app.include_router(health_router)
 
-# Mount questionnaire sessions at root (required for pytest + backwards-compat):
-#   /questionnaires
-#   /questionnaires/{session_id}
+# Sessions at root + /api (backwards compat)
 app.include_router(questionnaire_sessions_router)
 app.include_router(questionnaire_sessions_router, prefix="/api")
 
-# All functional API routers mounted under /api/*
+# Functional routers under /api
 app.include_router(flags_router, prefix="/api")
 app.include_router(reviews_router, prefix="/api")
 app.include_router(questionnaire_router, prefix="/api")
@@ -414,25 +551,17 @@ app.include_router(knowledge_router, prefix="/api")
 app.include_router(llm_config_router, prefix="/api")
 app.include_router(pricing_router, prefix="/api")
 app.include_router(llm_status_router, prefix="/api")
-
-# Also expose sessions router under /api for Front Door / IL5 routing:
-#   /api/questionnaires
-#   /api/questionnaires/{session_id}
-
-
-
+app.include_router(vector_router, prefix="/api")
+app.include_router(rag_router, prefix="/api")
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "CSS backend running"}
 
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+
 
 
 
