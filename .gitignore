@@ -66,3 +66,20 @@ out/
 
 scripts/inspect-providers.ps1
 
+# Local patch/backup artifacts
+*.bak_*
+rag/service.py.bak_*
+providers/impl/*.bak_*
+# Environments / IDE
+.venv/
+.vs/
+out/
+
+# Big artifacts
+*.zip
+*.7z
+*.tar
+*.gz
+*.bin
+*.sqlite
+*.db

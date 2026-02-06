@@ -1,4 +1,4 @@
-﻿import json
+import json
 from typing import Any, Dict
 
 import pytest

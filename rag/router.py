@@ -1,8 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import traceback
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -38,6 +38,11 @@ class AnalyzeRequest(BaseModel):
     review_id: str
     top_k: int = 12
     force_reingest: bool = False
+
+    # NEW: mode controls question set + prompt behavior
+    # "review_summary" is the bounded workflow for Reviews.
+    # "chat" reserved for future if chat migrates to /rag/analyze.
+    mode: Optional[str] = None
 
 
 @router.get("/ingest-status")
@@ -123,6 +128,7 @@ async def rag_analyze(req: AnalyzeRequest, storage=Depends(get_storage), vector=
             review_id=req.review_id,
             top_k=req.top_k,
             force_reingest=req.force_reingest,
+            mode=req.mode,
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="Review not found")

@@ -1,4 +1,4 @@
-﻿from core.settings import get_settings
+from core.settings import get_settings
 
 
 def test_storage_mode_wins_over_storage_provider(monkeypatch):

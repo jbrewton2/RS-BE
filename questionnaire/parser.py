@@ -1,4 +1,4 @@
-﻿# backend/questionnaire/parser.py
+# backend/questionnaire/parser.py
 from __future__ import annotations
 
 import re

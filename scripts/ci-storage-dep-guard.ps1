@@ -1,33 +1,53 @@
-param()
-
+Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
 
-# Any router using storage.get_object/put_object/etc must have "storage" in the signature.
-$routerFiles = Get-ChildItem -Recurse -Filter router.py |
-  Where-Object { $_.FullName -notmatch "\\\.venv\\|\\__pycache__\\|\\out\\|\\\.git\\" }
+. "$PSScriptRoot\_lib\scan-paths.ps1"
 
-$fail = $false
+$allowedException = (Resolve-Path ".\questionnaire\sessions_router.py").Path
+$methodPattern = 'storage\.(get_object|put_object|delete_object|head_object)\s*\('
+$defPattern = '^\s*(async\s+def|def)\s+([A-Za-z0-9_]+)\s*\('
 
-foreach ($rf in $routerFiles) {
-  $p = $rf.FullName
-  $lines = Get-Content $p
+function Get-DefHeader {
+  param([string[]]$Lines, [int]$Index)
 
-  for ($i=0; $i -lt $lines.Count; $i++) {
-    if ($lines[$i] -match '\bstorage\.(get_object|put_object|delete_object|head_object)\b') {
-
-      $def = $null
-      for ($j=$i; $j -ge 0; $j--) {
-        if ($lines[$j] -match '^(async\s+def|def)\s+') { $def = $lines[$j]; break }
+  for ($i = $Index; $i -ge 0; $i--) {
+    if ($Lines[$i] -match $defPattern) {
+      $hdr = $Lines[$i]
+      $j = $i + 1
+      while ($j -lt $Lines.Length -and $hdr -notmatch '\)\s*(:|->)') {
+        $hdr += "`n" + $Lines[$j]
+        $j++
       }
+      return @{ Start = $i; Header = $hdr }
+    }
+  }
+  return $null
+}
 
-      if ($def -and $def -notmatch '\bstorage\b') {
-        Write-Host ("STORAGE DEP DRIFT: {0}:{1} -> {2}" -f $p, ($i+1), $def.Trim()) -ForegroundColor Red
-        $fail = $true
+$fail = @()
+
+foreach ($f in Get-CssRouterFiles ".") {
+  $full = (Resolve-Path $f).Path
+  if ($full -eq $allowedException) { continue }
+
+  $lines = Get-Content -LiteralPath $f
+  for ($i = 0; $i -lt $lines.Length; $i++) {
+    if ($lines[$i] -match $methodPattern) {
+      $def = Get-DefHeader -Lines $lines -Index $i
+      if (-not $def) {
+        $fail += ("{0}:{1}: storage.* used but no enclosing def found above" -f $f, ($i+1))
+        continue
+      }
+      if ($def.Header -notmatch '\bstorage\b') {
+        $fail += ("{0}:{1}: storage.* used but route signature missing 'storage' dependency. Function header starts at line {2}." -f $f, ($i+1), ($def.Start+1))
       }
     }
   }
 }
 
-if ($fail) { throw "CI FAIL: routes use storage.* without storage param (use StorageDep or pass storage explicitly)" }
+if ($fail.Count -gt 0) {
+  $fail | Sort-Object | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+  throw "CI FAIL: StorageDep guard failed. Routers using storage.* must accept storage in signature (except questionnaire\sessions_router.py)."
+}
 
-Write-Host "CI STORAGE DEP OK" -ForegroundColor Green
+Write-Host "OK: storage dependency guard passed." -ForegroundColor Green
