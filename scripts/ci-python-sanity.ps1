@@ -1,14 +1,34 @@
-param()
-
+Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
 
-# Fail on duplicate "request: Request" in function defs
-$hits = Select-String -Path ".\**\*.py" -Pattern 'def\s+\w+\(.*request:\s*Request.*request:\s*Request' -AllMatches |
-  Where-Object { $_.Path -notmatch "\\\.venv\\|\\__pycache__\\|\\out\\|\\\.git\\" }
+. "$PSScriptRoot\_lib\scan-paths.ps1"
 
-if ($hits) {
-  $hits | ForEach-Object { "{0}:{1} {2}" -f $_.Path, $_.LineNumber, $_.Line.Trim() }
-  throw "CI FAIL: duplicate request: Request in function signature"
+$fail = @()
+
+foreach ($f in Get-CssPythonFiles ".") {
+  # force array always
+  $lines = @(Get-Content -LiteralPath $f)
+
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match '^\s*(async\s+def|def)\s+') {
+      $hdr = $lines[$i]
+      $j = $i + 1
+      while ($j -lt $lines.Count -and $hdr -notmatch '\)\s*(:|->)') {
+        $hdr += " " + ($lines[$j].Trim())
+        $j++
+      }
+
+      $matches = [regex]::Matches($hdr, '\brequest\s*:\s*Request\b')
+      if ($matches.Count -gt 1) {
+        $fail += ("{0}:{1}: duplicate 'request: Request' in function signature" -f $f, ($i+1))
+      }
+    }
+  }
 }
 
-Write-Host "CI PYTHON SANITY OK" -ForegroundColor Green
+if ($fail.Count -gt 0) {
+  $fail | Sort-Object | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+  throw "CI FAIL: python sanity checks failed."
+}
+
+Write-Host "OK: python sanity checks passed." -ForegroundColor Green

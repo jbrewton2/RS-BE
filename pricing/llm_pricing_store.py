@@ -1,4 +1,4 @@
-﻿# backend/pricing/llm_pricing_store.py
+# backend/pricing/llm_pricing_store.py
 from __future__ import annotations
 
 import json

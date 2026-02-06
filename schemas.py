@@ -1,4 +1,3 @@
-﻿# backend/schemas.py
 from __future__ import annotations
 
 from typing import List, Optional, Dict
@@ -119,6 +118,9 @@ class AnalyzeRequestModel(BaseModel):
     prompt_override: Optional[str] = None
     temperature: Optional[float] = 0.2
     model: Optional[str] = None
+
+    # NEW: optional caller mode (safe/back-compat)
+    mode: Optional[str] = None
 
     # NEW: Knowledge docs for review
     knowledge_doc_ids: Optional[List[str]] = None

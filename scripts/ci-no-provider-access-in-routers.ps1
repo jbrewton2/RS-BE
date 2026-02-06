@@ -1,29 +1,30 @@
-param()
-
+Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
 
-# Only allow providers_from_request(...) in questionnaire\sessions_router.py (test seam + core router).
-$allow = (Resolve-Path ".\questionnaire\sessions_router.py").Path
+. "$PSScriptRoot\_lib\scan-paths.ps1"
 
-$routerFiles = Get-ChildItem -Recurse -Filter router.py |
-  Where-Object {
-    $_.FullName -notmatch "\\\.venv\\|\\__pycache__\\|\\out\\|\\\.git\\" -and
-    (Resolve-Path $_.FullName).Path -ne $allow
-  }
+$allow = @(
+  (Resolve-Path ".\core\deps.py").Path,
+  (Resolve-Path ".\core\providers.py").Path,
+  (Resolve-Path ".\questionnaire\sessions_router.py").Path
+)
 
-$fail = $false
-
-foreach ($rf in $routerFiles) {
-  $p = $rf.FullName
-  $hits = Select-String -Path $p -Pattern 'providers_from_request\(' -AllMatches
-  if ($hits) {
-    $hits | ForEach-Object {
-      Write-Host ("FORBIDDEN IN ROUTER: {0}:{1} {2}" -f $_.Path, $_.LineNumber, $_.Line.Trim()) -ForegroundColor Red
+$hits = @()
+foreach ($f in Get-CssRouterFiles ".") {
+  $m = Select-String -Path $f -Pattern 'providers_from_request\s*\(' -AllMatches
+  if ($m) {
+    $full = (Resolve-Path $f).Path
+    if ($allow -notcontains $full) {
+      foreach ($h in $m) {
+        $hits += ("{0}:{1}: providers_from_request(...) is forbidden in routers (use deps / pass providers)" -f $h.Path, $h.LineNumber)
+      }
     }
-    $fail = $true
   }
 }
 
-if ($fail) { throw "CI FAIL: routers must not call providers_from_request(); use StorageDep/ProvidersDep or pass storage explicitly." }
+if ($hits.Count -gt 0) {
+  $hits | Sort-Object | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+  throw "CI FAIL: routers must not call providers_from_request(); only core deps/providers and questionnaire\sessions_router.py may use it."
+}
 
-Write-Host "CI NO-PROVIDER-ACCESS-IN-ROUTERS OK" -ForegroundColor Green
+Write-Host "OK: no forbidden providers_from_request() usage in routers." -ForegroundColor Green

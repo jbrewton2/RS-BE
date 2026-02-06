@@ -1,4 +1,4 @@
-﻿# backend/questionnaire/scoring.py
+# backend/questionnaire/scoring.py
 from __future__ import annotations
 from typing import List, Optional
 from questionnaire.models import QuestionnaireQuestionModel

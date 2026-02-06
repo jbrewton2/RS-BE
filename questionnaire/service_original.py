@@ -1,4 +1,4 @@
-﻿# backend/app/questionnaire/service.py
+# backend/app/questionnaire/service.py
 from __future__ import annotations
 from typing import List, Optional
 
