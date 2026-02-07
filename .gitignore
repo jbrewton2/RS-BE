@@ -83,3 +83,7 @@ out/
 *.bin
 *.sqlite
 *.db
+
+# git-filter-repo artifacts
+.git/filter-repo/
+
