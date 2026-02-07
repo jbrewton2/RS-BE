@@ -87,3 +87,8 @@ out/
 # git-filter-repo artifacts
 .git/filter-repo/
 
+_archive/
+body.json
+openapi*.json
+
+
