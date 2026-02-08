@@ -427,8 +427,8 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
                 # keep parsing content lines below as actions
                 continue
 
-            is_bullet = t.startswith(("-", "â€¢", "*"))
-            bullet_text = t.lstrip("-â€¢*").strip() if is_bullet else t
+            is_bullet = t.startswith(("-", "Ã¢â‚¬Â¢", "*"))
+            bullet_text = t.lstrip("-Ã¢â‚¬Â¢*").strip() if is_bullet else t
 
             if mode == "findings":
                 sec["findings"].append(bullet_text)
@@ -643,6 +643,165 @@ def _attach_evidence_to_sections(
     for s in sections:
         if "_evidence_seen" in s:
             del s["_evidence_seen"]
+
+    return sections
+
+def _section_keywords(section_id: str) -> List[str]:
+    sid = (section_id or "").strip().lower()
+    m: Dict[str, List[str]] = {
+        "overview": ["shall", "must", "required", "prohibited", "rmf", "ato", "il", "nist", "dfars", "deliverables", "cdrl"],
+        "mission-objective": ["mission", "objective", "goal", "purpose", "intent"],
+        "scope-of-work": ["scope", "work", "tasks", "responsible", "shall", "provide", "perform", "support"],
+        "deliverables-timelines": ["deliverable", "cdrl", "submission", "due", "weekly", "monthly", "quarterly", "schedule", "ims", "timeline", "approval"],
+        "security-compliance-hosting-constraints": ["rmf", "ato", "il", "impact level", "nist", "800-53", "800-171", "encryption", "logging", "audit", "conmon", "incident", "breach", "zero trust"],
+        "eligibility-personnel-constraints": ["citizenship", "clearance", "personnel", "staffing", "subcontractor", "flow down", "export", "fsi", "vet"],
+        "legal-data-rights-risks": ["data rights", "ip", "license", "audit rights", "gfi", "gfm", "disclosure", "penalty", "confidential", "rights"],
+        "financial-risks": ["cost", "ceiling", "invoice", "payment", "burn rate", "overrun", "funding", "price", "rom"],
+        "submission-instructions-deadlines": ["submission", "deadline", "instructions", "proposal", "format", "due"],
+        "contradictions-inconsistencies": ["conflict", "inconsistent", "contradiction", "ambiguous", "undefined", "clarify"],
+        "gaps-questions-for-the-government": ["clarify", "confirm", "government", "missing", "undefined", "gap"],
+        "recommended-internal-actions": ["recommend", "action", "internal", "confirm", "assign", "owner", "review"],
+    }
+    return m.get(sid, [])
+
+
+def _text_matches_keywords(text: str, keywords: List[str]) -> bool:
+    t = (text or "").lower()
+    for k in (keywords or []):
+        if k and k.lower() in t:
+            return True
+    return False
+
+
+def _format_evidence_bullet(prefix: str, ev: Dict[str, Any]) -> str:
+    doc = ev.get("doc") or ev.get("docId") or "UnknownDoc"
+    cs = ev.get("charStart")
+    ce = ev.get("charEnd")
+    snippet = (ev.get("text") or "").strip().replace("\r", " ").replace("\n", " ")
+    snippet = snippet[:220]
+    return f"{prefix}: {snippet} (Doc: {doc} span: {cs}-{ce})"
+
+
+def _backfill_sections_from_evidence(
+    sections: List[Dict[str, Any]],
+    intent: str,
+) -> List[Dict[str, Any]]:
+    """
+    Deterministically ensure each section is populated:
+    - If findings are empty, convert relevant evidence into EVIDENCE bullets.
+    - If evidence is empty, add clear GAPS bullets (no hallucination).
+    - For risk_triage only: allow POTENTIAL RISK bullets when evidence exists but implication needs confirmation.
+    """
+    intent = (intent or "strict_summary").strip().lower()
+    is_triage = intent == "risk_triage"
+
+    for sec in sections:
+        sid = (sec.get("id") or "").strip().lower()
+        title = (sec.get("title") or "").strip()
+        findings = sec.get("findings") or []
+        gaps = sec.get("gaps") or []
+        actions = sec.get("recommended_actions") or []
+        evidence = sec.get("evidence") or []
+
+        # Normalize arrays
+        sec["findings"] = list(findings)
+        sec["gaps"] = list(gaps)
+        sec["recommended_actions"] = list(actions)
+        sec["evidence"] = list(evidence)
+
+        kw = _section_keywords(sid)
+
+        # If we have evidence but no findings, synthesize findings from evidence
+        if sec["evidence"] and not sec["findings"]:
+            kept = 0
+            for ev in sec["evidence"]:
+                if not _text_matches_keywords(ev.get("text") or "", kw) and sid != "overview":
+                    continue
+                sec["findings"].append(_format_evidence_bullet("EVIDENCE", ev))
+                kept += 1
+                if kept >= 3:
+                    break
+
+            # If still empty (evidence not topical), add a conservative note
+            if not sec["findings"] and sid != "overview":
+                sec["gaps"].append("No high-signal evidence matched this section topic. Confirm scope and provide relevant contract sections for retrieval.")
+
+        # If triage and we have evidence, add 1 potential risk when warranted
+        if is_triage and sec["evidence"]:
+            # very conservative: only add potential risk if we have obligation keywords
+            ev0 = (sec["evidence"][0].get("text") or "").lower()
+            if any(x in ev0 for x in ["shall", "must", "required", "prohibited"]) and sid not in ("overview",):
+                sec["findings"].append("POTENTIAL RISK: Obligation language is present; confirm boundaries/owners/acceptance criteria with Government. (Reviewer confirmation required.)")
+
+        # If nothing at all, add a gap (never fabricate)
+        if (not sec["findings"]) and (not sec["evidence"]):
+            if not sec["gaps"]:
+                sec["gaps"].append("Insufficient evidence retrieved for this section. Confirm relevant contract sections and rerun analysis.")
+            if not sec["recommended_actions"]:
+                sec["recommended_actions"].append("Request the relevant section(s) from the Government/PM and rerun RAG triage.")
+
+        # Small per-section action hints (deterministic)
+        if sid == "security-compliance-hosting-constraints" and sec["evidence"] and not sec["recommended_actions"]:
+            sec["recommended_actions"].append("Confirm IL level, ATO boundary responsibilities (Gov vs Contractor), and required RMF artifacts/acceptance gates.")
+        if sid == "deliverables-timelines" and sec["evidence"] and not sec["recommended_actions"]:
+            sec["recommended_actions"].append("Extract deliverables/approval gates into a tracker (CDRLs, cadence, acceptance criteria) and confirm IMS requirements.")
+        if sid == "eligibility-personnel-constraints" and sec["evidence"] and not sec["recommended_actions"]:
+            sec["recommended_actions"].append("Confirm staffing/citizenship/clearance/flowdown constraints and ensure subcontractor vetting language is feasible.")
+
+    return sections
+
+
+def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Ensure OVERVIEW is always strong:
+    - Pull top evidence bullets across all sections.
+    - Summarize obligations/constraints in deterministic bullets.
+    """
+    ov = None
+    for s in sections:
+        if (s.get("id") or "").strip().lower() == "overview":
+            ov = s
+            break
+    if ov is None:
+        return sections
+
+    # Collect high-signal evidence from all sections
+    pool: List[Dict[str, Any]] = []
+    for s in sections:
+        for ev in (s.get("evidence") or []):
+            pool.append(ev)
+
+    def score_ev(ev: Dict[str, Any]) -> Any:
+        t = (ev.get("text") or "")
+        sig = _evidence_signal_score(t)
+        vs = ev.get("score")
+        try:
+            vsf = float(vs) if vs is not None else 0.0
+        except Exception:
+            vsf = 0.0
+        return (-sig, -vsf)
+
+    pool = sorted(pool, key=score_ev)
+
+    # Add deterministic overview bullets if missing depth
+    ov.setdefault("findings", [])
+    existing = ov.get("findings") or []
+    ov["findings"] = list(existing)
+
+    if len(ov["findings"]) < 6:
+        added = 0
+        for ev in pool:
+            if _is_glossary_text(ev.get("text") or ""):
+                continue
+            ov["findings"].append(_format_evidence_bullet("EVIDENCE", ev))
+            added += 1
+            if added >= 6:
+                break
+
+    if not ov.get("recommended_actions"):
+        ov["recommended_actions"] = [
+            "Review top obligations/constraints surfaced below and assign owners (Security/ISSO, PM, Engineering, Legal, Finance) for confirmation and response planning."
+        ]
 
     return sections
 # -----------------------------
@@ -890,5 +1049,6 @@ def rag_analyze_review(
         "warnings": warnings,
         "retrieved": retrieved_debug,
     }
+
 
 
