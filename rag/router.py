@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+import os
+import traceback
 
 from core.providers import providers_from_request
 from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse
@@ -40,4 +42,8 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         # Preserve stack traces in logs; give a stable message to callers.
+        if str(os.getenv("RAG_TRACEBACK","0")).strip() == "1":
+            print("[RAG][TRACEBACK] " + traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"RAG analyze failed: {type(e).__name__}") from e
+
+
