@@ -427,8 +427,8 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
                 # keep parsing content lines below as actions
                 continue
 
-            is_bullet = t.startswith(("-", "•", "*"))
-            bullet_text = t.lstrip("-•*").strip() if is_bullet else t
+            is_bullet = t.startswith(("-", "â€¢", "*"))
+            bullet_text = t.lstrip("-â€¢*").strip() if is_bullet else t
 
             if mode == "findings":
                 sec["findings"].append(bullet_text)
@@ -447,100 +447,204 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
     return sections
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        v = os.getenv(name)
+        return default if v is None or str(v).strip() == "" else int(str(v).strip())
+    except Exception:
+        return default
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    s = str(v).strip().lower()
+    return s in ("1", "true", "yes", "y", "on")
+
+
+_GLOSSARY_RE = re.compile(r"\b(glossary|definitions?|for purposes of|means)\b", re.IGNORECASE)
+_SIGNAL_RE = re.compile(r"\b(shall|must|required|will|may not|prohibited)\b", re.IGNORECASE)
+_COMPLIANCE_RE = re.compile(
+    r"\b(dfars|far|nist|cui|cdi|rmf|ato|il[0-9]|fedramp|800-53|800-171|incident|breach|encryption|audit|logging|sbom|zero trust)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_glossary_text(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    # strong cues
+    if "GLOSSARY" in t.upper() or "DEFINITIONS" in t.upper():
+        return True
+    return bool(_GLOSSARY_RE.search(t))
+
+
+def _evidence_signal_score(text: str) -> int:
+    """
+    Deterministic heuristic score: higher = more likely to be obligations/risk language.
+    """
+    t = (text or "").strip()
+    if not t:
+        return 0
+
+    score = 0
+
+    # obligation language
+    if _SIGNAL_RE.search(t):
+        score += 3
+
+    # compliance keywords
+    if _COMPLIANCE_RE.search(t):
+        score += 2
+
+    # penalize glossary/definition-heavy chunks
+    if _is_glossary_text(t):
+        score -= 3
+
+    return score
+
 def _attach_evidence_to_sections(
     sections: List[Dict[str, Any]],
     questions: List[str],
-    retrieved: Dict[str, List[Dict[str, Any]]],
     citations: List[Dict[str, Any]],
+    retrieved: Dict[str, List[Dict[str, Any]]],
 ) -> List[Dict[str, Any]]:
-    sec_by_title = {(s.get("title") or "").strip(): s for s in sections}
+    """
+    Attach evidence to parsed sections deterministically, but prefer high-signal chunks
+    and avoid glossary/definitions noise by default.
+    """
+    # knobs
+    max_per_section = _env_int("RAG_EVIDENCE_MAX_PER_SECTION", 3)
+    allow_glossary = _env_bool("RAG_EVIDENCE_ALLOW_GLOSSARY", False)
+    min_signal = _env_int("RAG_EVIDENCE_MIN_SIGNAL", 1)
 
     # Map question index -> section title (base UI sections)
-    q_to_title = {
-        0: "OVERVIEW",  # map first triage bucket to overview too
-        1: "SCOPE OF WORK",
-        2: "SECURITY, COMPLIANCE & HOSTING CONSTRAINTS",
-        3: "ELIGIBILITY & PERSONNEL CONSTRAINTS",
-        4: "LEGAL & DATA RIGHTS RISKS",
-        5: "DELIVERABLES & TIMELINES",
-        6: "FINANCIAL RISKS",
-        7: "DELIVERABLES & TIMELINES",
-        8: "CONTRADICTIONS & INCONSISTENCIES",
-        9: "RECOMMENDED INTERNAL ACTIONS",
+    # NOTE: keep existing mapping behavior but improve evidence selection quality.
+    question_to_section_title: Dict[int, str] = {
+        0: "OVERVIEW",  # keep this behavior for triage
     }
 
-    def add_ev(sec: Dict[str, Any], ev: Dict[str, Any]) -> None:
+    # Normalize section dicts
+    for sec in sections:
         sec.setdefault("evidence", [])
-        key = f'{ev.get("docId")}:{ev.get("charStart")}:{ev.get("charEnd")}:{(ev.get("text") or "")[:40]}'
+        sec.setdefault("findings", [])
+        sec.setdefault("gaps", [])
+        sec.setdefault("recommended_actions", [])
+        sec.setdefault("_evidence_seen", set())
+
+    sec_by_title = {(s.get("title") or "").strip(): s for s in sections}
+
+    def add_ev(sec: Dict[str, Any], ev: Dict[str, Any]) -> None:
         seen = sec.setdefault("_evidence_seen", set())
+        key = f'{ev.get("docId")}:{ev.get("charStart")}:{ev.get("charEnd")}'
         if key in seen:
             return
         seen.add(key)
         sec["evidence"].append(ev)
 
-    # Prefer retrieved hit chunks
+    def rank_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        def sort_key(h: Dict[str, Any]) -> Any:
+            text = h.get("chunk_text") or h.get("snippet") or ""
+            sig = _evidence_signal_score(text)
+            vs = h.get("score")
+            try:
+                vsf = float(vs) if vs is not None else 0.0
+            except Exception:
+                vsf = 0.0
+            # Higher signal first, then higher vector score
+            return (-sig, -vsf)
+        return sorted(hits or [], key=sort_key)
+
+    def accept_text(text: str) -> bool:
+        if not text:
+            return False
+        sig = _evidence_signal_score(text)
+        if (not allow_glossary) and _is_glossary_text(text):
+            return False
+        if sig < min_signal:
+            return False
+        return True
+
+    # 1) Prefer retrieved hit chunks (ranked + filtered)
     for i, q in enumerate(questions):
-        title = q_to_title.get(i)
-        if not title:
+        sec_title = question_to_section_title.get(i)
+        if not sec_title:
+            # Try to use section by index if question list aligns with section order
+            if i < len(sections):
+                sec_title = (sections[i].get("title") or "").strip()
+        if not sec_title:
             continue
-        sec = sec_by_title.get(title)
+
+        sec = sec_by_title.get(sec_title)
         if not sec:
             continue
 
-        hits = retrieved.get(q) or []
-        for h in hits[:3]:
-            meta = h.get("meta") or {}
-            doc_id = meta.get("doc_id")
-            doc_name = meta.get("doc_name") or doc_id
-            text = ((h.get("chunk_text") or "").strip()[:350] or None)
-            if not text:
+        hits = rank_hits(retrieved.get(q) or [])
+        kept = 0
+
+        for h in hits:
+            text = (h.get("chunk_text") or "").strip()
+            if not accept_text(text):
                 continue
-            add_ev(
-                sec,
-                {
-                    "docId": doc_id or "",
-                    "doc": doc_name,
-                    "text": text,
-                    "charStart": meta.get("char_start"),
-                    "charEnd": meta.get("char_end"),
-                    "score": h.get("score"),
-                },
-            )
 
-    # Fallback from citations when a section has no evidence
-    for i, q in enumerate(questions):
-        title = q_to_title.get(i)
-        if not title:
-            continue
-        sec = sec_by_title.get(title)
-        if not sec:
-            continue
+            ev = {
+                "docId": h.get("document_id"),
+                "doc": h.get("doc_name"),
+                "text": text[:1000],
+                "charStart": h.get("char_start"),
+                "charEnd": h.get("char_end"),
+                "score": h.get("score"),
+            }
+            add_ev(sec, ev)
+            kept += 1
+            if kept >= max_per_section:
+                break
+
+    # 2) Fallback from citations when a section has no evidence (also filtered)
+    for sec in sections:
         if sec.get("evidence"):
             continue
 
-        for c in [x for x in citations if x.get("question") == q][:3]:
-            snip = (c.get("snippet") or "").strip()
-            if not snip:
-                continue
-            add_ev(
-                sec,
-                {
-                    "docId": c.get("docId") or "",
-                    "doc": c.get("doc") or None,
-                    "text": snip,
-                    "charStart": c.get("charStart"),
-                    "charEnd": c.get("charEnd"),
-                    "score": c.get("score"),
-                },
-            )
+        title = (sec.get("title") or "").strip()
+        if not title:
+            continue
 
+        # choose citations whose question matches the section index (best-effort)
+        # keep existing behavior: take first 3 matching question citations
+        idx = None
+        for j, s in enumerate(sections):
+            if (s.get("title") or "").strip() == title:
+                idx = j
+                break
+        if idx is None or idx >= len(questions):
+            continue
+
+        q = questions[idx]
+        for c in [x for x in citations if x.get("question") == q]:
+            text = (c.get("snippet") or "").strip()
+            if not accept_text(text):
+                continue
+
+            ev = {
+                "docId": c.get("docId"),
+                "doc": c.get("doc"),
+                "text": text[:1000],
+                "charStart": c.get("charStart"),
+                "charEnd": c.get("charEnd"),
+                "score": c.get("score"),
+            }
+            add_ev(sec, ev)
+            if len(sec["evidence"]) >= max_per_section:
+                break
+
+    # Cleanup temp fields
     for s in sections:
         if "_evidence_seen" in s:
             del s["_evidence_seen"]
 
     return sections
-
-
 # -----------------------------
 # Main entry
 # -----------------------------
@@ -786,3 +890,5 @@ def rag_analyze_review(
         "warnings": warnings,
         "retrieved": retrieved_debug,
     }
+
+
