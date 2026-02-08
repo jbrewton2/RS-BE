@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
 
 function Invoke-Step {
@@ -17,5 +17,8 @@ Invoke-Step "ci-python-sanity" "$PSScriptRoot\ci-python-sanity.ps1"
 Invoke-Step "ci-provider-drift-guard" "$PSScriptRoot\ci-provider-drift-guard.ps1"
 Invoke-Step "ci-no-provider-access-in-routers" "$PSScriptRoot\ci-no-provider-access-in-routers.ps1"
 Invoke-Step "ci-storage-dep-guard" "$PSScriptRoot\ci-storage-dep-guard.ps1"
+
+Write-Host "--- ci-anti-regression ---" -ForegroundColor Cyan
+& "$PSScriptRoot\ci-anti-regression.ps1"
 
 Write-Host "OK: truth gate passed." -ForegroundColor Green
