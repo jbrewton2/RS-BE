@@ -60,6 +60,8 @@ class RagEvidenceSnippet(BaseModel):
 
 class RagSection(BaseModel):
     id: str
+    owner: Optional[str] = None  # Security/ISSO | Legal/Contracts | Program/PM | Engineering | Finance | QA
+
     title: str
 
     findings: List[str] = Field(default_factory=list)
