@@ -427,8 +427,8 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
                 # keep parsing content lines below as actions
                 continue
 
-            is_bullet = t.startswith(("-", "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢", "*"))
-            bullet_text = t.lstrip("-ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢*").strip() if is_bullet else t
+            is_bullet = t.startswith(("-", "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢", "*"))
+            bullet_text = t.lstrip("-ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢*").strip() if is_bullet else t
 
             if mode == "findings":
                 sec["findings"].append(bullet_text)
@@ -713,6 +713,10 @@ def _backfill_sections_from_evidence(
         sec["gaps"] = list(gaps)
         sec["recommended_actions"] = list(actions)
         sec["evidence"] = list(evidence)
+        # If evidence exists, do not keep the generic "Insufficient evidence retrieved" gap
+        if sec["evidence"]:
+            sec["gaps"] = [g for g in sec["gaps"] if "Insufficient evidence retrieved" not in str(g)]
+
 
         kw = _section_keywords(sid)
 
@@ -729,6 +733,8 @@ def _backfill_sections_from_evidence(
 
             # If still empty (evidence not topical), add a conservative note
             if not sec["findings"] and sid != "overview":
+                if not sec["findings"]:
+                    sec["findings"].append("GAP: Evidence retrieved appears non-topical for this section (likely glossary/definitions). Mission/objective language may be elsewhere; request/ingest the contract section defining purpose/mission and rerun triage.")
                 sec["gaps"].append("Retrieved evidence appears non-topical (likely definitions/glossary) for this section. Recommend targeted retrieval for this section and rerun analysis.")
 
         # If triage and we have evidence, add 1 potential risk when warranted
@@ -792,6 +798,19 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
     ov.setdefault("findings", [])
     existing = ov.get("findings") or []
     ov["findings"] = list(existing)
+    # Always ensure at least 3 evidence-labeled bullets at the top of OVERVIEW findings
+    if not any(str(x).startswith("EVIDENCE:") for x in ov["findings"]):
+        injected: List[str] = []
+        added = 0
+        for ev in pool:
+            if _is_glossary_text(ev.get("text") or ""):
+                continue
+            injected.append(_format_evidence_bullet("EVIDENCE", ev))
+            added += 1
+            if added >= 3:
+                break
+        ov["findings"] = injected + ov["findings"]
+
 
     if len(ov["findings"]) < 6:
         added = 0
