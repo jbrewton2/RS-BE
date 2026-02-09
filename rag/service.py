@@ -352,6 +352,43 @@ def _risk_triage_questions() -> List[str]:
     ]
 
 
+def _question_section_map(intent: str) -> List[Tuple[str, str]]:
+    """
+    Authoritative routing for evidence attachment.
+    Each tuple is (SECTION TITLE, QUESTION).
+    """
+    intent = (intent or "strict_summary").strip().lower()
+
+    if intent == "risk_triage":
+        return [
+            ("SECURITY, COMPLIANCE & HOSTING CONSTRAINTS", "Identify cybersecurity / ATO / RMF / IL requirements and risks (encryption, logging, incident reporting, vuln mgmt)."),
+            ("SECURITY, COMPLIANCE & HOSTING CONSTRAINTS", "Identify CUI handling / safeguarding requirements and risks (marking, access, transmission, storage, disposal)."),
+            ("LEGAL & DATA RIGHTS RISKS", "Identify privacy / PII / data protection obligations and risks."),
+            ("LEGAL & DATA RIGHTS RISKS", "Identify legal/data-rights terms and risks (IP/data rights, audit rights, GFI/GFM handling, disclosure penalties)."),
+            ("ELIGIBILITY & PERSONNEL CONSTRAINTS", "Identify subcontractor / flowdown / staffing constraints and risks (citizenship, clearance, facility, export)."),
+            ("DELIVERABLES & TIMELINES", "Identify delivery/acceptance gates and required approvals (CDRLs, QA, test, acceptance criteria)."),
+            ("FINANCIAL RISKS", "Identify financial and invoicing risks (ceilings, overruns, payment terms, reporting cadence)."),
+            ("DELIVERABLES & TIMELINES", "Identify schedule risks (IMS, milestones, reporting cadence, penalties)."),
+            ("CONTRADICTIONS & INCONSISTENCIES", "Identify ambiguous/undefined terms and contradictions that require clarification."),
+            # keep overview as a "top red flags" aggregator
+            ("OVERVIEW", "List top red-flag phrases/requirements with evidence and suggested internal owner (security/legal/PM/finance)."),
+        ]
+
+    # strict_summary
+    return [
+        ("MISSION & OBJECTIVE", "What is the mission and objective of this effort?"),
+        ("SCOPE OF WORK", "What is the scope of work and required deliverables?"),
+        ("SECURITY, COMPLIANCE & HOSTING CONSTRAINTS", "What are the security, compliance, and hosting constraints (IL levels, NIST, DFARS, CUI, ATO/RMF, logging)?"),
+        ("ELIGIBILITY & PERSONNEL CONSTRAINTS", "What are the eligibility and personnel constraints (citizenship, clearances, facility, location, export controls)?"),
+        ("LEGAL & DATA RIGHTS RISKS", "What are key legal and data rights risks (IP/data rights, audit rights, flowdowns)?"),
+        ("FINANCIAL RISKS", "What are key financial risks (pricing model, ceilings, invoicing systems, payment terms)?"),
+        ("SUBMISSION INSTRUCTIONS & DEADLINES", "What are submission instructions and deadlines, including required formats and delivery method?"),
+        ("CONTRADICTIONS & INCONSISTENCIES", "What contradictions or inconsistencies exist across documents?"),
+        ("GAPS / QUESTIONS FOR THE GOVERNMENT", "What gaps require clarification from the Government?"),
+        ("RECOMMENDED INTERNAL ACTIONS", "What internal actions should we take next (security/legal/PM/engineering/finance)?"),
+    ]
+
+
 # -----------------------------
 # Sections parsing for UI
 # -----------------------------
@@ -424,11 +461,10 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
                 continue
             if t.lower().startswith("recommended") or t.lower().startswith("suggested owner"):
                 mode = "recommended_actions"
-                # keep parsing content lines below as actions
                 continue
 
-            is_bullet = t.startswith(("-", "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢", "*"))
-            bullet_text = t.lstrip("-ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢*").strip() if is_bullet else t
+            is_bullet = t.startswith(("-", "*"))
+            bullet_text = t.lstrip("-*").strip() if is_bullet else t
 
             if mode == "findings":
                 sec["findings"].append(bullet_text)
@@ -466,7 +502,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
 _GLOSSARY_RE = re.compile(r"\b(glossary|definitions?|for purposes of|means)\b", re.IGNORECASE)
 _SIGNAL_RE = re.compile(r"\b(shall|must|required|will|may not|prohibited)\b", re.IGNORECASE)
 _COMPLIANCE_RE = re.compile(
-    r"\b(dfars|far|nist|cui|cdi|rmf|ato|il[0-9]|fedramp|800-53|800-171|incident|breach|encryption|audit|logging|sbom|zero trust)\b",
+    r"\b(dfars|far|nist|cui|cdi|rmf|ato|il[0-9]|fedramp|800-53|800-171|incident|breach|encryption|audit|logging|sbom|zero trust|conmon)\b",
     re.IGNORECASE,
 )
 
@@ -475,10 +511,16 @@ def _is_glossary_text(text: str) -> bool:
     t = (text or "").strip()
     if not t:
         return False
-    # strong cues
     if "GLOSSARY" in t.upper() or "DEFINITIONS" in t.upper():
         return True
     return bool(_GLOSSARY_RE.search(t))
+
+
+def _has_obligation_signal(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    return bool(_SIGNAL_RE.search(t) or _COMPLIANCE_RE.search(t))
 
 
 def _evidence_signal_score(text: str) -> int:
@@ -490,43 +532,50 @@ def _evidence_signal_score(text: str) -> int:
         return 0
 
     score = 0
-
-    # obligation language
     if _SIGNAL_RE.search(t):
         score += 3
-
-    # compliance keywords
     if _COMPLIANCE_RE.search(t):
         score += 2
-
-    # penalize glossary/definition-heavy chunks
     if _is_glossary_text(t):
         score -= 3
 
     return score
 
+
+def _extract_obligation_excerpt(text: str, max_len: int = 1200) -> str:
+    """
+    Make evidence popups more useful:
+    take an excerpt around the first obligation/compliance cue, otherwise truncate.
+    """
+    t = _normalize_text(text or "").strip()
+    if not t:
+        return ""
+    m = _SIGNAL_RE.search(t) or _COMPLIANCE_RE.search(t)
+    if not m:
+        return t[:max_len]
+    start = max(0, m.start() - 250)
+    end = min(len(t), start + max_len)
+    return t[start:end].strip()
+
+
 def _attach_evidence_to_sections(
     sections: List[Dict[str, Any]],
-    questions: List[str],
+    *,
+    intent: str,
+    section_question_map: List[Tuple[str, str]],
     citations: List[Dict[str, Any]],
     retrieved: Dict[str, List[Dict[str, Any]]],
 ) -> List[Dict[str, Any]]:
     """
-    Attach evidence to parsed sections deterministically, but prefer high-signal chunks
-    and avoid glossary/definitions noise by default.
+    Attach evidence to parsed sections deterministically, with:
+    - explicit section routing (question -> section)
+    - glossary suppression unless it contains real obligation signals
+    - evidence excerpts that are useful for popups
     """
-    # knobs
     max_per_section = _env_int("RAG_EVIDENCE_MAX_PER_SECTION", 3)
     allow_glossary = _env_bool("RAG_EVIDENCE_ALLOW_GLOSSARY", False)
     min_signal = _env_int("RAG_EVIDENCE_MIN_SIGNAL", 1)
 
-    # Map question index -> section title (base UI sections)
-    # NOTE: keep existing mapping behavior but improve evidence selection quality.
-    question_to_section_title: Dict[int, str] = {
-        0: "OVERVIEW",  # keep this behavior for triage
-    }
-
-    # Normalize section dicts
     for sec in sections:
         sec.setdefault("evidence", [])
         sec.setdefault("findings", [])
@@ -535,7 +584,6 @@ def _attach_evidence_to_sections(
         sec.setdefault("_evidence_seen", set())
 
     sec_by_title = {(s.get("title") or "").strip(): s for s in sections}
-    # Defensive: normalize citations/retrieved types (prevents list.get crashes)
     if not isinstance(citations, list):
         citations = []
     if not isinstance(retrieved, dict):
@@ -558,52 +606,53 @@ def _attach_evidence_to_sections(
                 vsf = float(vs) if vs is not None else 0.0
             except Exception:
                 vsf = 0.0
-            # Higher signal first, then higher vector score
             return (-sig, -vsf)
+
         return sorted(hits or [], key=sort_key)
 
-    def accept_text(text: str) -> bool:
+    def accept_text(text: str, sec_id: str) -> bool:
         if not text:
             return False
+
         sig = _evidence_signal_score(text)
-        if (not allow_glossary) and _is_glossary_text(text):
-            return False
+
+        # glossary handling:
+        # - reject pure glossary unless it also has obligation/compliance signal
+        # - allow glossary only when explicitly allowed OR has signal
+        if _is_glossary_text(text):
+            if not allow_glossary:
+                if not _has_obligation_signal(text):
+                    return False
+            # outside overview, require at least min_signal if it smells like glossary
+            if sec_id != "overview" and sig < min_signal:
+                return False
+
         if sig < min_signal:
             return False
         return True
 
-    # 1) Prefer retrieved hit chunks (ranked + filtered)
-    for i, q in enumerate(questions):
-        sec_title = question_to_section_title.get(i)
-        if not sec_title:
-            # Try to use section by index if question list aligns with section order
-            if i < len(sections):
-                sec_title = (sections[i].get("title") or "").strip()
-        if not sec_title:
-            continue
-
+    # 1) Attach from retrieved (explicit routing)
+    for sec_title, q in section_question_map:
         sec = sec_by_title.get(sec_title)
         if not sec:
             continue
 
+        sid = (sec.get("id") or "").strip().lower()
         hits = rank_hits(retrieved.get(q) or [])
         kept = 0
 
         for h in hits:
-            text = (h.get("chunk_text") or "").strip()
-            # skip glossary evidence outside overview
-            if _is_glossary_text(text) and (sec.get("id") or "").lower() != "overview":
+            chunk_text = (h.get("chunk_text") or "").strip()
+            if not accept_text(chunk_text, sid):
                 continue
 
-            if not accept_text(text):
-                continue
-
+            meta = h.get("meta") or {}
             ev = {
-                "docId": h.get("document_id"),
-                "doc": h.get("doc_name"),
-                "text": text[:1000],
-                "charStart": h.get("char_start"),
-                "charEnd": h.get("char_end"),
+                "docId": meta.get("doc_id") or h.get("document_id"),
+                "doc": meta.get("doc_name") or h.get("doc_name"),
+                "text": _extract_obligation_excerpt(chunk_text, max_len=1200),
+                "charStart": meta.get("char_start") if meta else h.get("char_start"),
+                "charEnd": meta.get("char_end") if meta else h.get("char_end"),
                 "score": h.get("score"),
             }
             add_ev(sec, ev)
@@ -611,35 +660,34 @@ def _attach_evidence_to_sections(
             if kept >= max_per_section:
                 break
 
-    # 2) Fallback from citations when a section has no evidence (also filtered)
+    # 2) Fallback from citations if section has no evidence
+    # pick the FIRST mapped question for that section
+    q_for_section: Dict[str, str] = {}
+    for sec_title, q in section_question_map:
+        if sec_title not in q_for_section:
+            q_for_section[sec_title] = q
+
     for sec in sections:
         if sec.get("evidence"):
             continue
-
         title = (sec.get("title") or "").strip()
         if not title:
             continue
 
-        # choose citations whose question matches the section index (best-effort)
-        # keep existing behavior: take first 3 matching question citations
-        idx = None
-        for j, s in enumerate(sections):
-            if (s.get("title") or "").strip() == title:
-                idx = j
-                break
-        if idx is None or idx >= len(questions):
+        q = q_for_section.get(title)
+        if not q:
             continue
 
-        q = questions[idx]
+        sid = (sec.get("id") or "").strip().lower()
         for c in [x for x in citations if x.get("question") == q]:
             text = (c.get("snippet") or "").strip()
-            if not accept_text(text):
+            if not accept_text(text, sid):
                 continue
 
             ev = {
                 "docId": c.get("docId"),
                 "doc": c.get("doc"),
-                "text": text[:1000],
+                "text": _extract_obligation_excerpt(text, max_len=1200),
                 "charStart": c.get("charStart"),
                 "charEnd": c.get("charEnd"),
                 "score": c.get("score"),
@@ -648,12 +696,12 @@ def _attach_evidence_to_sections(
             if len(sec["evidence"]) >= max_per_section:
                 break
 
-    # Cleanup temp fields
     for s in sections:
         if "_evidence_seen" in s:
             del s["_evidence_seen"]
 
     return sections
+
 
 def _section_keywords(section_id: str) -> List[str]:
     sid = (section_id or "").strip().lower()
@@ -709,70 +757,61 @@ def _owner_for_section(section_id: str) -> str:
     }
     return m.get(sid, "Program/PM")
 
+
 def _risk_blurb_for_section(section_id: str, ev_text: str) -> str:
     sid = (section_id or "").strip().lower()
     t = (ev_text or "").strip()
 
-    # keep it deterministic and non-hallucinating: cite the observed obligation phrase (short) + what to confirm
     def short(s: str, n: int = 160) -> str:
-        s = (s or "").replace("\r"," ").replace("\n"," ").strip()
+        s = (s or "").replace("\r", " ").replace("\n", " ").strip()
         return s if len(s) <= n else (s[:n] + "...")
 
     if sid == "security-compliance-hosting-constraints":
-        return "Obligation/security constraint detected. Confirm IL level, RMF/ATO responsibility split, CONMON/log retention, and any prohibited actions. Evidence: " + short(t)
+        return "Security/compliance constraint found. Confirm IL level (Impact Level), RMF/ATO split, logging/CONMON, and any prohibited actions. Evidence: " + short(t)
     if sid == "legal-data-rights-risks":
-        return "Possible legal/data-rights obligation detected. Confirm IP/data rights, disclosure penalties, audit rights, and flowdown requirements. Evidence: " + short(t)
+        return "Legal/data-rights obligation found. Confirm IP/data rights, audit rights, disclosure penalties, and flowdowns. Evidence: " + short(t)
     if sid == "financial-risks":
-        return "Possible cost/reporting obligation detected. Confirm burn-rate reporting, overruns notification, ceilings, and invoicing cadence. Evidence: " + short(t)
+        return "Financial obligation found. Confirm burn-rate reporting, overruns notification, ceilings, and invoicing cadence. Evidence: " + short(t)
     if sid == "deliverables-timelines":
-        return "Deliverable/acceptance obligation language detected. Confirm CDRLs, due dates, acceptance criteria, and Government approval gates. Evidence: " + short(t)
+        return "Deliverable/acceptance requirement found. Confirm CDRLs, due dates, acceptance criteria, and Government approval gates. Evidence: " + short(t)
     if sid == "eligibility-personnel-constraints":
-        return "Eligibility/personnel constraint language detected. Confirm citizenship/clearance requirements, subcontractor restrictions, and access constraints. Evidence: " + short(t)
+        return "Staffing/eligibility constraint found. Confirm citizenship/clearance requirements, subcontractor restrictions, and access constraints. Evidence: " + short(t)
     if sid == "submission-instructions-deadlines":
-        return "Submission/instruction obligation language detected. Confirm format, due dates, delivery mechanism, and required attachments. Evidence: " + short(t)
+        return "Submission requirement found. Confirm format, due dates, delivery mechanism, and required attachments. Evidence: " + short(t)
     if sid == "contradictions-inconsistencies":
-        return "Potential inconsistency/ambiguity risk. Confirm conflicting requirements, undefined terms, or updates to applicable documents list. Evidence: " + short(t)
+        return "Potential ambiguity/inconsistency. Confirm conflicting requirements, undefined terms, or evolving document lists. Evidence: " + short(t)
     if sid == "scope-of-work":
-        return "Scope/task obligation language detected. Confirm who does what, required tasks, and dependencies/assumptions. Evidence: " + short(t)
+        return "Scope/task requirement found. Confirm who does what, required tasks, and dependencies/assumptions. Evidence: " + short(t)
     if sid == "mission-objective":
-        return "Mission/objective may be unclear or missing in retrieved content. Confirm purpose/goal language and success criteria from the contract/solicitation. Evidence: " + short(t)
+        return "Mission/objective may be unclear in retrieved text. Confirm purpose/goal language and success criteria from the solicitation. Evidence: " + short(t)
 
-    return "Obligation language detected. Confirm scope, acceptance gates, and Gov vs Contractor responsibility. Evidence: " + short(t)
+    return "Requirement language found. Confirm scope, acceptance gates, and Gov vs Contractor responsibilities. Evidence: " + short(t)
+
 
 def _backfill_sections_from_evidence(
     sections: List[Dict[str, Any]],
     intent: str,
 ) -> List[Dict[str, Any]]:
-    """
-    Deterministically ensure each section is populated:
-    - If findings are empty, convert relevant evidence into EVIDENCE bullets.
-    - If evidence is empty, add clear GAPS bullets (no hallucination).
-    - For risk_triage only: allow POTENTIAL RISK bullets when evidence exists but implication needs confirmation.
-    """
     intent = (intent or "strict_summary").strip().lower()
     is_triage = intent == "risk_triage"
 
     for sec in sections:
         sid = (sec.get("id") or "").strip().lower()
-        title = (sec.get("title") or "").strip()
         findings = sec.get("findings") or []
         gaps = sec.get("gaps") or []
         actions = sec.get("recommended_actions") or []
         evidence = sec.get("evidence") or []
 
-        # Normalize arrays
         sec["findings"] = list(findings)
         sec["gaps"] = list(gaps)
         sec["recommended_actions"] = list(actions)
         sec["evidence"] = list(evidence)
-        # If evidence exists, do not keep the generic "Insufficient evidence retrieved" gap
+
         if sec["evidence"]:
             sec["gaps"] = [g for g in sec["gaps"] if "Insufficient evidence retrieved" not in str(g)]
 
-
         kw = _section_keywords(sid)
 
-        # If we have evidence but no findings, synthesize findings from evidence
         if sec["evidence"] and not sec["findings"]:
             kept = 0
             for ev in sec["evidence"]:
@@ -783,27 +822,25 @@ def _backfill_sections_from_evidence(
                 if kept >= 3:
                     break
 
-            # If still empty (evidence not topical), add a conservative note
             if not sec["findings"] and sid != "overview":
-                if not sec["findings"]:
-                    sec["findings"].append("GAP: Evidence retrieved appears non-topical for this section (likely glossary/definitions). Mission/objective language may be elsewhere; request/ingest the contract section defining purpose/mission and rerun triage.")
-                sec["gaps"].append("Retrieved evidence appears non-topical (likely definitions/glossary) for this section. Recommend targeted retrieval for this section and rerun analysis.")
+                sec["findings"].append(
+                    "GAP: Retrieved text looks off-topic for this section (often definitions/glossary). Request the specific contract section for this topic and rerun."
+                )
+                sec["gaps"].append("Retrieved evidence appears non-topical (often definitions/glossary). Recommend targeted retrieval and rerun analysis.")
 
-        # If triage and we have evidence, add 1 potential risk when warranted
         if is_triage and sec["evidence"]:
-            # very conservative: only add potential risk if we have obligation keywords
             ev0 = (sec["evidence"][0].get("text") or "").lower()
             if any(x in ev0 for x in ["shall", "must", "required", "prohibited"]) and sid not in ("overview",):
-                sec["findings"].append(f"POTENTIAL RISK (Owner: {_owner_for_section(sid)}): " + _risk_blurb_for_section(sid, sec["evidence"][0].get("text") if sec["evidence"] else ""))
+                sec["findings"].append(
+                    f"POTENTIAL RISK (Owner: {_owner_for_section(sid)}): " + _risk_blurb_for_section(sid, sec["evidence"][0].get("text") if sec["evidence"] else "")
+                )
 
-        # If nothing at all, add a gap (never fabricate)
         if (not sec["findings"]) and (not sec["evidence"]):
             if not sec["gaps"]:
                 sec["gaps"].append("Insufficient evidence retrieved for this section. Confirm relevant contract sections and rerun analysis.")
             if not sec["recommended_actions"]:
                 sec["recommended_actions"].append("Request the relevant section(s) from the Government/PM and rerun RAG triage.")
 
-        # Small per-section action hints (deterministic)
         if sid == "security-compliance-hosting-constraints" and sec["evidence"] and not sec["recommended_actions"]:
             sec["recommended_actions"].append("Confirm IL level, ATO boundary responsibilities (Gov vs Contractor), and required RMF artifacts/acceptance gates.")
         if sid == "deliverables-timelines" and sec["evidence"] and not sec["recommended_actions"]:
@@ -815,11 +852,6 @@ def _backfill_sections_from_evidence(
 
 
 def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Ensure OVERVIEW is always strong:
-    - Pull top evidence bullets across all sections.
-    - Summarize obligations/constraints in deterministic bullets.
-    """
     ov = None
     for s in sections:
         if (s.get("id") or "").strip().lower() == "overview":
@@ -828,7 +860,6 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
     if ov is None:
         return sections
 
-    # Collect high-signal evidence from all sections
     pool: List[Dict[str, Any]] = []
     for s in sections:
         for ev in (s.get("evidence") or []):
@@ -846,16 +877,16 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 
     pool = sorted(pool, key=score_ev)
 
-    # Add deterministic overview bullets if missing depth
     ov.setdefault("findings", [])
     existing = ov.get("findings") or []
     ov["findings"] = list(existing)
-    # Always ensure at least 3 evidence-labeled bullets at the top of OVERVIEW findings
+
     if not any(str(x).startswith("EVIDENCE:") for x in ov["findings"]):
         injected: List[str] = []
         added = 0
         for ev in pool:
-            if _is_glossary_text(ev.get("text") or ""):
+            # allow some glossary only if it has real signals
+            if _is_glossary_text(ev.get("text") or "") and not _has_obligation_signal(ev.get("text") or ""):
                 continue
             injected.append(_format_evidence_bullet("EVIDENCE", ev))
             added += 1
@@ -863,11 +894,10 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
                 break
         ov["findings"] = injected + ov["findings"]
 
-
     if len(ov["findings"]) < 6:
         added = 0
         for ev in pool:
-            if _is_glossary_text(ev.get("text") or ""):
+            if _is_glossary_text(ev.get("text") or "") and not _has_obligation_signal(ev.get("text") or ""):
                 continue
             ov["findings"].append(_format_evidence_bullet("EVIDENCE", ev))
             added += 1
@@ -876,10 +906,12 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 
     if not ov.get("recommended_actions"):
         ov["recommended_actions"] = [
-            "Review top obligations/constraints surfaced below and assign owners (Security/ISSO, PM, Engineering, Legal, Finance) for confirmation and response planning."
+            "Review the obligations/constraints below and assign owners (Security/ISSO, PM, Engineering, Legal, Finance) for validation and response planning."
         ]
 
     return sections
+
+
 # -----------------------------
 # Main entry
 # -----------------------------
@@ -899,7 +931,6 @@ def rag_analyze_review(
     t0 = time.time() if _timing_enabled() else 0.0
     m = _canonical_mode(mode)
 
-    # DEV guardrail: avoid expensive re-ingest loops during fast mode unless explicitly allowed.
     if _fast_enabled() and force_reingest and (_env("RAG_ALLOW_FORCE_REINGEST", "0").strip() != "1"):
         print("[RAG] WARN: force_reingest requested but skipped because RAG_FAST=1 and RAG_ALLOW_FORCE_REINGEST!=1")
         force_reingest = False
@@ -916,10 +947,8 @@ def rag_analyze_review(
         if _timing_enabled():
             print("[RAG] ingest done", round(time.time() - t_ing0, 2), "s")
 
-    if intent == "risk_triage":
-        questions = _risk_triage_questions()
-    else:
-        questions = _review_summary_questions()
+    section_question_map = _question_section_map(intent)
+    questions = [q for (_sec, q) in section_question_map]
 
     effective_top_k = _effective_top_k(top_k, profile)
     retrieved: Dict[str, List[Dict[str, Any]]] = {}
@@ -959,47 +988,37 @@ def rag_analyze_review(
     for q in questions:
         hits = retrieved.get(q) or []
         blocks.append(
-            f"QUESTION: {q}\nRETRIEVED EVIDENCE:\n"
-            + "\n".join(fmt_hit(h) for h in hits[:effective_top_k])
+            f"QUESTION: {q}\nRETRIEVED EVIDENCE:\n" + "\n".join(fmt_hit(h) for h in hits[:effective_top_k])
         )
 
     context = "\n\n".join(blocks)
 
-    # -----------------------------
-    # Context cap: make triage able to expand beyond 16k
-    # -----------------------------
-    # Baseline env cap (legacy behavior)
+    # Context cap
     env_cap = int((_env("RAG_CONTEXT_MAX_CHARS", "16000") or "16000").strip() or "16000")
-    # Hard ceiling safety valve
     hard_cap = int((_env("RAG_HARD_CONTEXT_MAX_CHARS", "80000") or "80000").strip() or "80000")
-    # Profile target cap
     profile_cap = int(_effective_context_chars(profile))
 
     if intent == "risk_triage":
-        # allow deep/balanced to override env baseline, but never exceed hard cap
         max_chars = min(max(env_cap, profile_cap), hard_cap)
     else:
-        # strict_summary remains conservative and respects env baseline
         max_chars = min(env_cap, profile_cap)
 
     context = context[:max_chars]
 
-
-    # -----------------------------
     # Prompt
-    # -----------------------------
     if intent == "risk_triage":
         prompt = (
             "OVERVIEW\n"
-            "You are performing HUMAN-IN-THE-LOOP RISK TRIAGE on government/DoD contract documents.\n"
-            "Goal: quickly surface likely risks, obligations, and red flags for a reviewer to confirm.\n\n"
+            "You are doing HUMAN-IN-THE-LOOP RISK TRIAGE on government/DoD contract documents.\n"
+            "Goal: surface risks/obligations in plain English so a non-lawyer can read section-by-section.\n\n"
             "HARD RULES\n"
             "- Plain text only. No markdown.\n"
-            "- Do NOT fabricate requirements. If you cannot find evidence, write exactly: "
-            f"\"{INSUFFICIENT}\"\n"
-            "- Prefer specificity: name the obligation and why it is risky.\n"
-            "- For each section: include Findings (bullets) + Evidence (1-3 snippets copied from evidence blocks).\n"
-            "- If evidence is weak/implicit, label it as 'Potential risk' and explain what to confirm.\n"
+            f"- Do NOT fabricate requirements. If you cannot find evidence, write exactly: \"{INSUFFICIENT}\"\n"
+            "- Write for a non-lawyer. Use plain English. Avoid contract/legal phrasing.\n"
+            "- If you use an acronym (IL5, RMF, ATO, CUI, DFARS, SBOM, CONMON), define it the first time in parentheses.\n"
+            "- For each finding, add a short 'why it matters' phrase.\n"
+            "- For each section: Findings (bullets) + Evidence (1-3 short snippets copied from evidence blocks).\n"
+            "- If evidence is weak/implicit, label it as 'Potential risk' and say what to confirm.\n"
             "- Suggested owner must be one of: Security/ISSO, Legal/Contracts, Program/PM, Engineering, Finance, QA.\n\n"
             "SECTIONS (exact order)\n"
             + "\n".join(RAG_REVIEW_SUMMARY_SECTIONS)
@@ -1010,20 +1029,23 @@ def rag_analyze_review(
     else:
         prompt = (
             "OVERVIEW\n"
-            "Write ONE unified cross-document executive brief for this review.\n\n"
+            "Write ONE unified cross-document executive brief for this review.\n"
+            "It must read like normal English for a non-lawyer.\n\n"
             "HARD RULES\n"
             "- Plain text only. No markdown.\n"
-            "- Do NOT output bracket placeholders like \"[insert ...]\" or any templating filler.\n"
+            "- Do NOT output bracket placeholders like \"[insert ...]\".\n"
             f"- If you cannot find evidence for a section, write exactly: \"{INSUFFICIENT}\"\n"
             "- Do not fabricate deliverables, dates, roles, responsibilities, or requirements.\n"
+            "- Write in plain English. Avoid contract/legal phrasing.\n"
+            "- If you use an acronym (IL5, RMF, ATO, CUI, DFARS, SBOM, CONMON), define it the first time in parentheses.\n"
             "- You MUST use evidence from the retrieved context only.\n"
             "- Evidence MUST be copied only from within blocks between:\n"
             "  ===BEGIN CONTRACT EVIDENCE=== and ===END CONTRACT EVIDENCE===\n"
-            "- Do NOT treat the QUESTION lines, headings, or instructions as evidence.\n\n"
+            "- Do NOT treat QUESTION lines or instructions as evidence.\n\n"
             "FORMAT RULES\n"
             "- Use the SECTION HEADERS exactly as listed below, in the exact order.\n"
             "- For EACH SECTION:\n"
-            "  1) Findings (bullets)\n"
+            "  1) Findings (bullets, plain English, add 'why it matters')\n"
             "  2) Evidence: 1-3 short snippets copied EXACTLY from retrieved context\n"
             "  3) If insufficient evidence, state what to retrieve/clarify\n\n"
             "SECTIONS (exact order)\n"
@@ -1058,25 +1080,37 @@ def rag_analyze_review(
 
     parsed_sections = _attach_evidence_to_sections(
         sections=_parse_review_summary_sections(summary),
-        questions=questions,
+        intent=intent,
+        section_question_map=section_question_map,
         citations=citations,
         retrieved=retrieved,
     )
-    # Populate per-section owner for UI routing
+
+    # Populate per-section owner for UI routing (dict OR Pydantic model)
     for section in parsed_sections:
         if isinstance(section, dict):
-            sid = (section.get("id") or "").strip().lower()
-            section["owner"] = _owner_for_section(sid)
+            sid_val = section.get("id")
+        else:
+            sid_val = getattr(section, "id", None)
+
+        sid = (sid_val or "").strip().lower()
+        owner = _owner_for_section(sid)
+
+        if isinstance(section, dict):
+            section["owner"] = owner
+        else:
+            try:
+                setattr(section, "owner", owner)
+            except Exception:
+                pass
 
     parsed_sections = _backfill_sections_from_evidence(parsed_sections, intent)
     parsed_sections = _strengthen_overview_from_evidence(parsed_sections)
-
 
     if _timing_enabled():
         print("[RAG] generation done", round(time.time() - t_gen0, 2), "s")
         print("[RAG] analyze done", round(time.time() - t0, 2), "s")
 
-    # --- stats / warnings ---
     retrieved_total = sum(len(retrieved.get(q) or []) for q in questions)
     warnings: List[str] = []
 
@@ -1089,7 +1123,6 @@ def rag_analyze_review(
     if context_truncated:
         warnings.append(f"Context truncated at {max_chars} chars.")
 
-    # Optional debug payload
     retrieved_debug = None
     if debug:
         retrieved_debug = {}
@@ -1134,7 +1167,3 @@ def rag_analyze_review(
         "warnings": warnings,
         "retrieved": retrieved_debug,
     }
-
-
-
-
