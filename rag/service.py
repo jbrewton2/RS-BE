@@ -427,8 +427,8 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
                 # keep parsing content lines below as actions
                 continue
 
-            is_bullet = t.startswith(("-", "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢", "*"))
-            bullet_text = t.lstrip("-ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢*").strip() if is_bullet else t
+            is_bullet = t.startswith(("-", "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢", "*"))
+            bullet_text = t.lstrip("-ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢*").strip() if is_bullet else t
 
             if mode == "findings":
                 sec["findings"].append(bullet_text)
@@ -729,7 +729,7 @@ def _backfill_sections_from_evidence(
 
             # If still empty (evidence not topical), add a conservative note
             if not sec["findings"] and sid != "overview":
-                sec["gaps"].append("No high-signal evidence matched this section topic. Confirm scope and provide relevant contract sections for retrieval.")
+                sec["gaps"].append("Retrieved evidence appears non-topical (likely definitions/glossary) for this section. Recommend targeted retrieval for this section and rerun analysis.")
 
         # If triage and we have evidence, add 1 potential risk when warranted
         if is_triage and sec["evidence"]:
@@ -991,6 +991,9 @@ def rag_analyze_review(
         citations=citations,
         retrieved=retrieved,
     )
+    parsed_sections = _backfill_sections_from_evidence(parsed_sections, intent)
+    parsed_sections = _strengthen_overview_from_evidence(parsed_sections)
+
 
     if _timing_enabled():
         print("[RAG] generation done", round(time.time() - t_gen0, 2), "s")
