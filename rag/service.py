@@ -427,8 +427,8 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
                 # keep parsing content lines below as actions
                 continue
 
-            is_bullet = t.startswith(("-", "Ã¢â‚¬Â¢", "*"))
-            bullet_text = t.lstrip("-Ã¢â‚¬Â¢*").strip() if is_bullet else t
+            is_bullet = t.startswith(("-", "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢", "*"))
+            bullet_text = t.lstrip("-ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢*").strip() if is_bullet else t
 
             if mode == "findings":
                 sec["findings"].append(bullet_text)
@@ -535,6 +535,11 @@ def _attach_evidence_to_sections(
         sec.setdefault("_evidence_seen", set())
 
     sec_by_title = {(s.get("title") or "").strip(): s for s in sections}
+    # Defensive: normalize citations/retrieved types (prevents list.get crashes)
+    if not isinstance(citations, list):
+        citations = []
+    if not isinstance(retrieved, dict):
+        retrieved = {}
 
     def add_ev(sec: Dict[str, Any], ev: Dict[str, Any]) -> None:
         seen = sec.setdefault("_evidence_seen", set())
@@ -981,10 +986,10 @@ def rag_analyze_review(
             )
 
     parsed_sections = _attach_evidence_to_sections(
-        _parse_review_summary_sections(summary),
-        questions,
-        retrieved,
-        citations,
+        sections=_parse_review_summary_sections(summary),
+        questions=questions,
+        citations=citations,
+        retrieved=retrieved,
     )
 
     if _timing_enabled():
@@ -1049,6 +1054,7 @@ def rag_analyze_review(
         "warnings": warnings,
         "retrieved": retrieved_debug,
     }
+
 
 
 
