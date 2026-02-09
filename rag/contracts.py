@@ -16,6 +16,7 @@ class RagAnalyzeRequest(BaseModel):
     """
     Request body for POST /api/rag/analyze
     """
+
     review_id: str = Field(..., min_length=1)
     mode: RagMode = Field(default="review_summary")
 

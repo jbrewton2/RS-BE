@@ -4,10 +4,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 import os
 import traceback
+from typing import Any
 
 from core.providers import providers_from_request
 from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse
-from rag.service import rag_analyze_review
+from rag.service import rag_analyze_review, _owner_for_section  # noqa: F401
+
 
 # main.py includes routers with prefix="/api"
 # so this must be "/rag" (not "/api/rag") to yield "/api/rag/*"
@@ -17,6 +19,51 @@ router = APIRouter(prefix="/rag", tags=["rag"])
 assert not router.prefix.startswith("/api"), "Router prefix must not start with /api (main.py adds /api)."
 
 
+def _ensure_section_owners(payload: Any) -> Any:
+    """
+    Final API-boundary guardrail:
+    - If sections exist, ensure each section has a non-empty 'owner'
+    - Handles dict sections OR Pydantic model sections
+    """
+    try:
+        sections = None
+        if isinstance(payload, dict):
+            sections = payload.get("sections")
+        else:
+            sections = getattr(payload, "sections", None)
+
+        if not sections:
+            return payload
+
+        for sec in sections:
+            # read id + owner (dict OR model)
+            if isinstance(sec, dict):
+                sid_val = sec.get("id")
+                owner_val = sec.get("owner")
+            else:
+                sid_val = getattr(sec, "id", None)
+                owner_val = getattr(sec, "owner", None)
+
+            sid = (sid_val or "").strip().lower()
+            owner = (owner_val or "").strip()
+
+            if not owner:
+                owner = _owner_for_section(sid)
+
+                if isinstance(sec, dict):
+                    sec["owner"] = owner
+                else:
+                    try:
+                        setattr(sec, "owner", owner)
+                    except Exception:
+                        pass
+
+        return payload
+    except Exception:
+        # Never fail the endpoint because of a guardrail; main response validation still applies.
+        return payload
+
+
 @router.post(
     "/analyze",
     response_model=RagAnalyzeResponse,
@@ -24,7 +71,7 @@ assert not router.prefix.startswith("/api"), "Router prefix must not start with 
 )
 def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
     try:
-        return rag_analyze_review(
+        result = rag_analyze_review(
             storage=providers.storage,
             vector=providers.vector,
             llm=providers.llm,
@@ -36,14 +83,19 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
             force_reingest=req.force_reingest,
             debug=req.debug,
         )
+
+        # API boundary backstop: owner must always be present for sections
+        result = _ensure_section_owners(result)
+
+        # Ensure the response is validated/coerced into the declared contract
+        return RagAnalyzeResponse.model_validate(result)
+
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         # Preserve stack traces in logs; give a stable message to callers.
-        if str(os.getenv("RAG_TRACEBACK","0")).strip() == "1":
+        if str(os.getenv("RAG_TRACEBACK", "0")).strip() == "1":
             print("[RAG][TRACEBACK] " + traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"RAG analyze failed: {type(e).__name__}") from e
-
-
