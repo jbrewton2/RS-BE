@@ -351,7 +351,7 @@ def _question_section_map(intent: str) -> List[Tuple[str, str]]:
             ("FINANCIAL RISKS", "Identify financial and invoicing risks (ceilings, overruns, payment terms, reporting cadence)."),
             ("DELIVERABLES & TIMELINES", "Identify schedule risks (IMS, milestones, reporting cadence, penalties)."),
             ("CONTRADICTIONS & INCONSISTENCIES", "Identify ambiguous/undefined terms and contradictions that require clarification."),
-            # overview as a ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œtop red flagsÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â aggregator
+            # overview as a ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œtop red flagsÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â aggregator
             ("OVERVIEW", "List top red-flag phrases/requirements with evidence and suggested internal owner (security/legal/PM/finance)."),
             ("MISSION & OBJECTIVE", "What is the mission and objective of this effort?"),
             ("SCOPE OF WORK", "What is the scope of work and required deliverables?"),
@@ -755,9 +755,9 @@ def _why_it_matters(section_id: str, sentence: str) -> str:
     s = (sentence or "").lower()
 
     if sid == "mission-objective":
-        return "This explains what success looks like. If itÃ¢â‚¬â„¢s vague, the proposal and delivery plan can miss the mark."
+        return "This explains what success looks like. If itÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢s vague, the proposal and delivery plan can miss the mark."
     if sid == "scope-of-work":
-        return "This drives cost and staffing. If the tasks are bigger than expected, youÃ¢â‚¬â„¢ll eat schedule and margin risk."
+        return "This drives cost and staffing. If the tasks are bigger than expected, youÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ll eat schedule and margin risk."
     if sid == "deliverables-timelines":
         return "This affects your delivery plan. Missing a required deliverable or due date can make you non-compliant."
     if sid == "security-compliance-hosting-constraints":
@@ -808,6 +808,80 @@ def _format_evidence_bullet(prefix: str, ev: Dict[str, Any]) -> str:
     snippet = snippet[:220]
     return f"{prefix}: {snippet} (Doc: {doc} span: {cs}-{ce})"
 
+
+# -----------------------------
+# Deterministic section confidence (no LLM)
+# -----------------------------
+def _clamp01(x: float) -> float:
+    try:
+        if x < 0.0:
+            return 0.0
+        if x > 1.0:
+            return 1.0
+        return float(x)
+    except Exception:
+        return 0.0
+
+
+def _confidence_for_section(section: Dict[str, Any]) -> Tuple[str, int]:
+    """
+    Returns (confidence_label, confidence_pct).
+
+    Inputs:
+      - evidence count
+      - evidence signal strength (via _evidence_signal_score)
+
+    Output:
+      confidence: missing | weak | moderate | strong
+      confidence_pct: 0-100
+    """
+    ev_list = section.get("evidence") or []
+    if not isinstance(ev_list, list) or len(ev_list) == 0:
+        return ("missing", 0)
+
+    # Evidence count factor: saturate at 6 evidence snippets
+    ev_count = len(ev_list)
+    count_factor = _clamp01(ev_count / 6.0)
+
+    # Signal factor: average positive signal across evidence (cap at 5)
+    sigs: List[float] = []
+    for ev in ev_list:
+        txt = ""
+        if isinstance(ev, dict):
+            txt = str(ev.get("text") or "")
+        else:
+            try:
+                txt = str(getattr(ev, "text", "") or "")
+            except Exception:
+                txt = ""
+        sig = _evidence_signal_score(txt)
+        sigs.append(max(0.0, float(sig)))
+
+    avg_sig = (sum(sigs) / max(1.0, float(len(sigs)))) if sigs else 0.0
+    signal_factor = _clamp01(avg_sig / 5.0)
+
+    # Weighted score: prefer count slightly more than signal
+    pct = int(round(100.0 * _clamp01(0.60 * count_factor + 0.40 * signal_factor)))
+
+    # Bucket
+    if pct >= 80:
+        label = "strong"
+    elif pct >= 55:
+        label = "moderate"
+    else:
+        label = "weak"
+
+    return (label, pct)
+
+
+def _apply_confidence(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for sec in sections or []:
+        if not isinstance(sec, dict):
+            continue
+        label, pct = _confidence_for_section(sec)
+        sec["confidence"] = label
+        sec["confidence_pct"] = pct
+    return sections
 
 def _owner_for_section(section_id: str) -> str:
     sid = (section_id or "").strip().lower()
@@ -1175,6 +1249,7 @@ def rag_analyze_review(
 
     parsed_sections = _backfill_sections_from_evidence(parsed_sections, intent)
     parsed_sections = _strengthen_overview_from_evidence(parsed_sections)
+    parsed_sections = _apply_confidence(parsed_sections)
 
     if _timing_enabled():
         print("[RAG] generation done", round(time.time() - t_gen0, 2), "s")
@@ -1236,6 +1311,8 @@ def rag_analyze_review(
         "warnings": warnings,
         "retrieved": retrieved_debug,
     }
+
+
 
 
 

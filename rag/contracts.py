@@ -74,6 +74,7 @@ class RagSection(BaseModel):
     confidence: Optional[Literal["strong", "moderate", "weak", "missing"]] = None
 
 
+    confidence_pct: Optional[int] = None  # 0-100 deterministic confidence
 class RagAnalyzeStats(BaseModel):
     top_k_effective: Optional[int] = None
     analysis_intent: Optional[str] = None
@@ -106,3 +107,4 @@ class RagAnalyzeResponse(BaseModel):
 
     # Debug payload (only when debug=true)
     retrieved: Optional[Dict[str, list]] = None
+
