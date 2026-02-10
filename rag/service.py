@@ -319,39 +319,8 @@ def query_review(
 
 
 # -----------------------------
-# Questions
+# Questions and routing
 # -----------------------------
-def _review_summary_questions() -> List[str]:
-    return [
-        "What is the mission and objective of this effort?",
-        "What is the scope of work and required deliverables?",
-        "What are the security, compliance, and hosting constraints (IL levels, NIST, DFARS, CUI, ATO/RMF, logging)?",
-        "What are the eligibility and personnel constraints (citizenship, clearances, facility, location, export controls)?",
-        "What are key legal and data rights risks (IP/data rights, audit rights, flowdowns)?",
-        "What are key financial risks (pricing model, ceilings, invoicing systems, payment terms)?",
-        "What are submission instructions and deadlines, including required formats and delivery method?",
-        "What contradictions or inconsistencies exist across documents?",
-        "What gaps require clarification from the Government?",
-        "What internal actions should we take next (security/legal/PM/engineering/finance)?",
-    ]
-
-
-def _risk_triage_questions() -> List[str]:
-    # Human-in-the-loop triage: focus on likely risk language and obligations.
-    return [
-        "Identify cybersecurity / ATO / RMF / IL requirements and risks (encryption, logging, incident reporting, vuln mgmt).",
-        "Identify CUI handling / safeguarding requirements and risks (marking, access, transmission, storage, disposal).",
-        "Identify privacy / PII / data protection obligations and risks.",
-        "Identify legal/data-rights terms and risks (IP/data rights, audit rights, GFI/GFM handling, disclosure penalties).",
-        "Identify subcontractor / flowdown / staffing constraints and risks (citizenship, clearance, facility, export).",
-        "Identify delivery/acceptance gates and required approvals (CDRLs, QA, test, acceptance criteria).",
-        "Identify financial and invoicing risks (ceilings, overruns, payment terms, reporting cadence).",
-        "Identify schedule risks (IMS, milestones, reporting cadence, penalties).",
-        "Identify ambiguous/undefined terms and contradictions that require clarification.",
-        "List top red-flag phrases/requirements with evidence and suggested internal owner (security/legal/PM/finance).",
-    ]
-
-
 def _question_section_map(intent: str) -> List[Tuple[str, str]]:
     """
     Authoritative routing for evidence attachment.
@@ -361,16 +330,28 @@ def _question_section_map(intent: str) -> List[Tuple[str, str]]:
 
     if intent == "risk_triage":
         return [
-            ("SECURITY, COMPLIANCE & HOSTING CONSTRAINTS", "Identify cybersecurity / ATO / RMF / IL requirements and risks (encryption, logging, incident reporting, vuln mgmt)."),
-            ("SECURITY, COMPLIANCE & HOSTING CONSTRAINTS", "Identify CUI handling / safeguarding requirements and risks (marking, access, transmission, storage, disposal)."),
+            (
+                "SECURITY, COMPLIANCE & HOSTING CONSTRAINTS",
+                "Identify cybersecurity / ATO / RMF / IL requirements and risks (encryption, logging, incident reporting, vuln mgmt).",
+            ),
+            (
+                "SECURITY, COMPLIANCE & HOSTING CONSTRAINTS",
+                "Identify CUI handling / safeguarding requirements and risks (marking, access, transmission, storage, disposal).",
+            ),
             ("LEGAL & DATA RIGHTS RISKS", "Identify privacy / PII / data protection obligations and risks."),
-            ("LEGAL & DATA RIGHTS RISKS", "Identify legal/data-rights terms and risks (IP/data rights, audit rights, GFI/GFM handling, disclosure penalties)."),
-            ("ELIGIBILITY & PERSONNEL CONSTRAINTS", "Identify subcontractor / flowdown / staffing constraints and risks (citizenship, clearance, facility, export)."),
+            (
+                "LEGAL & DATA RIGHTS RISKS",
+                "Identify legal/data-rights terms and risks (IP/data rights, audit rights, GFI/GFM handling, disclosure penalties).",
+            ),
+            (
+                "ELIGIBILITY & PERSONNEL CONSTRAINTS",
+                "Identify subcontractor / flowdown / staffing constraints and risks (citizenship, clearance, facility, export).",
+            ),
             ("DELIVERABLES & TIMELINES", "Identify delivery/acceptance gates and required approvals (CDRLs, QA, test, acceptance criteria)."),
             ("FINANCIAL RISKS", "Identify financial and invoicing risks (ceilings, overruns, payment terms, reporting cadence)."),
             ("DELIVERABLES & TIMELINES", "Identify schedule risks (IMS, milestones, reporting cadence, penalties)."),
             ("CONTRADICTIONS & INCONSISTENCIES", "Identify ambiguous/undefined terms and contradictions that require clarification."),
-            # keep overview as a "top red flags" aggregator
+            # overview as a â€œtop red flagsâ€ aggregator
             ("OVERVIEW", "List top red-flag phrases/requirements with evidence and suggested internal owner (security/legal/PM/finance)."),
         ]
 
@@ -616,13 +597,12 @@ def _attach_evidence_to_sections(
 
         sig = _evidence_signal_score(text)
 
-        # glossary handling:
+        # Glossary handling:
         # - reject pure glossary unless it also has obligation/compliance signal
         # - allow glossary only when explicitly allowed OR has signal
         if _is_glossary_text(text):
-            if not allow_glossary:
-                if not _has_obligation_signal(text):
-                    return False
+            if not allow_glossary and (not _has_obligation_signal(text)):
+                return False
             # outside overview, require at least min_signal if it smells like glossary
             if sec_id != "overview" and sig < min_signal:
                 return False
@@ -660,8 +640,7 @@ def _attach_evidence_to_sections(
             if kept >= max_per_section:
                 break
 
-    # 2) Fallback from citations if section has no evidence
-    # pick the FIRST mapped question for that section
+    # 2) Fallback from citations if section has no evidence: use first mapped question for that section
     q_for_section: Dict[str, str] = {}
     for sec_title, q in section_question_map:
         if sec_title not in q_for_section:
@@ -832,7 +811,8 @@ def _backfill_sections_from_evidence(
             ev0 = (sec["evidence"][0].get("text") or "").lower()
             if any(x in ev0 for x in ["shall", "must", "required", "prohibited"]) and sid not in ("overview",):
                 sec["findings"].append(
-                    f"POTENTIAL RISK (Owner: {_owner_for_section(sid)}): " + _risk_blurb_for_section(sid, sec["evidence"][0].get("text") if sec["evidence"] else "")
+                    f"POTENTIAL RISK (Owner: {_owner_for_section(sid)}): "
+                    + _risk_blurb_for_section(sid, sec["evidence"][0].get("text") if sec["evidence"] else "")
                 )
 
         if (not sec["findings"]) and (not sec["evidence"]):
@@ -885,7 +865,6 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
         injected: List[str] = []
         added = 0
         for ev in pool:
-            # allow some glossary only if it has real signals
             if _is_glossary_text(ev.get("text") or "") and not _has_obligation_signal(ev.get("text") or ""):
                 continue
             injected.append(_format_evidence_bullet("EVIDENCE", ev))
@@ -931,6 +910,7 @@ def rag_analyze_review(
     t0 = time.time() if _timing_enabled() else 0.0
     m = _canonical_mode(mode)
 
+    # DEV guardrail: avoid expensive re-ingest loops during fast mode unless explicitly allowed.
     if _fast_enabled() and force_reingest and (_env("RAG_ALLOW_FORCE_REINGEST", "0").strip() != "1"):
         print("[RAG] WARN: force_reingest requested but skipped because RAG_FAST=1 and RAG_ALLOW_FORCE_REINGEST!=1")
         force_reingest = False
@@ -987,9 +967,7 @@ def rag_analyze_review(
     blocks: List[str] = []
     for q in questions:
         hits = retrieved.get(q) or []
-        blocks.append(
-            f"QUESTION: {q}\nRETRIEVED EVIDENCE:\n" + "\n".join(fmt_hit(h) for h in hits[:effective_top_k])
-        )
+        blocks.append(f"QUESTION: {q}\nRETRIEVED EVIDENCE:\n" + "\n".join(fmt_hit(h) for h in hits[:effective_top_k]))
 
     context = "\n\n".join(blocks)
 
