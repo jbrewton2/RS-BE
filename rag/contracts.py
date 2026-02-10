@@ -88,6 +88,8 @@ class RagAnalyzeStats(BaseModel):
     fast_mode: Optional[bool] = None
 
 
+    # Materialization stats (AI RiskObjects) — additive
+    risk_objects: Optional[Dict[str, int]] = None
 class RagAnalyzeResponse(BaseModel):
     review_id: str
     mode: RagMode
