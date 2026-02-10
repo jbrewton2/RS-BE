@@ -351,8 +351,13 @@ def _question_section_map(intent: str) -> List[Tuple[str, str]]:
             ("FINANCIAL RISKS", "Identify financial and invoicing risks (ceilings, overruns, payment terms, reporting cadence)."),
             ("DELIVERABLES & TIMELINES", "Identify schedule risks (IMS, milestones, reporting cadence, penalties)."),
             ("CONTRADICTIONS & INCONSISTENCIES", "Identify ambiguous/undefined terms and contradictions that require clarification."),
-            # overview as a â€œtop red flagsâ€ aggregator
+            # overview as a ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œtop red flagsÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â aggregator
             ("OVERVIEW", "List top red-flag phrases/requirements with evidence and suggested internal owner (security/legal/PM/finance)."),
+            ("MISSION & OBJECTIVE", "What is the mission and objective of this effort?"),
+            ("SCOPE OF WORK", "What is the scope of work and required deliverables?"),
+            ("SUBMISSION INSTRUCTIONS & DEADLINES", "What are submission instructions and deadlines, including required formats and delivery method?"),
+            ("GAPS / QUESTIONS FOR THE GOVERNMENT", "What gaps require clarification from the Government?"),
+            ("RECOMMENDED INTERNAL ACTIONS", "What internal actions should we take next (security/legal/PM/engineering/finance)?"),
         ]
 
     # strict_summary
@@ -709,6 +714,92 @@ def _text_matches_keywords(text: str, keywords: List[str]) -> bool:
     return False
 
 
+# -----------------------------
+# Plain-English finding synthesis (deterministic)
+# -----------------------------
+_SENT_SPLIT_RE = re.compile(r"(?<=[\.\!\?])\s+|\n+")
+
+def _best_signal_sentence(text: str, max_len: int = 260) -> str:
+    """
+    Pick a concise sentence that contains obligation/compliance signals.
+    Deterministic: no LLM, just regex + sentence scan.
+    """
+    t = _normalize_text(text or "").strip()
+    if not t:
+        return ""
+    # break into sentences-ish
+    parts = [p.strip() for p in _SENT_SPLIT_RE.split(t) if p and p.strip()]
+    if not parts:
+        return t[:max_len]
+    # prefer sentences that contain obligation/compliance signals
+    scored = []
+    for p in parts:
+        sig = _evidence_signal_score(p)
+        # mild preference for medium-length sentences
+        length_penalty = 0
+        if len(p) < 40:
+            length_penalty = 1
+        if len(p) > 320:
+            length_penalty = 2
+        scored.append((sig, -length_penalty, -len(p), p))
+    scored.sort(reverse=True)
+    best = scored[0][3]
+    best = best.replace("\r", " ").replace("\n", " ").strip()
+    return best if len(best) <= max_len else (best[:max_len].rstrip() + "...")
+
+def _why_it_matters(section_id: str, sentence: str) -> str:
+    """
+    Deterministic plain-English impact message per section.
+    """
+    sid = (section_id or "").strip().lower()
+    s = (sentence or "").lower()
+
+    if sid == "mission-objective":
+        return "This explains what success looks like. If itÃ¢â‚¬â„¢s vague, the proposal and delivery plan can miss the mark."
+    if sid == "scope-of-work":
+        return "This drives cost and staffing. If the tasks are bigger than expected, youÃ¢â‚¬â„¢ll eat schedule and margin risk."
+    if sid == "deliverables-timelines":
+        return "This affects your delivery plan. Missing a required deliverable or due date can make you non-compliant."
+    if sid == "security-compliance-hosting-constraints":
+        return "These requirements can force architecture changes and add compliance work (ATO/RMF, logging, encryption)."
+    if sid == "eligibility-personnel-constraints":
+        return "These constraints can block staffing (clearance/citizenship) or limit subcontractor options."
+    if sid == "legal-data-rights-risks":
+        return "These terms can create long-term legal exposure (data rights, audits, penalties, flowdowns)."
+    if sid == "financial-risks":
+        return "These terms affect cash flow and profitability (ceilings, reporting, invoicing cadence, overrun notice)."
+    if sid == "submission-instructions-deadlines":
+        return "This affects proposal compliance. Wrong format or missed instructions can get you rejected."
+    if sid == "contradictions-inconsistencies":
+        return "Conflicting requirements cause rework and risk. These should be clarified before committing."
+    if sid == "gaps-questions-for-the-government":
+        return "These are open questions. Unanswered items are proposal risk and should be clarified early."
+    if sid == "recommended-internal-actions":
+        return "These are concrete next steps to reduce risk and produce an accurate, compliant response."
+
+    # overview
+    if sid == "overview":
+        if any(x in s for x in ["shall", "must", "required", "prohibited"]):
+            return "This looks like a binding requirement. Confirm it early and assign an owner."
+        return "This is a key point to validate and assign to the right team."
+
+    return "This is relevant to delivery/compliance. Confirm and assign an owner."
+
+def _plain_finding_from_evidence(section_id: str, ev_text: str) -> List[str]:
+    """
+    Return 2 bullets: Requirement/Key point + Why it matters.
+    Deterministic and derived from evidence only.
+    """
+    sent = _best_signal_sentence(ev_text or "")
+    if not sent:
+        return []
+    bullets: List[str] = []
+    # use "Requirement" when obligation signal present, otherwise "Key point"
+    label = "Requirement" if _has_obligation_signal(sent) else "Key point"
+    bullets.append(f"{label}: {sent}")
+    bullets.append(f"Why it matters: {_why_it_matters(section_id, sent)}")
+    return bullets
+
 def _format_evidence_bullet(prefix: str, ev: Dict[str, Any]) -> str:
     doc = ev.get("doc") or ev.get("docId") or "UnknownDoc"
     cs = ev.get("charStart")
@@ -796,7 +887,7 @@ def _backfill_sections_from_evidence(
             for ev in sec["evidence"]:
                 if not _text_matches_keywords(ev.get("text") or "", kw) and sid != "overview":
                     continue
-                sec["findings"].append(_format_evidence_bullet("EVIDENCE", ev))
+                sec["findings"].extend(_plain_finding_from_evidence(sid, ev.get("text") or ""))
                 kept += 1
                 if kept >= 3:
                     break
@@ -1145,3 +1236,6 @@ def rag_analyze_review(
         "warnings": warnings,
         "retrieved": retrieved_debug,
     }
+
+
+
