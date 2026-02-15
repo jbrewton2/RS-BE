@@ -93,3 +93,18 @@ openapi*.json
 
 
 Docs/
+
+# Local venvs
+.venv/
+venv/
+__pycache__/
+
+# Local outputs / archives
+out/
+*.bundle
+*.patch
+
+# Local debug backups
+*.bak
+*.bak.*
+rag/service.py.bak.*
