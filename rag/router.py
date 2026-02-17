@@ -78,6 +78,7 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
             review_id=req.review_id,
             mode=req.mode,
             analysis_intent=req.analysis_intent,
+            heuristic_hits=req.heuristic_hits,
             context_profile=req.context_profile,
             top_k=req.top_k,
             force_reingest=req.force_reingest,
@@ -99,3 +100,4 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
         if str(os.getenv("RAG_TRACEBACK", "0")).strip() == "1":
             print("[RAG][TRACEBACK] " + traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"RAG analyze failed: {type(e).__name__}") from e
+

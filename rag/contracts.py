@@ -36,6 +36,10 @@ class RagAnalyzeRequest(BaseModel):
     top_k: int = Field(default=12, ge=1, le=50)
     force_reingest: bool = Field(default=False)
 
+    # Optional deterministic Tier-2 signals provided by caller (NOT contract evidence)
+    heuristic_hits: Optional[List[Dict[str, Any]]] = Field(default=None)
+
+
     # Debug: include compact per-question hit lists
     debug: bool = Field(default=False)
 
@@ -88,7 +92,7 @@ class RagAnalyzeStats(BaseModel):
     fast_mode: Optional[bool] = None
 
 
-    # Materialization stats (AI RiskObjects) â€” additive
+    # Materialization stats (AI RiskObjects) Ã¢â‚¬â€ additive
     risk_objects: Optional[Dict[str, int]] = None
 class RagAnalyzeResponse(BaseModel):
     review_id: str
@@ -110,6 +114,7 @@ class RagAnalyzeResponse(BaseModel):
 
     # Debug payload (only when debug=true)
     retrieved: Optional[Dict[str, list]] = None
+
 
 
 
