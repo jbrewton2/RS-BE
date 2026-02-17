@@ -18,6 +18,28 @@ variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 # ---------------------------------------------
+# ✅ Fast integrity gate: compile everything
+# Catches broken edits (splices, indentation, syntax) before pytest
+# ---------------------------------------------
+py_compile_backend:
+  stage: test
+  image: python:3.11-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+    - if: '$CI_COMMIT_TAG'
+      when: on_success
+    - when: never
+  variables:
+    PYTHONPATH: "$CI_PROJECT_DIR"
+  before_script:
+    - python --version
+  script:
+    - python -m compileall -q .
+
+# ---------------------------------------------
 # ✅ Backend unit tests (pytest)
 # ---------------------------------------------
 pytest_backend:
@@ -51,8 +73,44 @@ pytest_backend:
       junit: report.xml
     expire_in: 7 days
 
+# ---------------------------------------------
+# ✅ RAG determinism regression test (CPU-safe)
+# Protects against the exact regression we fixed:
+# - timing enabled must NOT short-circuit deterministic risk materialization
+#
+# Requires: tests/test_rag_risk_materialization.py
+# ---------------------------------------------
+rag_determinism_smoke:
+  stage: test
+  image: python:3.11-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+    - if: '$CI_COMMIT_TAG'
+      when: on_success
+    - when: never
+  cache:
+    key: "pip-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .cache/pip
+  variables:
+    PYTHONPATH: "$CI_PROJECT_DIR"
+    # Ensure the regression condition is tested
+    RAG_TIMING: "1"
+  before_script:
+    - python --version
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install -U pytest
+  script:
+    - pytest -q tests/test_rag_risk_materialization.py
+
+# ---------------------------------------------
 # Optional: build/push backend container image (only MR/main/tags)
 # Keep this ONLY if css-backend repo has a Dockerfile at repo root.
+# ---------------------------------------------
 build_and_push_backend:
   stage: build
   image: docker:27
@@ -85,9 +143,22 @@ build_and_push_backend:
         docker tag "$IMAGE:$SHA_TAG" "$IMAGE:$CI_COMMIT_TAG"
         docker push "$IMAGE:$CI_COMMIT_TAG"
       fi
+
+# ---------------------------------------------
+# ✅ Provider drift guard
+# Fail if forbidden provider patterns exist
+# ---------------------------------------------
 provider_drift_guard:
   stage: test
   image: alpine:3.20
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+    - if: '$CI_COMMIT_TAG'
+      when: on_success
+    - when: never
   script:
     - echo "Fail if forbidden provider patterns exist"
     - '! grep -R --line-number --exclude-dir=.git --exclude-dir=test -E "(_providers\(|get_providers\()" .'
