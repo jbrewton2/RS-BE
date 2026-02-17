@@ -84,18 +84,14 @@ class StorageSettings:
 
     provider:
       - "local"  -> LocalFilesStorageProvider
-      - "minio"  -> MinIO/S3-compatible object store provider
+      - "local"  -> MinIO/S3-compatible object store provider
     """
     provider: str
 
     # Local
     local_dir: str = "./data"
 
-    # S3-compatible (used when provider == "minio")
-    minio_endpoint: str = "http://minio:9000"
-    minio_bucket: str = "css"
-    minio_access_key: str = ""
-    minio_secret_key: str = ""
+    # S3-compatible (used when provider == "local")
 
 
 @dataclass(frozen=True)
@@ -220,12 +216,9 @@ def _load_llm_settings() -> LLMSettings:
 
 def _normalize_storage_provider(raw: str) -> str:
     v = (raw or "").strip().lower()
-    if v in ("minio", "s3", "object_store", "objectstore"):
-        return "minio"
-    if v in ("local", "file", "files", "filesystem"):
-        return "local"
+    if v in ("local", "s3"):
+        return v
     return "local"
-
 
 def _load_storage_settings() -> StorageSettings:
     """
@@ -240,18 +233,10 @@ def _load_storage_settings() -> StorageSettings:
 
     local_dir = (_env("STORAGE_LOCAL_DIR", "") or _env("LOCAL_STORAGE_DIR", "") or "./data").strip()
 
-    minio_endpoint = (_env("MINIO_ENDPOINT", "") or "http://minio:9000").strip().rstrip("/")
-    minio_bucket = (_env("MINIO_BUCKET", "") or "css").strip()
-    minio_access_key = (_env("MINIO_ACCESS_KEY", "") or "").strip()
-    minio_secret_key = (_env("MINIO_SECRET_KEY", "") or "").strip()
 
     return StorageSettings(
         provider=provider,
         local_dir=local_dir,
-        minio_endpoint=minio_endpoint,
-        minio_bucket=minio_bucket,
-        minio_access_key=minio_access_key,
-        minio_secret_key=minio_secret_key,
     )
 
 
