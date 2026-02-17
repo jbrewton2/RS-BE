@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 import os
@@ -97,10 +97,31 @@ class OllamaLLMProvider(LLMProvider):
 
         # Temperature: params override, else env, else default
         temperature = float(p.get("temperature") or _env("LLM_TEMPERATURE", "0.2") or "0.2")
-        max_tokens = int(_env("LLM_MAX_TOKENS", "512") or "512")
+        # ULTRA FAST MODE (CPU-friendly hard cap)
+        try:
+            max_tokens = int(_env("LLM_MAX_TOKENS", "96") or "96")
+        except Exception:
+            max_tokens = 96
+
+        # Hard ceiling
+        if max_tokens > 96:
+            max_tokens = 96
+        if max_tokens < 16:
+            max_tokens = 16
         if (_env("RAG_FAST", "") or "").strip().lower() in {"1","true","yes","on"}:
             cap = int((_env("RAG_FAST_MAX_TOKENS", "256") or "256") or "256")
             max_tokens = min(max_tokens, cap)
+            
+            # Hard ceiling (env-driven) to prevent runaway generations (CPU-friendly)
+            try:
+                hard_ceiling = int(_env("LLM_HARD_MAX_TOKENS", "256") or "256")
+            except Exception:
+                hard_ceiling = 256
+            if hard_ceiling < 16:
+                hard_ceiling = 16
+            if max_tokens > hard_ceiling:
+                max_tokens = hard_ceiling
+            
 
         # If user points at /api/generate, use prompt format; otherwise use chat messages format
         is_generate = api_url.endswith("/api/generate")
@@ -125,6 +146,10 @@ class OllamaLLMProvider(LLMProvider):
 
         with httpx.Client(timeout=timeout) as client:
             print(f"[LLM] generate endpoint={api_url} model={chosen_model}")
+            try:
+                print(f"[LLM] num_predict={max_tokens}")
+            except Exception:
+                pass
             try:
                 r = client.post(api_url, json=payload)
                 r.raise_for_status()
@@ -181,6 +206,7 @@ class OllamaLLMProvider(LLMProvider):
                 "raw_keys": list(data.keys()) if isinstance(data, dict) else [],
             },
         }
+
 
 
 
