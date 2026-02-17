@@ -21,6 +21,7 @@ from providers.llm import LLMProvider
 import os
 
 from providers.impl.storage_local_files import LocalFilesStorageProvider
+from providers.impl.storage_s3 import S3StorageProvider
 import os
 from providers.impl.vector_disabled import DisabledVectorStore
 import os
@@ -28,8 +29,6 @@ from providers.impl.jobs_local_inline import LocalInlineJobRunner
 import os
 
 # Optional impls
-try:
-except Exception:  # pragma: no cover
 
 try:
     from providers.impl.llm_ollama import OllamaLLMProvider  # type: ignore
@@ -42,7 +41,7 @@ try:  # pragma: no cover
 except Exception:  # pragma: no cover
     BedrockLLMProvider = None  # type: ignore
 
-# ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ pgvector impl (this MUST exist if VECTOR_STORE=pgvector)
+# ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ pgvector impl (this MUST exist if VECTOR_STORE=pgvector)
 try:
     from providers.impl.vector_pgvector import PgVectorStore  # type: ignore
 except Exception:  # pragma: no cover
@@ -158,5 +157,6 @@ def get_providers() -> Providers:
         jobs=_build_jobs(s),
         llm=_build_llm(s),
     )
+
 
 
