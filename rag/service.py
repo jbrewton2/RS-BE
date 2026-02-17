@@ -1623,7 +1623,35 @@ def rag_analyze_review(
     # They should never be cited as "contract text".
     if str(intent or "").strip().lower() == "risk_triage":
         try:
-            _sig_items = signals if isinstance(signals, list) else []
+            # Tier 3 signals from autoFlags (deterministic, highest confidence)
+            try:
+                _flag_signals = []
+                try:
+                    _reviews = _read_reviews_file(storage)
+                    _rev = next((r for r in (_reviews or []) if str(r.get("id")) == str(review_id)), None) or {}
+                except Exception:
+                    _rev = {}
+                _af = (_rev.get("autoFlags") or {}) if isinstance(_rev, dict) else {}
+                _hits = _af.get("hits") or []
+                for fh in (_hits or []):
+                    if not isinstance(fh, dict):
+                        continue
+                    _fid = str(fh.get("id") or fh.get("hit_key") or fh.get("key") or "").strip()
+                    _flabel = str(fh.get("label") or fh.get("name") or "").strip()
+                    _fsev = str(fh.get("severity") or "").strip()
+                    if not (_fid or _flabel):
+                        continue
+                    _flag_signals.append({
+                        "id": _fid or _flabel,
+                        "label": _flabel or _fid,
+                        "severity": _fsev,
+                        "source": "autoFlag",
+                        "why": "",
+                    })
+            except Exception:
+                _flag_signals = []
+
+            _sig_items = (_flag_signals + (signals if isinstance(signals, list) else []))
             if _sig_items:
                 _sig_lines = []
                 for s in _sig_items:
@@ -2018,6 +2046,7 @@ def _materialize_risks_from_inference(
             )
 
     return out
+
 
 
 
