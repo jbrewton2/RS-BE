@@ -1615,6 +1615,7 @@ def rag_analyze_review(
         query_review_fn=query_review,
         env_get_fn=_env,
         effective_context_chars_fn=_effective_context_chars,
+        heuristic_hits=heuristic_hits,
     )
 
     # --- Deterministic signals injection (risk_triage only) -----------------
@@ -1683,6 +1684,18 @@ def rag_analyze_review(
         except Exception:
             pass
     # -----------------------------------------------------------------------
+    # Debug: persist the final prompt context (includes deterministic signals)
+    # NOTE: this is ONLY for debug/testing; do not treat as contract evidence.
+    if debug:
+        try:
+            if not isinstance(stats, dict):
+                stats = {}
+        except Exception:
+            stats = {}
+        try:
+            stats['debug_context'] = context or ''
+        except Exception:
+            pass
     if _timing_enabled():
         print('[RAG] retrieval done', round(time.time() - t_ret0, 2), 's')
 
@@ -2046,6 +2059,8 @@ def _materialize_risks_from_inference(
             )
 
     return out
+
+
 
 
 
