@@ -1,4 +1,4 @@
-# backend/reviews/router.py
+﻿# backend/reviews/router.py
 from __future__ import annotations
 
 import json
@@ -173,6 +173,14 @@ def _attach_auto_flags_to_review(review: Dict[str, Any]) -> Dict[str, Any]:
 async def list_reviews(storage: StorageDep):
     """Return the full list of saved reviews."""
     return _read_reviews_file(storage)
+@router.get("/{review_id}")
+async def get_review(review_id: str, storage: StorageDep):
+    """Return a single review by id."""
+    reviews = _read_reviews_file(storage)
+    review = next((r for r in (reviews or []) if str(r.get("id")) == str(review_id)), None)
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return review
 
 @router.post("")
 async def upsert_review(review: Dict[str, Any], storage: StorageDep):
@@ -255,3 +263,4 @@ async def delete_review(review_id: str, storage: StorageDep):
         raise HTTPException(status_code=404, detail="Review not found")
     _write_reviews_file(new_list, storage)
     return {"ok": True}
+
