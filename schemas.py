@@ -1,7 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import List, Optional, Dict
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 
 # -----------------------------------------------------
 # CONSTANTS & HELPERS
@@ -77,7 +77,8 @@ class EvidenceModel(BaseModel):
     line: Optional[int] = None
     text: Optional[str] = None
 
-    @validator("text", pre=True, always=True)
+    @field_validator("text", mode="before")
+    @classmethod
     def ensure_text(cls, v):
         return None if v is None else str(v)
 
@@ -98,16 +99,20 @@ class RiskModel(BaseModel):
     resolution: Optional[str] = None
     resolutionNote: Optional[str] = None
 
-    @validator("severity", pre=True, always=True)
+    @field_validator("severity", mode="before")
+    @classmethod
     def v_severity(cls, v): return _normalize_severity(v)
 
-    @validator("scope", pre=True, always=True)
+    @field_validator("scope", mode="before")
+    @classmethod
     def v_scope(cls, v): return _normalize_scope(v)
 
-    @validator("action", pre=True, always=True)
+    @field_validator("action", mode="before")
+    @classmethod
     def v_action(cls, v): return _normalize_action(v)
 
-    @validator("category", pre=True, always=True)
+    @field_validator("category", mode="before")
+    @classmethod
     def v_cat(cls, v): return _normalize_category(v)
 
 
@@ -233,3 +238,4 @@ class QuestionnaireFeedbackRequest(BaseModel):
     approved: bool
     feedback_reason: Optional[str] = None
     final_answer: Optional[str] = None
+
