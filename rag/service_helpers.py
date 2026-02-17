@@ -128,6 +128,17 @@ def materialize_risk_register(
     return merged, counts
 
 
+def _safe_str(v: Any, max_len: int = 240) -> str:
+    try:
+        s = "" if v is None else str(v)
+    except Exception:
+        s = ""
+    s = s.replace("\r", " ").replace("\n", " ").strip()
+    if max_len > 0 and len(s) > max_len:
+        s = s[: max_len - 3] + "..."
+    return s
+
+
 def retrieve_context(
     *,
     vector: Any,
@@ -215,16 +226,21 @@ def retrieve_context(
     # Deterministic signals (NOT contract evidence): heuristic hits only (for now)
     signals: List[Dict[str, Any]] = []
     try:
+        # Cap signals count (prevent runaway)
+        try:
+            sig_cap = int((env_get_fn("RAG_SIGNALS_MAX_ITEMS", "40") or "40").strip() or "40")
+        except Exception:
+            sig_cap = 40
+
         for h in (heuristic_hits or []):
             if not isinstance(h, dict):
                 continue
 
-            hid = str(h.get("id") or h.get("hit_id") or h.get("key") or "").strip()
-            label = str(h.get("label") or h.get("name") or h.get("title") or h.get("rule") or "").strip()
-            severity = str(h.get("severity") or h.get("level") or h.get("risk") or "").strip()
-            why = str(h.get("why") or h.get("rationale") or h.get("reason") or "").strip()
+            hid = _safe_str(h.get("id") or h.get("hit_id") or h.get("key") or "")
+            label = _safe_str(h.get("label") or h.get("name") or h.get("title") or h.get("rule") or "", max_len=200)
+            severity = _safe_str(h.get("severity") or h.get("level") or h.get("risk") or "", max_len=40)
+            why = _safe_str(h.get("why") or h.get("rationale") or h.get("reason") or "", max_len=220)
 
-            # If we have literally nothing, skip it
             if not (hid or label):
                 continue
 
@@ -237,6 +253,10 @@ def retrieve_context(
                     "why": why,
                 }
             )
+
+            if sig_cap > 0 and len(signals) >= sig_cap:
+                break
+
     except Exception:
         signals = []
 
