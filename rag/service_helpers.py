@@ -127,6 +127,7 @@ def materialize_risk_register(
 
     return merged, counts
 
+
 def retrieve_context(
     *,
     vector: Any,
@@ -140,12 +141,18 @@ def retrieve_context(
     query_review_fn: Callable[..., List[Dict[str, Any]]],
     env_get_fn: Callable[[str, str], str],
     effective_context_chars_fn: Callable[[str], int],
-) -> Tuple[Dict[str, List[Dict[str, Any]]], str, int]:
+    heuristic_hits: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[Dict[str, List[Dict[str, Any]]], str, int, List[Dict[str, Any]]]:
     """
     Retrieval + context assembly + deterministic context capping.
 
     Returns:
-      (retrieved_hits_by_question, context_string, max_context_chars_used_for_cap)
+      (retrieved_hits_by_question, context_string, max_context_chars_used_for_cap, signals)
+
+    signals:
+      Deterministic, non-contract-evidence hints (ex: heuristic hits). These are appended
+      later by the caller (risk_triage only) with explicit markers so they are never cited
+      as contract text.
     """
 
     retrieved: Dict[str, List[Dict[str, Any]]] = {}
@@ -205,4 +212,32 @@ def retrieve_context(
         if strict_cap > 0 and len(context) > strict_cap:
             context = context[:strict_cap]
 
-    return retrieved, context, max_chars
+    # Deterministic signals (NOT contract evidence): heuristic hits only (for now)
+    signals: List[Dict[str, Any]] = []
+    try:
+        for h in (heuristic_hits or []):
+            if not isinstance(h, dict):
+                continue
+
+            hid = str(h.get("id") or h.get("hit_id") or h.get("key") or "").strip()
+            label = str(h.get("label") or h.get("name") or h.get("title") or h.get("rule") or "").strip()
+            severity = str(h.get("severity") or h.get("level") or h.get("risk") or "").strip()
+            why = str(h.get("why") or h.get("rationale") or h.get("reason") or "").strip()
+
+            # If we have literally nothing, skip it
+            if not (hid or label):
+                continue
+
+            signals.append(
+                {
+                    "id": hid or label,
+                    "label": label or hid,
+                    "severity": severity,
+                    "source": "heuristic",
+                    "why": why,
+                }
+            )
+    except Exception:
+        signals = []
+
+    return retrieved, context, max_chars, signals
