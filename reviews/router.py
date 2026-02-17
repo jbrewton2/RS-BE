@@ -1,4 +1,4 @@
-﻿# backend/reviews/router.py
+# backend/reviews/router.py
 from __future__ import annotations
 
 import json
