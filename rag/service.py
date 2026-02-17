@@ -219,6 +219,7 @@ def _normalize_section_outputs(section: Dict[str, Any], *, max_findings: int = _
     section["findings"] = cleaned
 
 import time
+from rag.service_helpers import build_rag_response_dict
 from typing import Any, Dict, List, Optional, Tuple
 
 from providers.storage import StorageProvider
@@ -1928,20 +1929,20 @@ def rag_analyze_review(
 
     # FINAL RETURN (authoritative): always return contract-shaped response.
     # Timing logs are optional, but returning is not.
-    out = {
-        "review_id": str(review_id),
-        "mode": str(mode),
-        "top_k": int(locals().get("effective_top_k") or locals().get("top_k") or 12),
-        "analysis_intent": str(locals().get("intent") or locals().get("analysis_intent") or "strict_summary"),
-        "context_profile": str(locals().get("context_profile") or "fast"),
-        "summary": (locals().get("summary") or locals().get("summary_text") or ""),
-        "citations": (locals().get("citations") or []),
-        "retrieved_counts": (locals().get("retrieved_counts") or {}),
-        "risks": (locals().get("risks") or []),
-        "sections": (locals().get("parsed_sections") or locals().get("sections") or []),
-        "stats": (locals().get("stats") or None),
-        "warnings": (locals().get("warnings") or []),
-    }
+    out = build_rag_response_dict(
+        review_id=str(review_id),
+        mode=str(mode),
+        effective_top_k=int(locals().get('effective_top_k') or locals().get('top_k') or 12),
+        intent=str(locals().get('intent') or locals().get('analysis_intent') or 'strict_summary'),
+        context_profile=str(locals().get('context_profile') or 'fast'),
+        summary=(locals().get('summary') or locals().get('summary_text') or ''),
+        citations=(locals().get('citations') or []),
+        retrieved_counts=(locals().get('retrieved_counts') or {}),
+        risks=(locals().get('risks') or []),
+        sections=(locals().get('parsed_sections') or locals().get('sections') or []),
+        stats=(locals().get('stats') or None),
+        warnings=(locals().get('warnings') or []),
+    )
     return out
     # 4) Inference risks (Tier 1, lowest confidence) - optional via env toggle
 
