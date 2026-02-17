@@ -1,7 +1,7 @@
 # rag/contracts.py
 from __future__ import annotations
 
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -88,7 +88,7 @@ class RagAnalyzeStats(BaseModel):
     fast_mode: Optional[bool] = None
 
 
-    # Materialization stats (AI RiskObjects) — additive
+    # Materialization stats (AI RiskObjects) â€” additive
     risk_objects: Optional[Dict[str, int]] = None
 class RagAnalyzeResponse(BaseModel):
     review_id: str
@@ -104,9 +104,12 @@ class RagAnalyzeResponse(BaseModel):
     retrieved_counts: Dict[str, int] = Field(default_factory=dict)
 
     sections: Optional[List[RagSection]] = None
+    risks: Optional[List[Dict[str, Any]]] = None
     stats: Optional[RagAnalyzeStats] = None
     warnings: List[str] = Field(default_factory=list)
 
     # Debug payload (only when debug=true)
     retrieved: Optional[Dict[str, list]] = None
+
+
 
