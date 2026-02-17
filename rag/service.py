@@ -1,4 +1,4 @@
-# rag/service.py
+﻿# rag/service.py
 from __future__ import annotations
 
 
@@ -115,7 +115,7 @@ def _normalize_bullet_text(t: str) -> str:
 
     # Clamp length
     if len(s) > _FINDING_MAX_LEN:
-        s = s[:_FINDING_MAX_LEN].rstrip() + "…"
+        s = s[:_FINDING_MAX_LEN].rstrip() + "â€¦"
 
     return s
 
@@ -1724,7 +1724,7 @@ def rag_analyze_review(
             "- Keep each bullet short and concrete.\n\n"
             "FORMAT\n"
             "- Use the SECTION HEADERS exactly as listed, in order.\n"
-            "- Under each section, output ONLY findings as bullets (3–6 bullets max).\n"
+            "- Under each section, output ONLY findings as bullets (3â€“6 bullets max).\n"
             "- Do NOT include any Evidence lines (server will attach evidence separately).\n\n"
             "SECTIONS (exact order)\n"
             + "\n".join(RAG_REVIEW_SUMMARY_SECTIONS)
@@ -1861,7 +1861,7 @@ def rag_analyze_review(
         print("[RAG] generation done", round(time.time() - t_gen0, 2), "s")
         print("[RAG] analyze done", round(time.time() - t0, 2), "s")
         
-        # FINAL RETURN GUARD (never return None — required by RagAnalyzeResponse.model_validate)
+        # FINAL RETURN GUARD (never return None â€” required by RagAnalyzeResponse.model_validate)
         # If the function path forgets to return, we still emit a contract-shaped dict.
         out = {
             "review_id": str(review_id),
@@ -2059,6 +2059,7 @@ def _materialize_risks_from_inference(
             )
 
     return out
+
 
 
 
