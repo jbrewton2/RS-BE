@@ -219,7 +219,7 @@ def _normalize_section_outputs(section: Dict[str, Any], *, max_findings: int = _
     section["findings"] = cleaned
 
 import time
-from rag.service_helpers import build_rag_response_dict
+from rag.service_helpers import build_rag_response_dict, materialize_risk_register
 from typing import Any, Dict, List, Optional, Tuple
 
 from providers.storage import StorageProvider
@@ -1854,78 +1854,34 @@ def rag_analyze_review(
     if context_truncated:
         warnings.append(f"Context truncated at {max_chars} chars.")
 
-        # Deterministic: materialize risks for UI (Risk Register) from server truth.
-    # Canonical merge order (preserve confidence tiers):
-    #   1) FLAGS (Tier 3, highest confidence)
-    #   2) HEURISTICS (Tier 2, deterministic hits)
-    #   3) SECTION-derived deterministic risks (Tier 2)
-    risks: List[Dict[str, Any]] = []
+    # Deterministic: materialize risks for UI (Risk Register) from server truth.
+    risks, risk_counts = materialize_risk_register(
+        storage=storage,
+        review_id=str(review_id),
+        intent=str(intent),
+        parsed_sections=(parsed_sections or []),
+        heuristic_hits=heuristic_hits,
+        enable_inference_risks=bool(enable_inference_risks),
+        inference_candidates=inference_candidates,
+        read_reviews_fn=_read_reviews_file,
+        materialize_flags_fn=_materialize_risks_from_flags,
+        materialize_heuristics_fn=_materialize_risks_from_heuristic_hits,
+        materialize_sections_fn=_materialize_risks_from_sections,
+        materialize_inference_fn=_materialize_risks_from_inference,
+    )
 
-    # 1) Flags -> risks (Tier 3)
+    # Attach tier counts into stats if stats dict exists (best-effort, no behavior change).
     try:
-        reviews = _read_reviews_file(storage)
-        review = next((r for r in (reviews or []) if str(r.get("id")) == str(review_id)), None) or {}
-        risks_flags = _materialize_risks_from_flags(review)
+        if isinstance(stats, dict):
+            stats['risk_objects'] = risk_counts
     except Exception:
-        risks_flags = []
-
-    # 2) Heuristic hits -> risks (Tier 2)
-    risks_heur = _materialize_risks_from_heuristic_hits(heuristic_hits)
-
-    # 3) Section-derived risks -> risks (Tier 2)
-    if intent == "risk_triage":
-        risks_det = _materialize_risks_from_sections(parsed_sections)
-    else:
-        risks_det = []
+        pass
 
     if debug:
         try:
-            print("[RAG][RISKS] flags=", len(risks_flags or []), "heur=", len(risks_heur or []), "sections=", len(risks_det or []))
-            # show a couple sample section-derived risks (if any)
-            if risks_det:
-                print("[RAG][RISKS] sections sample ids=", [str(x.get("id")) for x in (risks_det or [])[:5] if isinstance(x, dict)])
-        except Exception as _e:
-            print("[RAG][RISKS] debug print failed:", repr(_e))
-
-    # Merge/dedupe by id, preserve tier priority (flags first)
-    merged: List[Dict[str, Any]] = []
-    seen_ids = set()
-
-    # Merge/dedupe by id, preserve tier priority (flags first)
-    for src in (risks_flags, risks_heur, risks_det):
-        for r in (src or []):
-            if not isinstance(r, dict):
-                continue
-            rid = str(r.get("id") or r.get("risk_id") or "").strip()
-            if not rid:
-                continue
-            if rid in seen_ids:
-                continue
-            seen_ids.add(rid)
-            merged.append(r)
-
-    # 4) Inference risks (Tier 1, lowest confidence) - optional via env toggle
-    try:
-        risks_inf = _materialize_risks_from_inference(
-            parsed_sections,
-            enable_inference_risks=True,
-            inference_candidates=inference_candidates,
-        )
-    except Exception:
-        risks_inf = []
-
-    for r in (risks_inf or []):
-        if not isinstance(r, dict):
-            continue
-        rid = str(r.get("id") or "").strip()
-        if not rid:
-            continue
-        if rid in seen_ids:
-            continue
-        seen_ids.add(rid)
-        merged.append(r)
-
-    risks = merged
+            print('[RAG][RISKS]', risk_counts)
+        except Exception:
+            pass
 
     # FINAL RETURN (authoritative): always return contract-shaped response.
     # Timing logs are optional, but returning is not.
@@ -2065,6 +2021,7 @@ def _materialize_risks_from_inference(
             )
 
     return out
+
 
 
 
