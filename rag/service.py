@@ -1603,7 +1603,7 @@ def rag_analyze_review(
     citations: List[Dict[str, Any]] = []
 
     t_ret0 = time.time() if _timing_enabled() else 0.0
-    retrieved, context, max_chars = retrieve_context(
+    retrieved, context, max_chars, signals = retrieve_context(
         vector=vector,
         llm=llm,
         questions=questions,
@@ -1616,6 +1616,45 @@ def rag_analyze_review(
         env_get_fn=_env,
         effective_context_chars_fn=_effective_context_chars,
     )
+
+    # --- Deterministic signals injection (risk_triage only) -----------------
+    # signals are NOT contract evidence; they are deterministic hints:
+    #  - flags (autoFlags), heuristics, and other non-RAG indicators.
+    # They should never be cited as "contract text".
+    if str(intent or "").strip().lower() == "risk_triage":
+        try:
+            _sig_items = signals if isinstance(signals, list) else []
+            if _sig_items:
+                _sig_lines = []
+                for s in _sig_items:
+                    if not isinstance(s, dict):
+                        continue
+                    _sid = str(s.get("id") or s.get("key") or "").strip()
+                    _label = str(s.get("label") or s.get("name") or s.get("type") or "").strip()
+                    _sev = str(s.get("severity") or s.get("level") or "").strip()
+                    _src = str(s.get("source") or s.get("origin") or "").strip()
+                    _why = str(s.get("why") or s.get("rationale") or s.get("reason") or "").strip()
+                    parts = []
+                    if _label: parts.append(_label)
+                    if _sid: parts.append(f"id={_sid}")
+                    if _sev: parts.append(f"sev={_sev}")
+                    if _src: parts.append(f"src={_src}")
+                    line = " - " + " | ".join(parts) if parts else None
+                    if line:
+                        if _why:
+                            line = line + f" | why={_why}"
+                        _sig_lines.append(line)
+
+                if _sig_lines:
+                    _sig_block = (
+                        "===BEGIN DETERMINISTIC SIGNALS (NOT CONTRACT EVIDENCE)===\n"
+                        + "\n".join(_sig_lines)
+                        + "\n===END DETERMINISTIC SIGNALS===\n"
+                    )
+                    context = (context or "") + "\n\n" + _sig_block
+        except Exception:
+            pass
+    # -----------------------------------------------------------------------
     if _timing_enabled():
         print('[RAG] retrieval done', round(time.time() - t_ret0, 2), 's')
 
@@ -1979,6 +2018,8 @@ def _materialize_risks_from_inference(
             )
 
     return out
+
+
 
 
 
