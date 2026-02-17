@@ -126,3 +126,83 @@ def materialize_risk_register(
     }
 
     return merged, counts
+
+def retrieve_context(
+    *,
+    vector: Any,
+    llm: Any,
+    questions: List[str],
+    effective_top_k: int,
+    filters: Optional[Dict[str, Any]],
+    snippet_cap: int,
+    intent: str,
+    profile: str,
+    query_review_fn: Callable[..., List[Dict[str, Any]]],
+    env_get_fn: Callable[[str, str], str],
+    effective_context_chars_fn: Callable[[str], int],
+) -> Tuple[Dict[str, List[Dict[str, Any]]], str, int]:
+    """
+    Retrieval + context assembly + deterministic context capping.
+
+    Returns:
+      (retrieved_hits_by_question, context_string, max_context_chars_used_for_cap)
+    """
+
+    retrieved: Dict[str, List[Dict[str, Any]]] = {}
+
+    for q in questions:
+        retrieved[q] = query_review_fn(
+            vector=vector,
+            llm=llm,
+            question=q,
+            top_k=effective_top_k,
+            filters=filters,
+        )
+
+    def fmt_hit(h: Dict[str, Any]) -> str:
+        meta = h.get("meta") or {}
+        doc = meta.get("doc_name") or h.get("doc_name") or meta.get("doc_id") or "UnknownDoc"
+        cs = meta.get("char_start")
+        ce = meta.get("char_end")
+        score = h.get("score")
+        chunk_text = (h.get("chunk_text") or "").strip()
+        snippet = chunk_text[:snippet_cap]
+        return (
+            "===BEGIN CONTRACT EVIDENCE===\n"
+            f"DOC: {doc} | score={score} | span={cs}-{ce}\n"
+            f"{snippet}\n"
+            "===END CONTRACT EVIDENCE==="
+        )
+
+    blocks: List[str] = []
+    for q in questions:
+        hits = retrieved.get(q) or []
+        blocks.append(
+            f"QUESTION: {q}\nRETRIEVED EVIDENCE:\n"
+            + "\n".join(fmt_hit(h) for h in hits[:effective_top_k])
+        )
+
+    context = "\n\n".join(blocks)
+
+    # Context cap stack
+    env_cap = int((env_get_fn("RAG_CONTEXT_MAX_CHARS", "16000") or "16000").strip() or "16000")
+    hard_cap = int((env_get_fn("RAG_HARD_CONTEXT_MAX_CHARS", "80000") or "80000").strip() or "80000")
+    profile_cap = int(effective_context_chars_fn(profile))
+
+    if str(intent or "").strip().lower() == "risk_triage":
+        max_chars = min(max(env_cap, profile_cap), hard_cap)
+    else:
+        max_chars = min(env_cap, profile_cap)
+
+    context = context[:max_chars]
+
+    # Strict summary gets an extra-tight context cap (keeps local CPU fast)
+    if str(intent or "").strip().lower() != "risk_triage":
+        try:
+            strict_cap = int((env_get_fn("RAG_STRICT_CONTEXT_MAX_CHARS", "3500") or "3500").strip() or "3500")
+        except Exception:
+            strict_cap = 3500
+        if strict_cap > 0 and len(context) > strict_cap:
+            context = context[:strict_cap]
+
+    return retrieved, context, max_chars

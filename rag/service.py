@@ -219,7 +219,7 @@ def _normalize_section_outputs(section: Dict[str, Any], *, max_findings: int = _
     section["findings"] = cleaned
 
 import time
-from rag.service_helpers import build_rag_response_dict, materialize_risk_register
+from rag.service_helpers import build_rag_response_dict, materialize_risk_register, retrieve_context
 from typing import Any, Dict, List, Optional, Tuple
 
 from providers.storage import StorageProvider
@@ -1604,62 +1604,21 @@ def rag_analyze_review(
     citations: List[Dict[str, Any]] = []
 
     t_ret0 = time.time() if _timing_enabled() else 0.0
-    for q in questions:
-        retrieved[q] = query_review(
-            vector=vector,
-            llm=llm,
-            question=q,
-            top_k=effective_top_k,
-            filters={"review_id": review_id},
-        )
+    retrieved, context, max_chars = retrieve_context(
+        vector=vector,
+        llm=llm,
+        questions=questions,
+        effective_top_k=effective_top_k,
+        filters={'review_id': review_id},
+        snippet_cap=_effective_snippet_chars(profile),
+        intent=intent,
+        profile=profile,
+        query_review_fn=query_review,
+        env_get_fn=_env,
+        effective_context_chars_fn=_effective_context_chars,
+    )
     if _timing_enabled():
-        print("[RAG] retrieval done", round(time.time() - t_ret0, 2), "s")
-
-    # Build prompt context (retrieved evidence only)
-    snippet_cap = _effective_snippet_chars(profile)
-
-    def fmt_hit(h: Dict[str, Any]) -> str:
-        meta = h.get("meta") or {}
-        doc = meta.get("doc_name") or h.get("doc_name") or meta.get("doc_id") or "UnknownDoc"
-        cs = meta.get("char_start")
-        ce = meta.get("char_end")
-        score = h.get("score")
-        chunk_text = (h.get("chunk_text") or "").strip()
-        snippet = chunk_text[:snippet_cap]
-        return (
-            "===BEGIN CONTRACT EVIDENCE===\n"
-            f"DOC: {doc} | score={score} | span={cs}-{ce}\n"
-            f"{snippet}\n"
-            "===END CONTRACT EVIDENCE==="
-        )
-
-    blocks: List[str] = []
-    for q in questions:
-        hits = retrieved.get(q) or []
-        blocks.append(f"QUESTION: {q}\nRETRIEVED EVIDENCE:\n" + "\n".join(fmt_hit(h) for h in hits[:effective_top_k]))
-
-    context = "\n\n".join(blocks)
-
-    # Context cap
-    env_cap = int((_env("RAG_CONTEXT_MAX_CHARS", "16000") or "16000").strip() or "16000")
-    hard_cap = int((_env("RAG_HARD_CONTEXT_MAX_CHARS", "80000") or "80000").strip() or "80000")
-    profile_cap = int(_effective_context_chars(profile))
-
-    if intent == "risk_triage":
-        max_chars = min(max(env_cap, profile_cap), hard_cap)
-    else:
-        max_chars = min(env_cap, profile_cap)
-
-    context = context[:max_chars]
-    
-    # Strict summary gets an extra-tight context cap (keeps local Ollama fast)
-    if intent != "risk_triage":
-        try:
-            _strict_cap = int((_env("RAG_STRICT_CONTEXT_MAX_CHARS", "3500") or "3500").strip() or "3500")
-        except Exception:
-            _strict_cap = 3500
-        if _strict_cap > 0 and len(context) > _strict_cap:
-            context = context[:_strict_cap]
+        print('[RAG] retrieval done', round(time.time() - t_ret0, 2), 's')
 
     # Prompt
     if intent == "risk_triage":
@@ -2021,6 +1980,7 @@ def _materialize_risks_from_inference(
             )
 
     return out
+
 
 
 
