@@ -64,6 +64,34 @@ def _keycloak_jwks_url(issuer: str) -> str:
     return f"{issuer}/protocol/openid-connect/certs"
 
 
+def _scopes_ok(claims: Dict[str, Any], required_scopes: List[str]) -> bool:
+    """
+    Scope validation helper.
+
+    - Cognito access tokens typically include: scope="openid email profile" (space-delimited string).
+    - Some providers use scp as list or string.
+
+    If required_scopes is empty, allow.
+    Otherwise, require ALL required scopes to be present.
+    """
+    req = [s.strip() for s in required_scopes if isinstance(s, str) and s.strip()]
+    if not req:
+        return True
+
+    scope_str = claims.get("scope")
+    scopes: set[str] = set()
+    if isinstance(scope_str, str) and scope_str.strip():
+        scopes.update([x for x in scope_str.split(" ") if x])
+
+    scp = claims.get("scp")
+    if isinstance(scp, str) and scp.strip():
+        scopes.update([x for x in scp.split(" ") if x])
+    elif isinstance(scp, list):
+        scopes.update([x for x in scp if isinstance(x, str) and x.strip()])
+
+    return all(r in scopes for r in req)
+
+
 def _keycloak_aud_ok(claims: Dict[str, Any], client_id: str) -> bool:
     aud = claims.get("aud")
     azp = claims.get("azp")
