@@ -30,7 +30,7 @@ class BedrockLLMProvider(LLMProvider):
     """
 
     def __init__(self) -> None:
-        region = _env("AWS_REGION") or _env("AWS_DEFAULT_REGION")
+        region = _env("BEDROCK_REGION") or _env("AWS_REGION") or _env("AWS_DEFAULT_REGION")
         if not region:
             raise RuntimeError("AWS_REGION is required for Bedrock provider")
 
@@ -57,6 +57,38 @@ class BedrockLLMProvider(LLMProvider):
         max_tokens = int(kwargs.get("max_tokens") or _env("LLM_MAX_TOKENS", "256") or "256")
         temperature = float(kwargs.get("temperature") or _env("LLM_TEMPERATURE", "0") or "0")
         top_p = float(kwargs.get("top_p") or _env("LLM_TOP_P", "1") or "1")
+
+        # [BEDROCK] Meta Llama 3 branch (Bedrock-native).
+        # Llama 3 expects: { "prompt": "...", "max_gen_len": N, "temperature": T } and returns { "generation": "..." }
+        if isinstance(self.model_id, str) and self.model_id.startswith("meta."):
+            llama_prompt = "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n" + prompt + "\n<|eot_id|>\n<|start_header_id|>assistant<|end_header_id|>\n"
+            llama_body = {
+                "prompt": llama_prompt,
+                "max_gen_len": max_tokens,
+                "temperature": temperature,
+            }
+
+            resp = self.client.invoke_model(
+                modelId=self.model_id,
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps(llama_body).encode("utf-8"),
+            )
+
+            raw = resp["body"].read().decode("utf-8", errors="ignore")
+            data = json.loads(raw) if raw else {}
+            text_out = ""
+            if isinstance(data, dict):
+                # Most common: { "generation": "..." }
+                if isinstance(data.get("generation"), str):
+                    text_out = data.get("generation")
+                # Defensive: some shapes use outputs[0].text
+                elif isinstance(data.get("outputs"), list) and data["outputs"]:
+                    o0 = data["outputs"][0] or {}
+                    if isinstance(o0, dict):
+                        text_out = str(o0.get("text") or o0.get("generation") or "")
+
+            return {"text": (text_out or "").strip(), "provider": "bedrock", "model_id": self.model_id}
 
         # Anthropic Claude Messages API payload
         body = {
