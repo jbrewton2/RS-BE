@@ -356,11 +356,12 @@ app.add_middleware(
 # Models
 # ---------------------------------------------------------------------
 
-class ExtractResponseModel(BaseModel):
 class ExtractByKeyRequest(BaseModel):
     review_id: str
     pdf_key: str
 
+
+class ExtractResponseModel(BaseModel):
     text: str
     type: str
     pdf_url: Optional[str] = None
