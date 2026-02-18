@@ -281,20 +281,21 @@ def _normalize_text(s: str) -> str:
     if not s:
         return ""
     # [MOJIBAKE_FIX] Repair common UTF-8->cp1252 mojibake sequences (bullets/quotes/dashes)
-    # Examples: "•" -> "â€¢" or "â¢"
+    # Examples: "â€¢" -> "Ã¢â‚¬Â¢" or "Ã¢Â¢"
     s = (
-        s.replace("â€¢", "•")
-         .replace("â¢", "•")
-         .replace("â€“", "–")
-         .replace("â€”", "—")
-         .replace("â€˜", "‘")
-         .replace("â€™", "’")
-         .replace("â€œ", "“")
-         .replace("â€�", "”")
-         .replace("â€¦", "…")
+        s.replace("Ã¢â‚¬Â¢", "â€¢")
+         .replace("Ã¢Â¢", "â€¢")
+         .replace("Ã¢â‚¬â€œ", "â€“")
+         .replace("Ã¢â‚¬â€", "â€”")
+         .replace("Ã¢â‚¬Ëœ", "â€˜")
+         .replace("Ã¢â‚¬â„¢", "â€™")
+         .replace("Ã¢â‚¬Å“", "â€œ")
+         .replace("Ã¢â‚¬ï¿½", "â€")
+         .replace("Ã¢â‚¬Â¦", "â€¦")
     )
     # Prefer ASCII-safe bullets for UI/JSON logs
-    s = s.replace("• ", "- ").replace("•", "-")    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    s = s.replace("â€¢ ", "- ").replace("â€¢", "-")
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
     s = s.replace("\x00", "")
     s = s.replace("\u2013", "-").replace("\u2014", "-")
     s = s.replace("\u2018", "'").replace("\u2019", "'")
@@ -1745,7 +1746,7 @@ def rag_analyze_review(
             "- Keep each bullet short and concrete.\n\n"
             "FORMAT\n"
             "- Use the SECTION HEADERS exactly as listed, in order.\n"
-            "- Under each section, output ONLY findings as bullets (3ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ6 bullets max).\n"
+            "- Under each section, output ONLY findings as bullets (3ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“6 bullets max).\n"
             "- Do NOT include any Evidence lines (server will attach evidence separately).\n\n"
             "SECTIONS (exact order)\n"
             + "\n".join(RAG_REVIEW_SUMMARY_SECTIONS)
@@ -1882,7 +1883,7 @@ def rag_analyze_review(
         print("[RAG] generation done", round(time.time() - t_gen0, 2), "s")
         print("[RAG] analyze done", round(time.time() - t0, 2), "s")
         
-        # FINAL RETURN GUARD (never return None ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â required by RagAnalyzeResponse.model_validate)
+        # FINAL RETURN GUARD (never return None ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â required by RagAnalyzeResponse.model_validate)
         # If the function path forgets to return, we still emit a contract-shaped dict.
         out = {
             "review_id": str(review_id),
