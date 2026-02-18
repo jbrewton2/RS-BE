@@ -1,14 +1,14 @@
-# Local dev env/caches
-.venv
-.pytest_cache
-__pycache__
-*.pyc
-
-# Git + misc
-.git
+﻿.git
 .gitignore
-.gitlab-ci.yml.bak
-
-# OS/editor
-.DS_Store
-Thumbs.db
+**/.venv
+**/__pycache__
+**/*.pyc
+.vs
+out
+*.bundle
+*.patch
+*.bak
+*.bak.*
+rag/service.py.bak.*
+files/stores
+files/seed

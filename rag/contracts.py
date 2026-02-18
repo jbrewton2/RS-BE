@@ -1,7 +1,7 @@
 # rag/contracts.py
 from __future__ import annotations
 
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -35,6 +35,10 @@ class RagAnalyzeRequest(BaseModel):
     # Retrieval knobs
     top_k: int = Field(default=12, ge=1, le=50)
     force_reingest: bool = Field(default=False)
+
+    # Optional deterministic Tier-2 signals provided by caller (NOT contract evidence)
+    heuristic_hits: Optional[List[Dict[str, Any]]] = Field(default=None)
+
 
     # Debug: include compact per-question hit lists
     debug: bool = Field(default=False)
@@ -74,6 +78,7 @@ class RagSection(BaseModel):
     confidence: Optional[Literal["strong", "moderate", "weak", "missing"]] = None
 
 
+    confidence_pct: Optional[int] = None  # 0-100 deterministic confidence
 class RagAnalyzeStats(BaseModel):
     top_k_effective: Optional[int] = None
     analysis_intent: Optional[str] = None
@@ -87,6 +92,8 @@ class RagAnalyzeStats(BaseModel):
     fast_mode: Optional[bool] = None
 
 
+    # Materialization stats (AI RiskObjects) Ã¢â‚¬â€ additive
+    risk_objects: Optional[Dict[str, int]] = None
 class RagAnalyzeResponse(BaseModel):
     review_id: str
     mode: RagMode
@@ -101,8 +108,13 @@ class RagAnalyzeResponse(BaseModel):
     retrieved_counts: Dict[str, int] = Field(default_factory=dict)
 
     sections: Optional[List[RagSection]] = None
+    risks: Optional[List[Dict[str, Any]]] = None
     stats: Optional[RagAnalyzeStats] = None
     warnings: List[str] = Field(default_factory=list)
 
     # Debug payload (only when debug=true)
     retrieved: Optional[Dict[str, list]] = None
+
+
+
+

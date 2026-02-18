@@ -35,33 +35,61 @@ def _entra_jwks_url(tenant_id: str, authority: str) -> str:
 
 
 def _aud_ok(claims: Dict[str, Any], allowlist: List[str]) -> bool:
+    """
+    Audience validation helper.
+
+    - Standard OIDC ID tokens often use "aud".
+    - Cognito access tokens (v2) may omit "aud" and instead include "client_id".
+
+    This function accepts either, checking allowlist against:
+      1) aud (str or list[str])
+      2) client_id (str)
+    """
     aud = claims.get("aud")
-    if not allowlist:
-        return True
     if isinstance(aud, str):
         return aud in allowlist
     if isinstance(aud, list):
         return any(a in allowlist for a in aud if isinstance(a, str))
+
+    # Cognito access tokens: fall back to client_id when aud is missing
+    client_id = claims.get("client_id")
+    if isinstance(client_id, str) and client_id:
+        return client_id in allowlist
+
     return False
-
-
-def _scopes_ok(claims: Dict[str, Any], required: List[str]) -> bool:
-    if not required:
-        return True
-
-    raw = ""
-    if claims.get("scp"):
-        raw = str(claims.get("scp") or "")
-    elif claims.get("scope"):
-        raw = str(claims.get("scope") or "")
-
-    token_scopes = set(_split_scopes(raw))
-    return all(s in token_scopes for s in required)
 
 
 def _keycloak_jwks_url(issuer: str) -> str:
     issuer = (issuer or "").rstrip("/")
     return f"{issuer}/protocol/openid-connect/certs"
+
+
+def _scopes_ok(claims: Dict[str, Any], required_scopes: List[str]) -> bool:
+    """
+    Scope validation helper.
+
+    - Cognito access tokens typically include: scope="openid email profile" (space-delimited string).
+    - Some providers use scp as list or string.
+
+    If required_scopes is empty, allow.
+    Otherwise, require ALL required scopes to be present.
+    """
+    req = [s.strip() for s in required_scopes if isinstance(s, str) and s.strip()]
+    if not req:
+        return True
+
+    scope_str = claims.get("scope")
+    scopes: set[str] = set()
+    if isinstance(scope_str, str) and scope_str.strip():
+        scopes.update([x for x in scope_str.split(" ") if x])
+
+    scp = claims.get("scp")
+    if isinstance(scp, str) and scp.strip():
+        scopes.update([x for x in scp.split(" ") if x])
+    elif isinstance(scp, list):
+        scopes.update([x for x in scp if isinstance(x, str) and x.strip()])
+
+    return all(r in scopes for r in req)
 
 
 def _keycloak_aud_ok(claims: Dict[str, Any], client_id: str) -> bool:

@@ -1,9 +1,232 @@
 # rag/service.py
 from __future__ import annotations
 
+
+# -----------------------------
 import os
 import re
+
+# -----------------------------
+# -----------------------------
+# SECTION OUTPUT NORMALIZATION
+# - Keep evidence in section.evidence[]
+# - Keep findings[] as short bullets only
+# -----------------------------
+
+# Tuning knobs (UI ergonomics)
+_SECTION_MAX_FINDINGS = 6          # clamp findings bullets per section (tight default)
+_SECTION_MAX_EVIDENCE = 6          # clamp evidence snippets per section (tight default)
+_FINDING_MAX_LEN = 160             # clamp bullet length (tight default)
+_DROP_TRAILING_PERIODS = True      # normalize bullets by removing trailing periods
+
+_EVIDENCE_LINE_RE = re.compile(
+    r'^\s*EVIDENCE:\s*(?P<snippet>.+?)\s*\(Doc:\s*(?P<doc>.+?)\s*span:\s*(?P<cs>\d+)\-(?P<ce>\d+)\)\s*$',
+    re.IGNORECASE,
+)
+
+def _extract_evidence_from_finding_line(line: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse our own formatted evidence line:
+      EVIDENCE: <snippet> (Doc: <doc> span: <cs>-<ce>)
+    Returns a RagEvidenceSnippet-like dict, or None.
+    """
+    m = _EVIDENCE_LINE_RE.match(line or "")
+    if not m:
+        return None
+    snippet = (m.group("snippet") or "").strip()
+    doc = (m.group("doc") or "").strip()
+    try:
+        cs = int(m.group("cs"))
+        ce = int(m.group("ce"))
+    except Exception:
+        cs, ce = None, None
+
+    return {
+        # NOTE: this format only has doc name, so docId is best-effort.
+        "docId": doc,
+        "doc": doc,
+        "text": snippet,
+        "charStart": cs,
+        "charEnd": ce,
+        "score": None,
+    }
+
+def _evidence_key(ev: Dict[str, Any]) -> str:
+    """
+    Dedupe key for evidence:
+      prefer (docId,charStart,charEnd); fall back to (doc,text prefix)
+    """
+    if not isinstance(ev, dict):
+        return ""
+    doc_id = str(ev.get("docId") or ev.get("doc") or "").strip()
+    cs = ev.get("charStart")
+    ce = ev.get("charEnd")
+    if doc_id and isinstance(cs, int) and isinstance(ce, int):
+        return f"{doc_id}|{cs}|{ce}"
+    # fallback: doc + first 80 chars of text
+    doc = str(ev.get("doc") or doc_id or "").strip()
+    text = str(ev.get("text") or "").strip().replace("\n", " ")
+    return f"{doc}|{text[:80]}"
+
+def _normalize_bullet_text(t: str) -> str:
+    """
+    Deterministic bullet normalization (NO LLM):
+      - strip markdown
+      - normalize common "Review ..." starters into verb-first
+      - optionally remove trailing periods
+      - clamp length
+    """
+    s = (t or "").strip()
+    if not s:
+        return s
+
+    # Strip markdown decoration
+    s = s.replace("**", "").strip()
+    sl = s.lower()
+
+    # Verb-first normalization (reduce repetitive "Review ...")
+    if sl.startswith("review and ensure "):
+        s = "Ensure " + s[len("review and ensure "):].lstrip()
+    elif sl.startswith("review and verify "):
+        s = "Verify " + s[len("review and verify "):].lstrip()
+    elif sl.startswith("review and assess "):
+        s = "Assess " + s[len("review and assess "):].lstrip()
+    elif sl.startswith("review and understand "):
+        s = "Understand " + s[len("review and understand "):].lstrip()
+    elif sl.startswith("review to ensure "):
+        s = "Ensure " + s[len("review to ensure "):].lstrip()
+    elif sl.startswith("review to verify "):
+        s = "Verify " + s[len("review to verify "):].lstrip()
+
+    # Normalize "X that ..." -> "X ..." (shorter)
+    sl = s.lower()
+    if sl.startswith("verify that "):
+        s = "Verify " + s[len("verify that "):].lstrip()
+    elif sl.startswith("ensure that "):
+        s = "Ensure " + s[len("ensure that "):].lstrip()
+    elif sl.startswith("confirm that "):
+        s = "Confirm " + s[len("confirm that "):].lstrip()
+
+    # Remove trailing periods (UI consistency)
+    if _DROP_TRAILING_PERIODS:
+        s = s.rstrip()
+        while s.endswith("."):
+            s = s[:-1].rstrip()
+
+    # Clamp length
+    if len(s) > _FINDING_MAX_LEN:
+        s = s[:_FINDING_MAX_LEN].rstrip() + "..."
+
+
+    # Deterministic output hardening: strip any non-ASCII (prevents mojibake leaking to UI)
+    try:
+        s = s.encode("ascii", "ignore").decode("ascii")
+    except Exception:
+        pass
+
+    return s
+
+def _clean_findings_line(s: str) -> Optional[str]:
+    """
+    Findings must be short bullets only (no scaffolding, no evidence blocks).
+    """
+    t = (s or "").strip()
+    if not t:
+        return None
+
+    tl = t.lower()
+    
+    # Drop common LLM intro sentence (broad)
+    if tl.startswith("based on the") and ("evidence" in tl) and ("actions" in tl or "next" in tl):
+        return None
+
+    # Drop evidence-marker lines (handled into evidence[])
+    if _EVIDENCE_LINE_RE.match(t):
+        return None
+
+    # Drop obvious evidence/meta artifacts
+    if tl.startswith("evidence:") or ("(doc:" in tl and "span:" in tl) or ("charstart" in tl and "charend" in tl):
+        return None
+
+    # Drop scaffolding (we want bullets only)
+    if tl.startswith("requirement:") or tl.startswith("why it matters:"):
+        return None
+
+    # Drop common LLM intro sentence
+    if "based on the retrieved evidence" in tl and "actions" in tl:
+        return None
+
+    # Drop markdown-ish headers / department headers
+    if tl.endswith("**") or tl.endswith(":**"):
+        return None
+    # e.g. "Security:", "Legal:", "Engineering:", "PM (Program Management):"
+    if re.match(r"^[a-z0-9 /()_-]+:\s*$", t, flags=re.IGNORECASE):
+        return None
+
+    t = _normalize_bullet_text(t)
+    if not t:
+        return None
+
+    return t
+
+def _normalize_section_outputs(section: Dict[str, Any], *, max_findings: int = _SECTION_MAX_FINDINGS) -> None:
+    """
+    Mutates section in place:
+      - Moves embedded EVIDENCE lines from findings -> evidence[]
+      - Cleans findings into short bullets
+      - Dedupes + clamps both evidence and findings
+    """
+    if not isinstance(section, dict):
+        return
+
+    findings_in = section.get("findings") or []
+    if not isinstance(findings_in, list):
+        findings_in = []
+
+    ev_out = section.get("evidence") or []
+    if not isinstance(ev_out, list):
+        ev_out = []
+
+    # Move evidence lines out of findings (best-effort)
+    for raw in findings_in:
+        ev = _extract_evidence_from_finding_line(str(raw or ""))
+        if ev:
+            ev_out.append(ev)
+
+    # Dedupe + clamp evidence
+    ev_seen = set()
+    ev_clean: List[Dict[str, Any]] = []
+    for ev in ev_out:
+        if not isinstance(ev, dict):
+            continue
+        k = _evidence_key(ev)
+        if not k or k in ev_seen:
+            continue
+        ev_seen.add(k)
+        ev_clean.append(ev)
+        if len(ev_clean) >= _SECTION_MAX_EVIDENCE:
+            break
+
+    # Clean findings
+    cleaned: List[str] = []
+    seen = set()
+    for raw in findings_in:
+        t = _clean_findings_line(str(raw or ""))
+        if not t:
+            continue
+        key = t.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(t)
+        if len(cleaned) >= max_findings:
+            break
+
+    section["evidence"] = ev_clean
+    section["findings"] = cleaned
+
 import time
+from rag.service_helpers import build_rag_response_dict, materialize_risk_register, retrieve_context
 from typing import Any, Dict, List, Optional, Tuple
 
 from providers.storage import StorageProvider
@@ -57,6 +280,21 @@ def _fast_enabled() -> bool:
 def _normalize_text(s: str) -> str:
     if not s:
         return ""
+    # [MOJIBAKE_FIX] Repair common UTF-8->cp1252 mojibake sequences (bullets/quotes/dashes)
+    # Examples: "â€¢" -> "Ã¢â‚¬Â¢" or "Ã¢Â¢"
+    s = (
+        s.replace("Ã¢â‚¬Â¢", "â€¢")
+         .replace("Ã¢Â¢", "â€¢")
+         .replace("Ã¢â‚¬â€œ", "â€“")
+         .replace("Ã¢â‚¬â€", "â€”")
+         .replace("Ã¢â‚¬Ëœ", "â€˜")
+         .replace("Ã¢â‚¬â„¢", "â€™")
+         .replace("Ã¢â‚¬Å“", "â€œ")
+         .replace("Ã¢â‚¬ï¿½", "â€")
+         .replace("Ã¢â‚¬Â¦", "â€¦")
+    )
+    # Prefer ASCII-safe bullets for UI/JSON logs
+    s = s.replace("â€¢ ", "- ").replace("â€¢", "-")
     s = s.replace("\r\n", "\n").replace("\r", "\n")
     s = s.replace("\x00", "")
     s = s.replace("\u2013", "-").replace("\u2014", "-")
@@ -319,39 +557,8 @@ def query_review(
 
 
 # -----------------------------
-# Questions
+# Questions and routing
 # -----------------------------
-def _review_summary_questions() -> List[str]:
-    return [
-        "What is the mission and objective of this effort?",
-        "What is the scope of work and required deliverables?",
-        "What are the security, compliance, and hosting constraints (IL levels, NIST, DFARS, CUI, ATO/RMF, logging)?",
-        "What are the eligibility and personnel constraints (citizenship, clearances, facility, location, export controls)?",
-        "What are key legal and data rights risks (IP/data rights, audit rights, flowdowns)?",
-        "What are key financial risks (pricing model, ceilings, invoicing systems, payment terms)?",
-        "What are submission instructions and deadlines, including required formats and delivery method?",
-        "What contradictions or inconsistencies exist across documents?",
-        "What gaps require clarification from the Government?",
-        "What internal actions should we take next (security/legal/PM/engineering/finance)?",
-    ]
-
-
-def _risk_triage_questions() -> List[str]:
-    # Human-in-the-loop triage: focus on likely risk language and obligations.
-    return [
-        "Identify cybersecurity / ATO / RMF / IL requirements and risks (encryption, logging, incident reporting, vuln mgmt).",
-        "Identify CUI handling / safeguarding requirements and risks (marking, access, transmission, storage, disposal).",
-        "Identify privacy / PII / data protection obligations and risks.",
-        "Identify legal/data-rights terms and risks (IP/data rights, audit rights, GFI/GFM handling, disclosure penalties).",
-        "Identify subcontractor / flowdown / staffing constraints and risks (citizenship, clearance, facility, export).",
-        "Identify delivery/acceptance gates and required approvals (CDRLs, QA, test, acceptance criteria).",
-        "Identify financial and invoicing risks (ceilings, overruns, payment terms, reporting cadence).",
-        "Identify schedule risks (IMS, milestones, reporting cadence, penalties).",
-        "Identify ambiguous/undefined terms and contradictions that require clarification.",
-        "List top red-flag phrases/requirements with evidence and suggested internal owner (security/legal/PM/finance).",
-    ]
-
-
 def _question_section_map(intent: str) -> List[Tuple[str, str]]:
     """
     Authoritative routing for evidence attachment.
@@ -361,17 +568,34 @@ def _question_section_map(intent: str) -> List[Tuple[str, str]]:
 
     if intent == "risk_triage":
         return [
-            ("SECURITY, COMPLIANCE & HOSTING CONSTRAINTS", "Identify cybersecurity / ATO / RMF / IL requirements and risks (encryption, logging, incident reporting, vuln mgmt)."),
-            ("SECURITY, COMPLIANCE & HOSTING CONSTRAINTS", "Identify CUI handling / safeguarding requirements and risks (marking, access, transmission, storage, disposal)."),
+            (
+                "SECURITY, COMPLIANCE & HOSTING CONSTRAINTS",
+                "Identify cybersecurity / ATO / RMF / IL requirements and risks (encryption, logging, incident reporting, vuln mgmt).",
+            ),
+            (
+                "SECURITY, COMPLIANCE & HOSTING CONSTRAINTS",
+                "Identify CUI handling / safeguarding requirements and risks (marking, access, transmission, storage, disposal).",
+            ),
             ("LEGAL & DATA RIGHTS RISKS", "Identify privacy / PII / data protection obligations and risks."),
-            ("LEGAL & DATA RIGHTS RISKS", "Identify legal/data-rights terms and risks (IP/data rights, audit rights, GFI/GFM handling, disclosure penalties)."),
-            ("ELIGIBILITY & PERSONNEL CONSTRAINTS", "Identify subcontractor / flowdown / staffing constraints and risks (citizenship, clearance, facility, export)."),
+            (
+                "LEGAL & DATA RIGHTS RISKS",
+                "Identify legal/data-rights terms and risks (IP/data rights, audit rights, GFI/GFM handling, disclosure penalties).",
+            ),
+            (
+                "ELIGIBILITY & PERSONNEL CONSTRAINTS",
+                "Identify subcontractor / flowdown / staffing constraints and risks (citizenship, clearance, facility, export).",
+            ),
             ("DELIVERABLES & TIMELINES", "Identify delivery/acceptance gates and required approvals (CDRLs, QA, test, acceptance criteria)."),
             ("FINANCIAL RISKS", "Identify financial and invoicing risks (ceilings, overruns, payment terms, reporting cadence)."),
             ("DELIVERABLES & TIMELINES", "Identify schedule risks (IMS, milestones, reporting cadence, penalties)."),
             ("CONTRADICTIONS & INCONSISTENCIES", "Identify ambiguous/undefined terms and contradictions that require clarification."),
-            # keep overview as a "top red flags" aggregator
+            # overview aggregator
             ("OVERVIEW", "List top red-flag phrases/requirements with evidence and suggested internal owner (security/legal/PM/finance)."),
+            ("MISSION & OBJECTIVE", "What is the mission and objective of this effort?"),
+            ("SCOPE OF WORK", "What is the scope of work and required deliverables?"),
+            ("SUBMISSION INSTRUCTIONS & DEADLINES", "What are submission instructions and deadlines, including required formats and delivery method?"),
+            ("GAPS / QUESTIONS FOR THE GOVERNMENT", "What gaps require clarification from the Government?"),
+            ("RECOMMENDED INTERNAL ACTIONS", "What internal actions should we take next (security/legal/PM/engineering/finance)?"),
         ]
 
     # strict_summary
@@ -616,13 +840,12 @@ def _attach_evidence_to_sections(
 
         sig = _evidence_signal_score(text)
 
-        # glossary handling:
+        # Glossary handling:
         # - reject pure glossary unless it also has obligation/compliance signal
         # - allow glossary only when explicitly allowed OR has signal
         if _is_glossary_text(text):
-            if not allow_glossary:
-                if not _has_obligation_signal(text):
-                    return False
+            if not allow_glossary and (not _has_obligation_signal(text)):
+                return False
             # outside overview, require at least min_signal if it smells like glossary
             if sec_id != "overview" and sig < min_signal:
                 return False
@@ -660,8 +883,7 @@ def _attach_evidence_to_sections(
             if kept >= max_per_section:
                 break
 
-    # 2) Fallback from citations if section has no evidence
-    # pick the FIRST mapped question for that section
+    # 2) Fallback from citations if section has no evidence: use first mapped question for that section
     q_for_section: Dict[str, str] = {}
     for sec_title, q in section_question_map:
         if sec_title not in q_for_section:
@@ -730,6 +952,91 @@ def _text_matches_keywords(text: str, keywords: List[str]) -> bool:
     return False
 
 
+# -----------------------------
+# Plain-English finding synthesis (deterministic)
+# -----------------------------
+_SENT_SPLIT_RE = re.compile(r"(?<=[\.\!\?])\s+|\n+")
+
+def _best_signal_sentence(text: str, max_len: int = 260) -> str:
+    """
+    Pick a concise sentence that contains obligation/compliance signals.
+    Deterministic: no LLM, just regex + sentence scan.
+    """
+    t = _normalize_text(text or "").strip()
+    if not t:
+        return ""
+    # break into sentences-ish
+    parts = [p.strip() for p in _SENT_SPLIT_RE.split(t) if p and p.strip()]
+    if not parts:
+        return t[:max_len]
+    # prefer sentences that contain obligation/compliance signals
+    scored = []
+    for p in parts:
+        sig = _evidence_signal_score(p)
+        # mild preference for medium-length sentences
+        length_penalty = 0
+        if len(p) < 40:
+            length_penalty = 1
+        if len(p) > 320:
+            length_penalty = 2
+        scored.append((sig, -length_penalty, -len(p), p))
+    scored.sort(reverse=True)
+    best = scored[0][3]
+    best = best.replace("\r", " ").replace("\n", " ").strip()
+    return best if len(best) <= max_len else (best[:max_len].rstrip() + "...")
+
+def _why_it_matters(section_id: str, sentence: str) -> str:
+    """
+    Deterministic plain-English impact message per section.
+    """
+    sid = (section_id or "").strip().lower()
+    s = (sentence or "").lower()
+    if sid == "mission-objective":
+        return "This explains what success looks like. If it is vague, the proposal and delivery plan can miss the mark."
+    if sid == "scope-of-work":
+        return "This drives cost and staffing. If tasks are bigger than expected, you will take schedule and margin risk."
+    if sid == "deliverables-timelines":
+        return "This affects your delivery plan. Missing a required deliverable or due date can make you non-compliant."
+    if sid == "security-compliance-hosting-constraints":
+        return "These requirements can force architecture changes and add compliance work (ATO/RMF, logging, encryption)."
+    if sid == "eligibility-personnel-constraints":
+        return "These constraints can block staffing (clearance/citizenship) or limit subcontractor options."
+    if sid == "legal-data-rights-risks":
+        return "These terms can create long-term legal exposure (data rights, audits, penalties, flowdowns)."
+    if sid == "financial-risks":
+        return "These terms affect cash flow and profitability (ceilings, reporting, invoicing cadence, overrun notice)."
+    if sid == "submission-instructions-deadlines":
+        return "This affects proposal compliance. Wrong format or missed instructions can get you rejected."
+    if sid == "contradictions-inconsistencies":
+        return "Conflicting requirements cause rework and risk. These should be clarified before committing."
+    if sid == "gaps-questions-for-the-government":
+        return "These are open questions. Unanswered items are proposal risk and should be clarified early."
+    if sid == "recommended-internal-actions":
+        return "These are concrete next steps to reduce risk and produce an accurate, compliant response."
+
+    # overview
+    if sid == "overview":
+        if any(x in s for x in ["shall", "must", "required", "prohibited"]):
+            return "This looks like a binding requirement. Confirm it early and assign an owner."
+        return "This is a key point to validate and assign to the right team."
+
+    return "This is relevant to delivery/compliance. Confirm and assign an owner."
+
+def _plain_finding_from_evidence(section_id: str, ev_text: str) -> List[str]:
+    """
+    Return 2 bullets: Requirement/Key point + Why it matters.
+    Deterministic and derived from evidence only.
+    """
+    sent = _best_signal_sentence(ev_text or "")
+    if not sent:
+        return []
+    bullets: List[str] = []
+    # use "Requirement" when obligation signal present, otherwise "Key point"
+    label = "Requirement" if _has_obligation_signal(sent) else "Key point"
+    bullets.append(f"{label}: {sent}")
+    bullets.append(f"Why it matters: {_why_it_matters(section_id, sent)}")
+    return bullets
+
 def _format_evidence_bullet(prefix: str, ev: Dict[str, Any]) -> str:
     doc = ev.get("doc") or ev.get("docId") or "UnknownDoc"
     cs = ev.get("charStart")
@@ -738,6 +1045,80 @@ def _format_evidence_bullet(prefix: str, ev: Dict[str, Any]) -> str:
     snippet = snippet[:220]
     return f"{prefix}: {snippet} (Doc: {doc} span: {cs}-{ce})"
 
+
+# -----------------------------
+# Deterministic section confidence (no LLM)
+# -----------------------------
+def _clamp01(x: float) -> float:
+    try:
+        if x < 0.0:
+            return 0.0
+        if x > 1.0:
+            return 1.0
+        return float(x)
+    except Exception:
+        return 0.0
+
+
+def _confidence_for_section(section: Dict[str, Any]) -> Tuple[str, int]:
+    """
+    Returns (confidence_label, confidence_pct).
+
+    Inputs:
+      - evidence count
+      - evidence signal strength (via _evidence_signal_score)
+
+    Output:
+      confidence: missing | weak | moderate | strong
+      confidence_pct: 0-100
+    """
+    ev_list = section.get("evidence") or []
+    if not isinstance(ev_list, list) or len(ev_list) == 0:
+        return ("missing", 0)
+
+    # Evidence count factor: saturate at 6 evidence snippets
+    ev_count = len(ev_list)
+    count_factor = _clamp01(ev_count / 6.0)
+
+    # Signal factor: average positive signal across evidence (cap at 5)
+    sigs: List[float] = []
+    for ev in ev_list:
+        txt = ""
+        if isinstance(ev, dict):
+            txt = str(ev.get("text") or "")
+        else:
+            try:
+                txt = str(getattr(ev, "text", "") or "")
+            except Exception:
+                txt = ""
+        sig = _evidence_signal_score(txt)
+        sigs.append(max(0.0, float(sig)))
+
+    avg_sig = (sum(sigs) / max(1.0, float(len(sigs)))) if sigs else 0.0
+    signal_factor = _clamp01(avg_sig / 5.0)
+
+    # Weighted score: prefer count slightly more than signal
+    pct = int(round(100.0 * _clamp01(0.60 * count_factor + 0.40 * signal_factor)))
+
+    # Bucket
+    if pct >= 80:
+        label = "strong"
+    elif pct >= 55:
+        label = "moderate"
+    else:
+        label = "weak"
+
+    return (label, pct)
+
+
+def _apply_confidence(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for sec in sections or []:
+        if not isinstance(sec, dict):
+            continue
+        label, pct = _confidence_for_section(sec)
+        sec["confidence"] = label
+        sec["confidence_pct"] = pct
+    return sections
 
 def _owner_for_section(section_id: str) -> str:
     sid = (section_id or "").strip().lower()
@@ -817,7 +1198,7 @@ def _backfill_sections_from_evidence(
             for ev in sec["evidence"]:
                 if not _text_matches_keywords(ev.get("text") or "", kw) and sid != "overview":
                     continue
-                sec["findings"].append(_format_evidence_bullet("EVIDENCE", ev))
+                sec["findings"].extend(_plain_finding_from_evidence(sid, ev.get("text") or ""))
                 kept += 1
                 if kept >= 3:
                     break
@@ -832,7 +1213,8 @@ def _backfill_sections_from_evidence(
             ev0 = (sec["evidence"][0].get("text") or "").lower()
             if any(x in ev0 for x in ["shall", "must", "required", "prohibited"]) and sid not in ("overview",):
                 sec["findings"].append(
-                    f"POTENTIAL RISK (Owner: {_owner_for_section(sid)}): " + _risk_blurb_for_section(sid, sec["evidence"][0].get("text") if sec["evidence"] else "")
+                    f"POTENTIAL RISK (Owner: {_owner_for_section(sid)}): "
+                    + _risk_blurb_for_section(sid, sec["evidence"][0].get("text") if sec["evidence"] else "")
                 )
 
         if (not sec["findings"]) and (not sec["evidence"]):
@@ -885,7 +1267,6 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
         injected: List[str] = []
         added = 0
         for ev in pool:
-            # allow some glossary only if it has real signals
             if _is_glossary_text(ev.get("text") or "") and not _has_obligation_signal(ev.get("text") or ""):
                 continue
             injected.append(_format_evidence_bullet("EVIDENCE", ev))
@@ -915,6 +1296,291 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 # -----------------------------
 # Main entry
 # -----------------------------
+def _materialize_risks_from_sections(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Deterministically materialize Risk Register items from section findings.
+
+    Inputs:
+      - sections[*].findings[] lines that start with:
+          POTENTIAL RISK ...
+          POTENTIAL INFERRED RISK ...
+          POTENTIAL RISK (Owner: X): Title...
+    Output:
+      - stable id (hash), clean title, clean owner
+    """
+    import hashlib
+    import re
+
+    out: List[Dict[str, Any]] = []
+
+    owner_re = re.compile(r"\(Owner:\s*([^)]+)\)\s*:\s*(.*)$", re.I)
+
+    for sec in (sections or []):
+        sid = str(sec.get("id") or "").strip() or None
+        sec_owner = str(sec.get("owner") or "").strip() or None
+
+        for line in (sec.get("findings") or []):
+            raw = str(line or "").strip()
+            if not raw:
+                continue
+
+            low = raw.lower()
+            if not (low.startswith("potential risk") or low.startswith("potential inferred risk")):
+                continue
+
+            owner = sec_owner
+            title = raw
+
+            # Try the structured "(Owner: X): Title..." shape
+            m = owner_re.search(raw)
+            if m:
+                owner = (m.group(1) or "").strip() or owner
+                title = (m.group(2) or "").strip() or title
+            else:
+                # Fallback: everything after first ":" if present
+                if ":" in raw:
+                    title = raw.split(":", 1)[1].strip()
+
+            # Normalize title: remove trailing "Evidence: ..." to keep it readable
+            if " evidence:" in title.lower():
+                title = title.split("Evidence:", 1)[0].strip()
+
+            if not title:
+                continue
+
+            # Stable id: section + normalized title
+            h = hashlib.sha1(f"{sid or 'unknown'}|{title}".encode("utf-8")).hexdigest()[:12]
+            rid = f"{sid or 'unknown'}:{h}"
+
+            out.append(
+                {
+                    "id": rid,
+                    "title": title,
+                    "severity": "Medium",
+                    "owner": owner,
+                    "confidence": "Inferred" if low.startswith("potential inferred risk") else "Moderate",
+                    "source_type": "DETERMINISTIC",
+                    "source_confidence_tier": 2,
+                    "section_id": sid,
+                    "evidence_ids": [],
+                    "flag_ids": [],
+                    "rationale": raw,
+                    "source": ["sections"],
+                }
+            )
+
+    # de-dupe by id
+    seen = set()
+    deduped: List[Dict[str, Any]] = []
+    for r in out:
+        if r["id"] in seen:
+            continue
+        seen.add(r["id"])
+        deduped.append(r)
+    return deduped
+def _normalize_owner_team(owner: Optional[str]) -> str:
+    o = (owner or "").strip()
+    allowed = {"Security/ISSO", "Legal/Contracts", "Program/PM", "Engineering", "Finance", "QA", "Unassigned"}
+    return o if o in allowed else ""
+
+
+def _owner_from_risk_meta(*, ownerTeam: Optional[str], category: Optional[str], label: str, fallback: str = "Unassigned") -> str:
+    """
+    Deterministic owner mapping (no guessing, no LLM).
+    Priority:
+      1) explicit ownerTeam if valid
+      2) category-based mapping
+      3) keyword mapping from label
+      4) fallback
+    """
+    explicit = _normalize_owner_team(ownerTeam)
+    if explicit:
+        return explicit
+
+    c = (category or "").strip().lower()
+    t = (label or "").strip().lower()
+
+    # Category-based mapping (extend over time)
+    if any(x in c for x in ["dfars", "rmf", "ato", "cui", "cmmc", "nist", "fedramp", "il"]):
+        return "Security/ISSO"
+    if any(x in c for x in ["ip", "data_rights", "rights", "legal", "audit", "nda"]):
+        return "Legal/Contracts"
+    if any(x in c for x in ["invoice", "payment", "ceiling", "pricing", "funding", "rom"]):
+        return "Finance"
+    if any(x in c for x in ["deliverable", "cdrl", "schedule", "milestone", "submission"]):
+        return "Program/PM"
+
+    # Keyword mapping (extend over time)
+    if any(x in t for x in ["rmf", "ato", "il", "cui", "dfars", "nist", "800-53", "800-171", "incident", "breach", "encryption", "logging", "conmon", "zero trust"]):
+        return "Security/ISSO"
+    if any(x in t for x in ["data rights", "ip", "license", "audit rights", "nda", "disclosure", "penalty", "flowdown"]):
+        return "Legal/Contracts"
+    if any(x in t for x in ["invoice", "invoicing", "payment", "ceiling", "overrun", "funding", "burn rate"]):
+        return "Finance"
+    if any(x in t for x in ["cdrl", "deliverable", "submission", "deadline", "milestone", "ims", "schedule"]):
+        return "Program/PM"
+    if any(x in t for x in ["test", "acceptance", "qa", "inspection"]):
+        return "QA"
+
+    return _normalize_owner_team(fallback) or "Unassigned"
+
+def _materialize_risks_from_flags(review: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Highest-confidence risk materialization.
+
+    Source:
+      - review.autoFlags.hits (deterministic flags engine)
+    Tiering:
+      - source_type=FLAG
+      - source_confidence_tier=3  (highest confidence)
+    Provenance:
+      - source_refs.hit_keys / flag_ids / doc_ids
+    """
+    import hashlib
+
+    auto = (review or {}).get("autoFlags") or {}
+    hits = auto.get("hits") or []
+
+    out: List[Dict[str, Any]] = []
+    seen = set()
+
+    for h in hits:
+        if not isinstance(h, dict):
+            try:
+                h = h.model_dump()
+            except Exception:
+                continue
+
+        hit_key = str(h.get("hit_key") or "").strip()
+        flag_id = str(h.get("id") or h.get("flag_id") or h.get("flagId") or "").strip()
+        label = str(h.get("label") or flag_id or "Flag hit").strip()
+
+        doc_id = str(h.get("docId") or "").strip() or None
+        doc_name = str(h.get("docName") or "").strip() or None
+        line = h.get("line")
+
+        # Stable ID: prefer hit_key; else hash of key fields
+        if hit_key:
+            rid = f"flag:{hit_key}"
+        else:
+            base = f"{flag_id}|{doc_id}|{line}|{label}"
+            rid = "flag:" + hashlib.sha1(base.encode("utf-8")).hexdigest()[:12]
+
+        if rid in seen:
+            continue
+        seen.add(rid)
+
+        sev = str(h.get("severity") or "Medium").strip()
+
+        # Owner mapping can be improved later (flag namespace -> owner)
+        owner = _owner_from_risk_meta(ownerTeam=h.get("ownerTeam"), category=h.get("category"), label=label, fallback="Security/ISSO")
+        snippet = (h.get("snippet") or h.get("match") or "")
+        snippet = str(snippet).strip()
+
+        if doc_name and line is not None:
+            rationale = f"[{doc_name}] line={line} :: {snippet}"
+        else:
+            rationale = snippet or label
+
+        out.append(
+            {
+                "id": rid,
+                "title": label,
+                "severity": sev,
+                "owner": owner,
+                "section_id": None,
+
+                # provenance + tier
+                "confidence": "High",
+                "source_type": "FLAG",
+                "source_confidence_tier": 3,
+                "source_refs": {
+                    "hit_keys": [hit_key] if hit_key else [],
+                    "flag_ids": [flag_id] if flag_id else [],
+                    "doc_ids": [doc_id] if doc_id else [],
+                },
+
+                "evidence_ids": [],
+                "flag_ids": [flag_id] if flag_id else [],
+                "rationale": rationale,
+            }
+        )
+
+    return out
+
+
+def _materialize_risks_from_heuristic_hits(heuristic_hits: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """
+    Tier-2 deterministic risk materialization.
+
+    Source:
+      - RagAnalyzeRequest.heuristic_hits
+    Tiering:
+      - source_type=HEURISTIC
+      - source_confidence_tier=2
+    """
+    import hashlib
+
+    hits = heuristic_hits or []
+    out: List[Dict[str, Any]] = []
+    seen = set()
+
+    for h in hits:
+        if not isinstance(h, dict):
+            try:
+                h = h.model_dump()
+            except Exception:
+                continue
+
+        hit_key = str(h.get("hit_key") or "").strip()
+        heur_id = str(h.get("id") or "").strip()
+        label = str(h.get("label") or heur_id or "Heuristic hit").strip()
+
+        doc_id = str(h.get("docId") or "").strip() or None
+        doc_name = str(h.get("docName") or "").strip() or None
+        line = h.get("line")
+
+        if hit_key:
+            rid = f"heur:{hit_key}"
+        else:
+            base = f"{heur_id}|{doc_id}|{line}|{label}"
+            rid = "heur:" + hashlib.sha1(base.encode("utf-8")).hexdigest()[:12]
+
+        if rid in seen:
+            continue
+        seen.add(rid)
+
+        sev = str(h.get("severity") or "Medium").strip()
+        owner = _owner_from_risk_meta(ownerTeam=h.get("ownerTeam"), category=h.get("category"), label=label, fallback="Unassigned")
+        snippet = str((h.get("snippet") or h.get("match") or "")).strip()
+        if doc_name and line is not None:
+            rationale = f"[{doc_name}] line={line} :: {snippet}"
+        else:
+            rationale = snippet or label
+
+        out.append(
+            {
+                "id": rid,
+                "title": label,
+                "severity": sev,
+                "owner": owner,
+                "section_id": None,
+                "confidence": "Moderate",
+                "source_type": "HEURISTIC",
+                "source_confidence_tier": 2,
+                "source_refs": {
+                    "hit_keys": [hit_key] if hit_key else [],
+                    "heuristic_ids": [heur_id] if heur_id else [],
+                    "doc_ids": [doc_id] if doc_id else [],
+                },
+                "evidence_ids": [],
+                "flag_ids": [],
+                "rationale": rationale,
+            }
+        )
+
+    return out
+
 def rag_analyze_review(
     *,
     storage: StorageProvider,
@@ -927,10 +1593,14 @@ def rag_analyze_review(
     analysis_intent: str = "strict_summary",
     context_profile: str = "fast",
     debug: bool = False,
+    heuristic_hits: Optional[List[Dict[str, Any]]] = None,
+    enable_inference_risks: bool = True,
+    inference_candidates: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     t0 = time.time() if _timing_enabled() else 0.0
     m = _canonical_mode(mode)
 
+    # DEV guardrail: avoid expensive re-ingest loops during fast mode unless explicitly allowed.
     if _fast_enabled() and force_reingest and (_env("RAG_ALLOW_FORCE_REINGEST", "0").strip() != "1"):
         print("[RAG] WARN: force_reingest requested but skipped because RAG_FAST=1 and RAG_ALLOW_FORCE_REINGEST!=1")
         force_reingest = False
@@ -955,77 +1625,135 @@ def rag_analyze_review(
     citations: List[Dict[str, Any]] = []
 
     t_ret0 = time.time() if _timing_enabled() else 0.0
-    for q in questions:
-        retrieved[q] = query_review(
-            vector=vector,
-            llm=llm,
-            question=q,
-            top_k=effective_top_k,
-            filters={"review_id": review_id},
-        )
+    retrieved, context, max_chars, signals = retrieve_context(
+        vector=vector,
+        llm=llm,
+        questions=questions,
+        effective_top_k=effective_top_k,
+        filters={'review_id': review_id},
+        snippet_cap=_effective_snippet_chars(profile),
+        intent=intent,
+        profile=profile,
+        query_review_fn=query_review,
+        env_get_fn=_env,
+        effective_context_chars_fn=_effective_context_chars,
+        heuristic_hits=heuristic_hits,
+    )
+
+    # --- Deterministic signals injection (risk_triage only) -----------------
+    # signals are NOT contract evidence; they are deterministic hints:
+    #  - flags (autoFlags), heuristics, and other non-RAG indicators.
+    # They should never be cited as "contract text".
+    if str(intent or "").strip().lower() == "risk_triage":
+        try:
+            # Tier 3 signals from autoFlags (deterministic, highest confidence)
+            try:
+                _flag_signals = []
+                try:
+                    _reviews = _read_reviews_file(storage)
+                    _rev = next((r for r in (_reviews or []) if str(r.get("id")) == str(review_id)), None) or {}
+                except Exception:
+                    _rev = {}
+                _af = (_rev.get("autoFlags") or {}) if isinstance(_rev, dict) else {}
+                _hits = _af.get("hits") or []
+                for fh in (_hits or []):
+                    if not isinstance(fh, dict):
+                        continue
+                    _fid = str(fh.get("id") or fh.get("hit_key") or fh.get("key") or "").strip()
+                    _flabel = str(fh.get("label") or fh.get("name") or "").strip()
+                    _fsev = str(fh.get("severity") or "").strip()
+                    if not (_fid or _flabel):
+                        continue
+                    _flag_signals.append({
+                        "id": _fid or _flabel,
+                        "label": _flabel or _fid,
+                        "severity": _fsev,
+                        "source": "autoFlag",
+                        "why": "",
+                    })
+            except Exception:
+                _flag_signals = []
+
+            _sig_items = (_flag_signals + (signals if isinstance(signals, list) else []))
+            if _sig_items:
+                _sig_lines = []
+                for s in _sig_items:
+                    if not isinstance(s, dict):
+                        continue
+                    _sid = str(s.get("id") or s.get("key") or "").strip()
+                    _label = str(s.get("label") or s.get("name") or s.get("type") or "").strip()
+                    _sev = str(s.get("severity") or s.get("level") or "").strip()
+                    _src = str(s.get("source") or s.get("origin") or "").strip()
+                    _why = str(s.get("why") or s.get("rationale") or s.get("reason") or "").strip()
+                    parts = []
+                    if _label: parts.append(_label)
+                    if _sid: parts.append(f"id={_sid}")
+                    if _sev: parts.append(f"sev={_sev}")
+                    if _src: parts.append(f"src={_src}")
+                    line = " - " + " | ".join(parts) if parts else None
+                    if line:
+                        if _why:
+                            line = line + f" | why={_why}"
+                        _sig_lines.append(line)
+
+                if _sig_lines:
+                    _sig_block = (
+                        "===BEGIN DETERMINISTIC SIGNALS (NOT CONTRACT EVIDENCE)===\n"
+                        + "\n".join(_sig_lines)
+                        + "\n===END DETERMINISTIC SIGNALS===\n"
+                    )
+                    context = (context or "") + "\n\n" + _sig_block
+        except Exception:
+            pass
+    # -----------------------------------------------------------------------
+    # Debug: persist the final prompt context (includes deterministic signals)
+    # NOTE: this is ONLY for debug/testing; do not treat as contract evidence.
+    if debug:
+        try:
+            if not isinstance(stats, dict):
+                stats = {}
+        except Exception:
+            stats = {}
+        try:
+            stats['debug_context'] = context or ''
+        except Exception:
+            pass
     if _timing_enabled():
-        print("[RAG] retrieval done", round(time.time() - t_ret0, 2), "s")
-
-    # Build prompt context (retrieved evidence only)
-    snippet_cap = _effective_snippet_chars(profile)
-
-    def fmt_hit(h: Dict[str, Any]) -> str:
-        meta = h.get("meta") or {}
-        doc = meta.get("doc_name") or h.get("doc_name") or meta.get("doc_id") or "UnknownDoc"
-        cs = meta.get("char_start")
-        ce = meta.get("char_end")
-        score = h.get("score")
-        chunk_text = (h.get("chunk_text") or "").strip()
-        snippet = chunk_text[:snippet_cap]
-        return (
-            "===BEGIN CONTRACT EVIDENCE===\n"
-            f"DOC: {doc} | score={score} | span={cs}-{ce}\n"
-            f"{snippet}\n"
-            "===END CONTRACT EVIDENCE==="
-        )
-
-    blocks: List[str] = []
-    for q in questions:
-        hits = retrieved.get(q) or []
-        blocks.append(
-            f"QUESTION: {q}\nRETRIEVED EVIDENCE:\n" + "\n".join(fmt_hit(h) for h in hits[:effective_top_k])
-        )
-
-    context = "\n\n".join(blocks)
-
-    # Context cap
-    env_cap = int((_env("RAG_CONTEXT_MAX_CHARS", "16000") or "16000").strip() or "16000")
-    hard_cap = int((_env("RAG_HARD_CONTEXT_MAX_CHARS", "80000") or "80000").strip() or "80000")
-    profile_cap = int(_effective_context_chars(profile))
-
-    if intent == "risk_triage":
-        max_chars = min(max(env_cap, profile_cap), hard_cap)
-    else:
-        max_chars = min(env_cap, profile_cap)
-
-    context = context[:max_chars]
+        print('[RAG] retrieval done', round(time.time() - t_ret0, 2), 's')
 
     # Prompt
     if intent == "risk_triage":
+        # PROMPT/CONTEXT CLAMPS (prevent Ollama truncation; deterministic)
+        try:
+            _ctx_max = int(os.getenv("RAG_CONTEXT_MAX_CHARS", "9000") or "9000")
+        except Exception:
+            _ctx_max = 9000
+        try:
+            _prompt_max = int(os.getenv("RAG_PROMPT_MAX_CHARS", "14000") or "14000")
+        except Exception:
+            _prompt_max = 14000
+        if isinstance(context, str) and _ctx_max > 0 and len(context) > _ctx_max:
+            context = context[:_ctx_max]
+        
         prompt = (
             "OVERVIEW\n"
-            "You are doing HUMAN-IN-THE-LOOP RISK TRIAGE on government/DoD contract documents.\n"
-            "Goal: surface risks/obligations in plain English so a non-lawyer can read section-by-section.\n\n"
+            "Write a short executive brief of this review, section-by-section.\n"
+            "Audience: non-lawyer, busy exec.\n\n"
             "HARD RULES\n"
             "- Plain text only. No markdown.\n"
-            f"- Do NOT fabricate requirements. If you cannot find evidence, write exactly: \"{INSUFFICIENT}\"\n"
-            "- Write for a non-lawyer. Use plain English. Avoid contract/legal phrasing.\n"
-            "- If you use an acronym (IL5, RMF, ATO, CUI, DFARS, SBOM, CONMON), define it the first time in parentheses.\n"
-            "- For each finding, add a short 'why it matters' phrase.\n"
-            "- For each section: Findings (bullets) + Evidence (1-3 short snippets copied from evidence blocks).\n"
-            "- If evidence is weak/implicit, label it as 'Potential risk' and say what to confirm.\n"
-            "- Suggested owner must be one of: Security/ISSO, Legal/Contracts, Program/PM, Engineering, Finance, QA.\n\n"
+            "- Do NOT fabricate facts.\n"
+            f"- If evidence is insufficient for a section, write exactly: \"{INSUFFICIENT}\"\n"
+            "- Keep each bullet short and concrete.\n\n"
+            "FORMAT\n"
+            "- Use the SECTION HEADERS exactly as listed, in order.\n"
+            "- Under each section, output ONLY findings as bullets (3ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“6 bullets max).\n"
+            "- Do NOT include any Evidence lines (server will attach evidence separately).\n\n"
             "SECTIONS (exact order)\n"
             + "\n".join(RAG_REVIEW_SUMMARY_SECTIONS)
             + "\n\n"
             "RETRIEVED CONTEXT\n"
             f"{context}\n"
-        ).strip()
+        ).strip()  # STRICT_SUMMARY_FAST_PROMPT
     else:
         prompt = (
             "OVERVIEW\n"
@@ -1055,11 +1783,46 @@ def rag_analyze_review(
             f"{context}\n"
         ).strip()
 
+    # POST-BUILD PROMPT CLAMP (applies to both prompt branches; deterministic)
+    try:
+        _prompt_max = int(os.getenv("RAG_PROMPT_MAX_CHARS", "14000") or "14000")
+    except Exception:
+        _prompt_max = 14000
+    if isinstance(prompt, str) and _prompt_max > 0 and len(prompt) > _prompt_max:
+        prompt = prompt[:_prompt_max]
+    
     t_gen0 = time.time() if _timing_enabled() else 0.0
     if _timing_enabled():
         print("[RAG] generation start")
 
-    summary_raw = (llm.generate(prompt) or {}).get("text") or ""
+    # DEBUG: prompt + context size
+    if _timing_enabled():
+        try:
+            print('[RAG] prompt_len=', len(prompt))
+            print('[RAG] context_len=', len(context))
+        except Exception:
+            pass
+    
+    # STRICT TOKENS OVERRIDE (strict_summary only; restore after call)
+    summary_raw = ""
+    _old_llm_max = None
+    if intent != "risk_triage":
+        try:
+            _old_llm_max = os.getenv("LLM_MAX_TOKENS")
+            os.environ["LLM_MAX_TOKENS"] = str(os.getenv("RAG_STRICT_MAX_TOKENS", "48") or "48")
+        except Exception:
+            pass
+    try:
+        summary_raw = (llm.generate(prompt) or {}).get("text") or ""
+    finally:
+        if intent != "risk_triage":
+            try:
+                if _old_llm_max is None:
+                    os.environ.pop("LLM_MAX_TOKENS", None)
+                else:
+                    os.environ["LLM_MAX_TOKENS"] = _old_llm_max
+            except Exception:
+                pass
     summary = _postprocess_review_summary(summary_raw)
 
     # citations: stable
@@ -1106,10 +1869,38 @@ def rag_analyze_review(
 
     parsed_sections = _backfill_sections_from_evidence(parsed_sections, intent)
     parsed_sections = _strengthen_overview_from_evidence(parsed_sections)
+    parsed_sections = _apply_confidence(parsed_sections)
 
+    
+    # NORMALIZE SECTION OUTPUTS (clean findings, keep evidence structured)
+    for _s in (parsed_sections or []):
+        try:
+            _normalize_section_outputs(_s)
+        except Exception:
+            pass
+    
     if _timing_enabled():
         print("[RAG] generation done", round(time.time() - t_gen0, 2), "s")
         print("[RAG] analyze done", round(time.time() - t0, 2), "s")
+        
+        # FINAL RETURN GUARD (never return None ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â required by RagAnalyzeResponse.model_validate)
+        # If the function path forgets to return, we still emit a contract-shaped dict.
+        out = {
+            "review_id": str(review_id),
+            "mode": str(mode),
+            "top_k": int(locals().get("effective_top_k") or locals().get("top_k") or 12),
+            "analysis_intent": str(locals().get("intent") or locals().get("analysis_intent") or "strict_summary"),
+            "context_profile": str(locals().get("context_profile") or "fast"),
+            "summary": (locals().get("summary") or locals().get("summary_text") or ""),
+            "citations": (locals().get("citations") or []),
+            "retrieved_counts": (locals().get("retrieved_counts") or {}),
+            "risks": (locals().get("risks") or []),
+            "sections": (locals().get("parsed_sections") or locals().get("sections") or []),
+            "stats": (locals().get("stats") or None),
+            "warnings": (locals().get("warnings") or []),
+        }
+        # return handled by final return (do not early-return on timing)
+        
 
     retrieved_total = sum(len(retrieved.get(q) or []) for q in questions)
     warnings: List[str] = []
@@ -1123,47 +1914,187 @@ def rag_analyze_review(
     if context_truncated:
         warnings.append(f"Context truncated at {max_chars} chars.")
 
-    retrieved_debug = None
-    if debug:
-        retrieved_debug = {}
-        limit = min(3, int(effective_top_k))
-        for q in questions:
-            hits = (retrieved.get(q) or [])[:limit]
-            out_hits = []
-            for h in hits:
-                meta = h.get("meta") or {}
-                out_hits.append(
-                    {
-                        "docId": meta.get("doc_id"),
-                        "doc": meta.get("doc_name") or meta.get("doc_id"),
-                        "score": h.get("score"),
-                        "charStart": meta.get("char_start"),
-                        "charEnd": meta.get("char_end"),
-                        "snippet": ((h.get("chunk_text") or "").strip()[:350] or None),
-                    }
-                )
-            retrieved_debug[q] = out_hits
+    # Deterministic: materialize risks for UI (Risk Register) from server truth.
+    risks, risk_counts = materialize_risk_register(
+        storage=storage,
+        review_id=str(review_id),
+        intent=str(intent),
+        parsed_sections=(parsed_sections or []),
+        heuristic_hits=heuristic_hits,
+        enable_inference_risks=bool(enable_inference_risks),
+        inference_candidates=inference_candidates,
+        read_reviews_fn=_read_reviews_file,
+        materialize_flags_fn=_materialize_risks_from_flags,
+        materialize_heuristics_fn=_materialize_risks_from_heuristic_hits,
+        materialize_sections_fn=_materialize_risks_from_sections,
+        materialize_inference_fn=_materialize_risks_from_inference,
+    )
 
-    return {
-        "review_id": review_id,
-        "mode": m,
-        "top_k": int(top_k),
-        "analysis_intent": intent,
-        "context_profile": profile,
-        "summary": summary,
-        "citations": citations,
-        "retrieved_counts": {q: len(retrieved.get(q) or []) for q in questions},
-        "sections": parsed_sections,
-        "stats": {
-            "top_k_effective": int(effective_top_k),
-            "analysis_intent": str(intent),
-            "context_profile": str(profile),
-            "retrieved_total": int(retrieved_total),
-            "context_max_chars": int(max_chars),
-            "context_used_chars": int(context_used_chars),
-            "context_truncated": bool(context_truncated),
-            "fast_mode": bool(_fast_enabled()),
-        },
-        "warnings": warnings,
-        "retrieved": retrieved_debug,
-    }
+    # Ensure stats exists so runtime truth can be observed at the API boundary.
+    # (response_model_exclude_none drops stats when None.)
+    try:
+        if not isinstance(locals().get("stats"), dict):
+            stats = {}
+        stats["risk_objects"] = risk_counts
+    except Exception:
+        # Never fail the endpoint due to stats plumbing
+        pass
+    if debug:
+        try:
+            print('[RAG][RISKS]', risk_counts)
+        except Exception:
+            pass
+
+    # FINAL RETURN (authoritative): always return contract-shaped response.
+    # Timing logs are optional, but returning is not.
+    out = build_rag_response_dict(
+        review_id=str(review_id),
+        mode=str(mode),
+        effective_top_k=int(locals().get('effective_top_k') or locals().get('top_k') or 12),
+        intent=str(locals().get('intent') or locals().get('analysis_intent') or 'strict_summary'),
+        context_profile=str(locals().get('context_profile') or 'fast'),
+        summary=(locals().get('summary') or locals().get('summary_text') or ''),
+        citations=(locals().get('citations') or []),
+        retrieved_counts=(locals().get('retrieved_counts') or {}),
+        risks=(locals().get('risks') or []),
+        sections=(locals().get('parsed_sections') or locals().get('sections') or []),
+        stats=(locals().get('stats') or None),
+        warnings=(locals().get('warnings') or []),
+    )
+    return out
+    # 4) Inference risks (Tier 1, lowest confidence) - optional via env toggle
+
+
+
+
+
+
+def _materialize_risks_from_inference(
+    sections: List[Dict[str, Any]],
+    *,
+    enable_inference_risks: bool = True,
+    inference_candidates: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Tier-1 candidate risks (lowest confidence).
+
+    Default: ON.
+
+    Disable:
+      - per request: enable_inference_risks=False
+      - global kill switch: RAG_DISABLE_INFERENCE_RISKS=1
+    """
+    import hashlib
+
+    if (not enable_inference_risks) or (_env("RAG_DISABLE_INFERENCE_RISKS", "0").strip() == "1"):
+        return []
+
+    out: List[Dict[str, Any]] = []
+    seen = set()
+
+    # Deterministic injected candidates (preferred for smoke/UI)
+    for raw0 in (inference_candidates or []):
+        raw = str(raw0 or "").strip()
+        if not raw:
+            continue
+        h = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+        rid = f"infer:inject:{h}"
+        if rid in seen:
+            continue
+        seen.add(rid)
+        out.append(
+            {
+                "id": rid,
+                "title": raw,
+                "severity": "Low",
+                "owner": "Unassigned",
+                "section_id": None,
+                "confidence": "Speculative",
+                "source_type": "INFERENCE",
+                "source_confidence_tier": 1,
+                "source_refs": {"injected": True},
+                "evidence_ids": [],
+                "flag_ids": [],
+                "rationale": raw,
+            }
+        )
+
+    def is_candidate(line: str) -> bool:
+        t = (line or "").strip()
+        if not t:
+            return False
+        tl = t.lower()
+
+        # Don't duplicate deterministic markers
+        if tl.startswith("potential risk") or tl.startswith("potential inferred risk"):
+            return False
+
+        # Only accept explicit uncertainty language
+        return ("potential concern" in tl) or ("might be a risk" in tl) or ("may be a risk" in tl)
+
+    for sec in (sections or []):
+        if not isinstance(sec, dict):
+            continue
+
+        sid = str(sec.get("id") or "").strip() or "unknown"
+        owner = str(sec.get("owner") or "Unassigned").strip() or "Unassigned"
+
+        findings = sec.get("findings") or []
+        if not isinstance(findings, list):
+            continue
+
+        ev_doc_ids: List[str] = []
+        for ev in (sec.get("evidence") or []):
+            if isinstance(ev, dict):
+                did = str(ev.get("docId") or "").strip()
+                if did:
+                    ev_doc_ids.append(did)
+
+        for f in findings:
+            raw = str(f or "").strip()
+            if not is_candidate(raw):
+                continue
+
+            h = hashlib.sha1(f"{sid}|{raw}".encode("utf-8")).hexdigest()[:12]
+            rid = f"infer:{sid}:{h}"
+            if rid in seen:
+                continue
+            seen.add(rid)
+
+            out.append(
+                {
+                    "id": rid,
+                    "title": raw,
+                    "severity": "Low",
+                    "owner": owner,
+                    "section_id": sid,
+                    "confidence": "Speculative",
+                    "source_type": "INFERENCE",
+                    "source_confidence_tier": 1,
+                    "source_refs": {
+                        "section_id": sid,
+                        "finding": raw,
+                        "doc_ids": list(dict.fromkeys(ev_doc_ids))[:10],
+                    },
+                    "evidence_ids": [],
+                    "flag_ids": [],
+                    "rationale": raw,
+                }
+            )
+
+    return out
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -21,6 +21,7 @@ from providers.llm import LLMProvider
 import os
 
 from providers.impl.storage_local_files import LocalFilesStorageProvider
+from providers.impl.storage_s3 import S3StorageProvider
 import os
 from providers.impl.vector_disabled import DisabledVectorStore
 import os
@@ -28,17 +29,19 @@ from providers.impl.jobs_local_inline import LocalInlineJobRunner
 import os
 
 # Optional impls
-try:
-    from providers.impl.storage_minio import MinioStorageProvider  # type: ignore
-except Exception:  # pragma: no cover
-    MinioStorageProvider = None  # type: ignore
 
 try:
     from providers.impl.llm_ollama import OllamaLLMProvider  # type: ignore
 except Exception:  # pragma: no cover
     OllamaLLMProvider = None  # type: ignore
 
-# ✅ pgvector impl (this MUST exist if VECTOR_STORE=pgvector)
+
+try:  # pragma: no cover
+    from providers.impl.llm_bedrock import BedrockLLMProvider  # type: ignore
+except Exception:  # pragma: no cover
+    BedrockLLMProvider = None  # type: ignore
+
+# ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ pgvector impl (this MUST exist if VECTOR_STORE=pgvector)
 try:
     from providers.impl.vector_pgvector import PgVectorStore  # type: ignore
 except Exception:  # pragma: no cover
@@ -75,77 +78,21 @@ def _env(name: str, default: Optional[str] = None) -> Optional[str]:
 
 
 def _build_storage(settings: Settings) -> StorageProvider:
-    """
-    Storage selection is SETTINGS/ENV driven.
-
-    Supported:
-      - local
-      - minio (S3-compatible)
-    """
     storage_cfg = _get_attr(settings, "storage", None)
-    provider = _get_attr(storage_cfg, "provider", None) or _get_attr(storage_cfg, "mode", None) or "local"
-    provider = str(provider).strip().lower()
+    provider = (_get_attr(storage_cfg, "provider", None) or _get_attr(storage_cfg, "mode", None) or "local").strip().lower()
 
-    # Normalize aliases
-    if provider in ("files", "local_files", "localfiles"):
-        provider = "local"
-    if provider in ("objectstore", "object_store", "s3", "blob"):
-        provider = "minio"
+    # Env override wins (runtime truth)
+    env_provider = (os.environ.get("STORAGE_MODE") or os.environ.get("STORAGE_PROVIDER") or "").strip().lower()
+    if env_provider:
+        provider = env_provider
 
     if provider == "local":
         return LocalFilesStorageProvider()
 
-    if provider == "minio":
-        if MinioStorageProvider is None:
-            raise RuntimeError(
-                "settings.storage.provider=minio but providers.impl.storage_minio.MinioStorageProvider "
-                "could not be imported."
-            )
-
-        endpoint = (
-            _get_attr(storage_cfg, "minio_endpoint", None)
-            or _get_attr(storage_cfg, "endpoint", None)
-            or _env("MINIO_ENDPOINT")
-            or _env("S3_ENDPOINT")
-        )
-        bucket = (
-            _get_attr(storage_cfg, "minio_bucket", None)
-            or _get_attr(storage_cfg, "bucket", None)
-            or _env("MINIO_BUCKET")
-            or _env("S3_BUCKET")
-        )
-        access_key = (
-            _get_attr(storage_cfg, "minio_access_key", None)
-            or _get_attr(storage_cfg, "access_key", None)
-            or _env("MINIO_ACCESS_KEY")
-            or _env("S3_ACCESS_KEY")
-        )
-        secret_key = (
-            _get_attr(storage_cfg, "minio_secret_key", None)
-            or _get_attr(storage_cfg, "secret_key", None)
-            or _env("MINIO_SECRET_KEY")
-            or _env("S3_SECRET_KEY")
-        )
-
-        missing = [k for k, v in {
-            "MINIO_ENDPOINT": endpoint,
-            "MINIO_BUCKET": bucket,
-            "MINIO_ACCESS_KEY": access_key,
-            "MINIO_SECRET_KEY": secret_key,
-        }.items() if not v]
-
-        if missing:
-            raise RuntimeError("MinIO storage selected but missing config: " + ", ".join(missing))
-
-        return MinioStorageProvider(
-            endpoint=endpoint,
-            bucket=bucket,
-            access_key=access_key,
-            secret_key=secret_key,
-        )
+    if provider == "s3":
+        return S3StorageProvider.from_env()
 
     raise RuntimeError(f"Unsupported storage provider: {provider}")
-
 
 def _build_vector(settings: Settings) -> VectorStore:
     """
@@ -191,6 +138,9 @@ def _build_llm(settings: Settings) -> Optional[LLMProvider]:
     if env_provider:
         provider = env_provider
 
+    if provider == "bedrock" and BedrockLLMProvider is not None:
+        return BedrockLLMProvider.from_env()
+
     if provider == "ollama" and OllamaLLMProvider is not None:
         return OllamaLLMProvider()
 
@@ -207,5 +157,6 @@ def get_providers() -> Providers:
         jobs=_build_jobs(s),
         llm=_build_llm(s),
     )
+
 
 
