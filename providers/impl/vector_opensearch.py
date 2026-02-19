@@ -16,13 +16,37 @@ def _env(name: str, default: str = "") -> str:
     return (os.environ.get(name) or default).strip()
 
 
+def _env_int(name: str, default: int) -> int:
+    v = _env(name, "")
+    if not v:
+        return int(default)
+    try:
+        return int(v)
+    except Exception as exc:
+        raise RuntimeError(f"{name} must be an integer (got {v!r})") from exc
+
+
 def _parse_host(endpoint: str) -> str:
+    """
+    Accept either:
+      - https://vpc-...amazonaws.com
+      - vpc-...amazonaws.com
+    Return hostname (no scheme).
+    """
     endpoint = (endpoint or "").strip()
     if not endpoint:
         raise RuntimeError("OPENSEARCH_ENDPOINT is missing")
+
     if endpoint.startswith("http://") or endpoint.startswith("https://"):
-        return urlparse(endpoint).netloc
-    return endpoint
+        host = urlparse(endpoint).netloc
+    else:
+        host = endpoint
+
+    host = host.strip()
+    if not host:
+        raise RuntimeError(f"OPENSEARCH_ENDPOINT is invalid: {endpoint!r}")
+
+    return host
 
 
 class OpenSearchVectorStore(VectorStore):
@@ -30,21 +54,22 @@ class OpenSearchVectorStore(VectorStore):
     SigV4-signed OpenSearch vector store.
 
     Requires:
-      - OPENSEARCH_ENDPOINT
-      - OPENSEARCH_INDEX
-      - OPENSEARCH_VECTOR_DIM
+      - OPENSEARCH_ENDPOINT (https://... or hostname)
+      - OPENSEARCH_INDEX (default: css_doc_chunks_1024)
+      - OPENSEARCH_VECTOR_DIM (default: 1024)
       - AWS_REGION (or AWS_DEFAULT_REGION)
     """
 
     def __init__(self) -> None:
         self.endpoint = _env("OPENSEARCH_ENDPOINT")
         self.index = _env("OPENSEARCH_INDEX", "css_doc_chunks_1024")
-        self.dim = int(_env("OPENSEARCH_VECTOR_DIM", "1024") or "1024")
+        self.dim = _env_int("OPENSEARCH_VECTOR_DIM", 1024)
 
         region = _env("AWS_REGION") or _env("AWS_DEFAULT_REGION")
         if not region:
-            raise RuntimeError("AWS_REGION/AWS_DEFAULT_REGION is missing for OpenSearch signer")
+            raise RuntimeError("AWS_REGION/AWS_DEFAULT_REGION is missing for OpenSearch SigV4")
 
+        # IRSA creds should be discoverable via boto3 default chain
         sess = boto3.Session(region_name=region)
         creds = sess.get_credentials()
         if creds is None:
@@ -75,6 +100,7 @@ class OpenSearchVectorStore(VectorStore):
         self._ensure_index()
 
     def _ensure_index(self) -> None:
+        # Index creation is safe/idempotent
         if self.client.indices.exists(index=self.index):
             return
 
@@ -93,10 +119,7 @@ class OpenSearchVectorStore(VectorStore):
                     "doc_name": {"type": "keyword"},
                     "chunk_text": {"type": "text"},
                     "meta": {"type": "object", "enabled": True},
-                    "embedding": {
-                        "type": "knn_vector",
-                        "dimension": self.dim,
-                    },
+                    "embedding": {"type": "knn_vector", "dimension": self.dim},
                 }
             },
         }
@@ -107,7 +130,8 @@ class OpenSearchVectorStore(VectorStore):
         if not document_id or not chunks:
             return
 
-        actions = []
+        actions: List[Dict[str, Any]] = []
+
         for ch in chunks:
             chunk_id = str(ch.get("chunk_id") or ch.get("id") or "")
             if not chunk_id:
@@ -158,6 +182,8 @@ class OpenSearchVectorStore(VectorStore):
                     continue
                 must_filters.append({"term": {fk: fv}})
 
+        # NOTE: we intentionally keep this query form because you already proved
+        # filter + knn works in your domain.
         body: Dict[str, Any] = {
             "size": k,
             "query": {
@@ -193,6 +219,7 @@ class OpenSearchVectorStore(VectorStore):
                     "score": h.get("_score"),
                 }
             )
+
         return out
 
     def delete_by_document(self, document_id: str) -> None:
