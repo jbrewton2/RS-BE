@@ -1,0 +1,13 @@
+# values-css-mock.yaml (pinned)
+replicaCount: 2
+
+image:
+  repository: 354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend
+  tag: "aws-3f6512b"
+  pullPolicy: Always
+
+service:
+  enabled: true
+
+targetGroupBinding:
+  enabled: false

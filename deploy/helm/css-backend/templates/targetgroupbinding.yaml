@@ -1,0 +1,24 @@
+﻿{{- if .Values.targetGroupBinding.enabled -}}
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: {{ .Values.targetGroupBinding.name | quote }}
+  labels:
+{{ include "css-backend.labels" . | indent 4 }}
+spec:
+  ipAddressType: {{ .Values.targetGroupBinding.ipAddressType | default "ipv4" | quote }}
+  networking:
+    ingress:
+    - from:
+      - securityGroup:
+          groupID: {{ .Values.targetGroupBinding.securityGroupId | quote }}
+      ports:
+      - port: {{ .Values.service.port }}
+        protocol: TCP
+  serviceRef:
+    name: {{ .Values.service.name }}
+    port: {{ .Values.service.port }}
+  targetGroupARN: {{ .Values.targetGroupBinding.targetGroupArn | quote }}
+  targetType: {{ .Values.targetGroupBinding.targetType | default "ip" | quote }}
+  vpcID: {{ .Values.targetGroupBinding.vpcId | quote }}
+{{- end -}}

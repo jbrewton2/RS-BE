@@ -1,0 +1,81 @@
+replicaCount: 2
+
+image:
+  repository: 354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend
+  tag: "aws-3f6512b"
+  pullPolicy: Always
+
+serviceAccount:
+  create: true
+  name: css-backend
+
+service:
+  name: css-backend
+  type: ClusterIP
+  port: 8000
+
+configMap:
+  name: css-backend-config
+  data:
+    AUTH_PROVIDER: "oidc"
+    AWS_REGION: "us-gov-east-1"
+    BEDROCK_EMBED_MODEL_ID: "amazon.titan-embed-text-v2:0"
+    BEDROCK_MODEL_ID: "meta.llama3-70b-instruct-v1:0"
+    BEDROCK_REGION: "us-gov-west-1"
+    DYNAMODB_TABLE: "css-mock-metadata"
+    LLM_PROVIDER: "bedrock"
+    METADATA_STORE: "dynamodb"
+    OIDC_AUDIENCE_ALLOWLIST: "nqbekjhbk3gugpsfuc1tfhihf"
+    OIDC_ISSUER: "https://cognito-idp.us-gov-east-1.amazonaws.com/us-gov-east-1_mUyl7eRgy"
+    OIDC_ISSUER_ALLOWLIST: "https://cognito-idp.us-gov-east-1.amazonaws.com/us-gov-east-1_mUyl7eRgy"
+    OIDC_JWKS_URL: "https://cognito-idp.us-gov-east-1.amazonaws.com/us-gov-east-1_mUyl7eRgy/.well-known/jwks.json"
+    OPENSEARCH_ENDPOINT: "https://vpc-css-mock-search-gylzl4tnnkbapi7pmgdklsftuu.us-gov-east-1.es.amazonaws.com"
+    OPENSEARCH_INDEX: "css_doc_chunks_1024"
+    OPENSEARCH_VECTOR_DIM: "1024"
+    RAG_ALLOW_FORCE_REINGEST: "1"
+    S3_BUCKET: "css-mock-docs-354962495083-xuwajy"
+    S3_PREFIX: "stores"
+    STORAGE_MODE: "s3"
+    VECTOR_STORE: "opensearch"
+
+probes:
+  path: /health
+  port: 8000
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 24
+  liveness:
+    initialDelaySeconds: 30
+    periodSeconds: 20
+    timeoutSeconds: 2
+    failureThreshold: 6
+  startup:
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 120
+
+lifecycle:
+  preStopSleepSeconds: 15
+
+strategy:
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+
+terminationGracePeriodSeconds: 60
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+targetGroupBinding:
+  enabled: false
+  name: "k8s-cssmock-cssbacke-7075253084"
+  targetGroupArn: ""
+  securityGroupId: ""
+  vpcId: ""
+  ipAddressType: "ipv4"
+  targetType: "ip"
