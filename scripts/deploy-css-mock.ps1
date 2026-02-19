@@ -4,11 +4,11 @@
 
 .DESCRIPTION
   This script is the only supported way to deploy css-backend to the css-mock namespace.
-  It uses Helm + a pinned values override file to avoid drift.
+  It uses Helm + pinned values override to avoid drift.
 
   Ownership boundaries:
     - Helm owns: Deployment, ConfigMap, ServiceAccount, Service
-    - AWS Load Balancer Controller owns: TargetGroupBinding (created/managed from Ingress rules)
+    - AWS Load Balancer Controller owns: TargetGroupBinding (created via Ingress)
 
 .PARAMETER Namespace
   Kubernetes namespace (default: css-mock)
@@ -23,7 +23,7 @@
   Path to pinned override values file (default: .\deploy\helm\values-css-mock.yaml)
 
 .PARAMETER ImageTag
-  Explicit tag to deploy (ex: aws-3f6512b). If omitted, uses current git HEAD short sha: aws-<sha>.
+  Explicit tag to deploy (ex: aws-648384e). If omitted, uses current git HEAD short sha: aws-<sha>.
 
 .PARAMETER ReplicaCount
   Replicas for css-backend (default: 2)
@@ -34,25 +34,29 @@
 .PARAMETER SkipVerify
   Skip post-deploy verification checks
 
-.EXAMPLE
-  .\scripts\deploy-css-mock.ps1
+.PARAMETER SkipEcrCheck
+  Skip the ECR “tag exists” preflight check (not recommended)
 
 .EXAMPLE
-  .\scripts\deploy-css-mock.ps1 -ImageTag aws-3f6512b -ReplicaCount 2
+  cd "C:\Users\JoshBrewton\Desktop\CSS\css-backend"
+  $env:AWS_PROFILE="css-gov"
+  $env:AWS_REGION="us-gov-east-1"
+  .\scripts\deploy-css-mock.ps1 -ImageTag aws-648384e
 #>
 
 param(
-  [string]$Namespace     = "css-mock",
-  [string]$Release       = "css-backend",
-  [string]$ChartPath     = ".\deploy\helm\css-backend",
-  [string]$OverridePath  = ".\deploy\helm\values-css-mock.yaml",
+  [string]$Namespace = "css-mock",
+  [string]$Release   = "css-backend",
+  [string]$ChartPath = ".\deploy\helm\css-backend",
+  [string]$OverridePath = ".\deploy\helm\values-css-mock.yaml",
   [string]$ImageTag,
-  [int]$ReplicaCount     = 2,
-  [int]$TimeoutMinutes   = 10,
-  [switch]$SkipVerify
+  [int]$ReplicaCount = 2,
+  [int]$TimeoutMinutes = 10,
+  [switch]$SkipVerify,
+  [switch]$SkipEcrCheck
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference="Stop"
 
 function Require-Cmd([string]$name) {
   if (!(Get-Command $name -ErrorAction SilentlyContinue)) {
@@ -68,9 +72,7 @@ function Get-GitTag() {
 
 function Write-PinnedOverride([string]$path, [string]$tag, [int]$replicas) {
   $dir = Split-Path -Parent $path
-  if (![string]::IsNullOrWhiteSpace($dir) -and !(Test-Path $dir)) {
-    New-Item -ItemType Directory -Force -Path $dir | Out-Null
-  }
+  if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
 
   $yaml = @"
 # values-css-mock.yaml (pinned) - SOURCE OF TRUTH FOR THIS ENV
@@ -90,12 +92,50 @@ targetGroupBinding:
   enabled: false
 "@
 
-  # Write UTF-8 no BOM
-  [System.IO.File]::WriteAllText(
-    (Resolve-Path (Split-Path -Parent $path)).Path + "\" + (Split-Path -Leaf $path),
-    $yaml,
-    (New-Object System.Text.UTF8Encoding($false))
+  $outPath = if ($dir) { Join-Path $dir (Split-Path -Leaf $path) } else { $path }
+  [System.IO.File]::WriteAllText((Resolve-Path (Split-Path -Parent $outPath)).Path + "\" + (Split-Path -Leaf $outPath), $yaml, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Invoke-AwsCli([string[]]$AwsArgs) {
+  # Run AWS CLI through cmd.exe so stderr does NOT become a PowerShell error record (EAP=Stop safe).
+  $awsExe = (Get-Command "aws.exe" -ErrorAction SilentlyContinue)
+  $exePath = if ($awsExe) { $awsExe.Source } else { "aws" }
+
+  if (!$AwsArgs -or $AwsArgs.Count -eq 0) {
+    throw "Invoke-AwsCli called with no arguments. This is a script bug."
+  }
+
+  $escapedArgs = $AwsArgs | ForEach-Object { '"' + ($_ -replace '"','\"') + '"' }
+  $cmdLine = '"' + ($exePath -replace '"','\"') + '" ' + ($escapedArgs -join ' ')
+
+  $out = cmd.exe /c "$cmdLine 2>&1"
+  $code = $LASTEXITCODE
+
+  if ($code -ne 0) {
+    throw ("AWS CLI failed (exit {0}): {1}`n{2}" -f $code, $cmdLine, ($out | Out-String))
+  }
+
+  return ($out | Out-String)
+}
+
+function Verify-EcrTagExists([string]$RepoName, [string]$Tag, [string]$Region) {
+  if ($SkipEcrCheck) {
+    Write-Host "ECR check: SKIPPED (SkipEcrCheck set)" -ForegroundColor Yellow
+    return
+  }
+
+  if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $profile = $env:AWS_PROFILE } else { $profile = "<default>" }
+  Write-Host "ECR check: ensuring tag exists: $RepoName`:$Tag (region=$Region, profile=$profile)" -ForegroundColor Cyan
+
+  # IMPORTANT: pass a real string[] of args (no $args ambiguity)
+  $cmd = @(
+    "ecr", "describe-images",
+    "--region", $Region,
+    "--repository-name", $RepoName,
+    "--image-ids", "imageTag=$Tag"
   )
+
+  $null = Invoke-AwsCli -AwsArgs $cmd
 }
 
 function Render-Helm([string]$chart, [string]$ns, [string]$override) {
@@ -105,55 +145,41 @@ function Render-Helm([string]$chart, [string]$ns, [string]$override) {
 }
 
 function Guardrails([string]$renderedYaml) {
-  # No MinIO allowed in this environment
   if ($renderedYaml -match 'MINIO_' -or $renderedYaml -match 'MINIO_ENDPOINT') {
-    throw "Guardrail violation: rendered manifests include MinIO env(s). css-mock must be S3 only."
+    throw "Guardrail violation: rendered manifests include MinIO env(s). This env must be S3 only."
   }
-  if ($renderedYaml -match '(?m)^\s*STORAGE_(MODE|PROVIDER):\s*"(minio|s3-minio|local-minio)"\s*$') {
-    throw "Guardrail violation: STORAGE_MODE/PROVIDER indicates MinIO. css-mock must be S3."
-  }
-
-  # Helm must NOT render TargetGroupBinding for css-mock
   if ($renderedYaml -match '(?m)^\s*kind:\s*TargetGroupBinding\s*$') {
     throw "Guardrail violation: chart is rendering TargetGroupBinding. For css-mock this must be owned by ALB controller. Keep targetGroupBinding.enabled=false."
   }
-
-  # STORAGE_MODE must be s3 in rendered ConfigMap
   if ($renderedYaml -notmatch '(?m)^\s*STORAGE_MODE:\s*"s3"\s*$') {
     throw "Guardrail violation: STORAGE_MODE is not rendered as ""s3"". Fix chart values/configmap."
   }
 }
 
 function Verify-External([string]$baseUrl) {
-  Write-Host "External checks:"
+  Write-Host "External checks:" -ForegroundColor Cyan
   $api  = try { (Invoke-WebRequest "$baseUrl/api/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
   $root = try { (Invoke-WebRequest "$baseUrl/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
-
-  Write-Host ("  /api/health = {0}" -f $api)
-  Write-Host ("  /health     = {0}" -f $root)
-
-  if ($api -ne 200 -or $root -ne 200) {
-    throw "External health checks failed. api=$api root=$root"
-  }
+  Write-Host "  /api/health = $api"
+  Write-Host "  /health     = $root"
+  if ($api -ne 200 -or $root -ne 200) { throw "External health checks failed. api=$api root=$root" }
 }
 
 function Verify-Cluster([string]$ns, [string]$release) {
-  Write-Host "Cluster checks:"
-  kubectl -n $ns get deploy $release -o wide
-  kubectl -n $ns get pods -l app=$release -o wide
-  kubectl -n $ns get svc $release -o wide
-  kubectl -n $ns get endpoints $release -o wide
+  Write-Host "Cluster checks:" -ForegroundColor Cyan
+  & kubectl -n $ns get deploy $release -o wide
+  & kubectl -n $ns get pods -l app=$release -o wide
+  & kubectl -n $ns get svc $release -o wide
+  & kubectl -n $ns get endpoints $release -o wide
 
-  Write-Host "Ingress route:"
-  kubectl -n $ns describe ingress css-mock | Select-String -Pattern "/api|$release:8000" -Context 0,1
+  Write-Host "Ingress route:" -ForegroundColor Cyan
+  & kubectl -n $ns describe ingress css-mock | Select-String -Pattern "/api|$release:8000" -Context 0,1
 
-  Write-Host "TGB (ALB controller owned; name may change over time):"
-  kubectl -n $ns get targetgroupbinding -o wide | Select-String -Pattern "cssbacke|css-backend"
+  Write-Host "TGB (ALB controller owned; name may change over time):" -ForegroundColor Cyan
+  & kubectl -n $ns get targetgroupbinding -o wide | Select-String -Pattern "cssbacke|css-backend"
 }
 
-# -----------------------------
-# Main
-# -----------------------------
+# --- Main ---
 Require-Cmd helm
 Require-Cmd kubectl
 Require-Cmd git
@@ -163,24 +189,30 @@ if (!(Test-Path $ChartPath)) { throw "ChartPath not found: $ChartPath" }
 if (!$ImageTag) { $ImageTag = Get-GitTag }
 Write-Host "Using ImageTag: $ImageTag"
 
+# Region preference order: AWS_REGION env var -> default us-gov-east-1
+$region = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION } else { "us-gov-east-1" }
+
+# ECR preflight (repo name is fixed for this env)
+Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $region
+
 Write-PinnedOverride -path $OverridePath -tag $ImageTag -replicas $ReplicaCount
 Write-Host "Pinned override written: $OverridePath"
-Get-Content $OverridePath | ForEach-Object { Write-Host ("  " + $_) }
+Get-Content $OverridePath | ForEach-Object { "  $_" }
 
-Write-Host "Lint chart..."
-helm lint $ChartPath | Out-Host
+Write-Host "Lint chart..." -ForegroundColor Cyan
+& helm lint $ChartPath
 
-Write-Host "Render + guardrails..."
+Write-Host "Render + guardrails..." -ForegroundColor Cyan
 $rendered = Render-Helm -chart $ChartPath -ns $Namespace -override $OverridePath
 Guardrails -renderedYaml $rendered
 
-Write-Host "Deploy via Helm..."
+Write-Host "Deploy via Helm..." -ForegroundColor Cyan
 $timeout = "{0}m" -f $TimeoutMinutes
-helm upgrade $Release $ChartPath -n $Namespace -f $OverridePath --wait --timeout $timeout --rollback-on-failure | Out-Host
+& helm upgrade $Release $ChartPath -n $Namespace -f $OverridePath --wait --timeout $timeout --rollback-on-failure
 
 if (!$SkipVerify) {
   Verify-External -baseUrl "https://css-mock.shipcom.ai"
   Verify-Cluster -ns $Namespace -release $Release
 }
 
-Write-Host "DEPLOY OK"
+Write-Host "DEPLOY OK" -ForegroundColor Green

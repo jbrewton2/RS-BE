@@ -1,0 +1,168 @@
+﻿---
+# Source: css-backend/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: css-backend
+  labels:
+    app.kubernetes.io/name: css-backend
+    app.kubernetes.io/instance: css-backend
+    app.kubernetes.io/managed-by: Helm
+---
+# Source: css-backend/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: css-backend-config
+  labels:
+    app.kubernetes.io/name: css-backend
+    app.kubernetes.io/instance: css-backend
+    app.kubernetes.io/managed-by: Helm
+data:
+  AUTH_PROVIDER: "oidc"
+  AWS_REGION: "us-gov-east-1"
+  BEDROCK_EMBED_MODEL_ID: "amazon.titan-embed-text-v2:0"
+  BEDROCK_MODEL_ID: "meta.llama3-70b-instruct-v1:0"
+  BEDROCK_REGION: "us-gov-west-1"
+  DYNAMODB_TABLE: "css-mock-metadata"
+  LLM_PROVIDER: "bedrock"
+  METADATA_STORE: "dynamodb"
+  OIDC_AUDIENCE_ALLOWLIST: "nqbekjhbk3gugpsfuc1tfhihf"
+  OIDC_ISSUER: "https://cognito-idp.us-gov-east-1.amazonaws.com/us-gov-east-1_mUyl7eRgy"
+  OIDC_ISSUER_ALLOWLIST: "https://cognito-idp.us-gov-east-1.amazonaws.com/us-gov-east-1_mUyl7eRgy"
+  OIDC_JWKS_URL: "https://cognito-idp.us-gov-east-1.amazonaws.com/us-gov-east-1_mUyl7eRgy/.well-known/jwks.json"
+  OPENSEARCH_ENDPOINT: "https://vpc-css-mock-search-gylzl4tnnkbapi7pmgdklsftuu.us-gov-east-1.es.amazonaws.com"
+  OPENSEARCH_INDEX: "css_doc_chunks_1024"
+  OPENSEARCH_VECTOR_DIM: "1024"
+  RAG_ALLOW_FORCE_REINGEST: "1"
+  S3_BUCKET: "css-mock-docs-354962495083-xuwajy"
+  S3_PREFIX: "stores"
+  STORAGE_MODE: "s3"
+  VECTOR_STORE: "opensearch"
+---
+# Source: css-backend/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: css-backend
+  labels:
+    app.kubernetes.io/name: css-backend
+    app.kubernetes.io/instance: css-backend
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  selector:
+    app: css-backend
+    app.kubernetes.io/name: css-backend
+    app.kubernetes.io/instance: css-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+---
+# Source: css-backend/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: css-backend
+  labels:
+    app.kubernetes.io/name: css-backend
+    app.kubernetes.io/instance: css-backend
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: css-backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: css-backend
+        app.kubernetes.io/name: css-backend
+        app.kubernetes.io/instance: css-backend
+        app.kubernetes.io/managed-by: Helm
+    spec:
+      serviceAccountName: css-backend
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: css-backend
+          image: "354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend:aws-3f6512b"
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: css-backend-config
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 24
+            successThreshold: 1
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 6
+            successThreshold: 1
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 120
+            successThreshold: 1
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -lc
+                  - "sleep 15"
+          resources:
+            {}
+      nodeSelector:
+        {}
+      tolerations:
+        []
+      affinity:
+        {}
+---
+# Source: css-backend/templates/targetgroupbinding.yaml
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: k8s-cssmock-cssbacke-7075253084
+  labels:
+    app.kubernetes.io/name: css-backend
+    app.kubernetes.io/instance: css-backend
+    app.kubernetes.io/managed-by: Helm
+spec:
+  ipAddressType: ipv4
+  networking:
+    ingress:
+    - from:
+      - securityGroup:
+          groupID: sg-0380a178e98ff1d97
+      ports:
+      - port: 8000
+        protocol: TCP
+  serviceRef:
+    name: css-backend
+    port: 8000
+  targetGroupARN: arn:aws-us-gov:elasticloadbalancing:us-gov-east-1:354962495083:targetgroup/k8s-cssmock-cssbacke-7075253084/9e94c13d8f0b763b
+  targetType: ip
+  vpcID: vpc-0578d0e31c17234e5
