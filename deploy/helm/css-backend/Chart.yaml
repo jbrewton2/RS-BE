@@ -3,4 +3,4 @@ name: css-backend
 description: CSS Backend (GovCloud mock) - Deployment, Service, ConfigMap
 type: application
 version: 0.1.0
-appVersion: "0.0.0"
+appVersion: "2.0.0"
