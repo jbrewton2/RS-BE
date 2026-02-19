@@ -161,47 +161,57 @@ def retrieve_context(
       (retrieved_hits_by_question, context_string, max_context_chars_used_for_cap, signals)
 
     IMPORTANT:
-      The downstream parser in rag/service.py expects EVIDENCE lines like:
-        EVIDENCE: <snippet> (Doc: <doc> span: <cs>-<ce>)
-      so we must emit that exact shape here.
+      Keep BOTH formats per hit:
+        1) BEGIN/END blocks (back-compat for older parsers)
+        2) Parseable EVIDENCE line (for _EVIDENCE_LINE_RE in rag/service.py):
+             EVIDENCE: <snippet> (Doc: <doc> span: <cs>-<ce>)
     """
 
     retrieved: Dict[str, List[Dict[str, Any]]] = {}
 
     # ---- retrieve per question ----
     for q in questions:
-        retrieved[q] = query_review_fn(
-            vector=vector,
-            llm=llm,
-            question=q,
-            top_k=effective_top_k,
-            filters=filters,
-        ) or []
+        retrieved[q] = (
+            query_review_fn(
+                vector=vector,
+                llm=llm,
+                question=q,
+                top_k=effective_top_k,
+                filters=filters,
+            )
+            or []
+        )
 
-    def _fmt_ev_line(h: Dict[str, Any]) -> str:
+    def _fmt_ev_block(h: Dict[str, Any]) -> str:
         meta = h.get("meta") or {}
+
         doc = meta.get("doc_name") or h.get("doc_name") or meta.get("doc_id") or "UnknownDoc"
         cs = meta.get("char_start")
         ce = meta.get("char_end")
+        score = h.get("score")
 
-        # keep spans printable even if missing
         cs_s = "0" if cs is None else str(cs)
         ce_s = "0" if ce is None else str(ce)
 
         chunk_text = (h.get("chunk_text") or "").strip()
         snippet = chunk_text[: max(0, int(snippet_cap or 0))]
 
-        # This exact prefix is what your _EVIDENCE_LINE_RE is matching in rag/service.py
-        return f"EVIDENCE: {snippet} (Doc: {doc} span: {cs_s}-{ce_s})"
+        # back-compat markers + parseable EVIDENCE line
+        return (
+            "===BEGIN CONTRACT EVIDENCE===\n"
+            f"DOC: {doc} | score={score} | span={cs_s}-{ce_s}\n"
+            f"EVIDENCE: {snippet} (Doc: {doc} span: {cs_s}-{ce_s})\n"
+            "===END CONTRACT EVIDENCE==="
+        )
 
     # ---- build context blocks deterministically ----
     blocks: List[str] = []
     for q in questions:
         hits = (retrieved.get(q) or [])[: int(effective_top_k or 0)]
-        ev_lines = "\n".join(_fmt_ev_line(h) for h in hits if isinstance(h, dict))
-        if not ev_lines:
-            ev_lines = "(no hits)"
-        blocks.append(f"QUESTION: {q}\n{ev_lines}")
+        ev_blocks = "\n".join(_fmt_ev_block(h) for h in hits if isinstance(h, dict))
+        if not ev_blocks:
+            ev_blocks = "(no hits)"
+        blocks.append(f"QUESTION: {q}\nRETRIEVED EVIDENCE:\n{ev_blocks}")
 
     context = "\n\n".join(blocks)
 
