@@ -1683,7 +1683,7 @@ def rag_analyze_review(
         llm=llm,
         questions=questions,
         effective_top_k=effective_top_k,
-        filters={'review_id': review_id},
+        filters={"document_id": str(review_id)},
         snippet_cap=_effective_snippet_chars(profile),
         intent=intent,
         profile=profile,
@@ -1692,6 +1692,9 @@ def rag_analyze_review(
         effective_context_chars_fn=_effective_context_chars,
         heuristic_hits=heuristic_hits,
     )
+
+    # Make retrieved_counts real (API consumers + debugging)
+     retrieved_counts = {q: int(len(retrieved.get(q) or [])) for q in questions}
 
     # --- Deterministic signals injection (risk_triage only) -----------------
     # signals are NOT contract evidence; they are deterministic hints:
