@@ -9,6 +9,7 @@ import re
 import tempfile
 import subprocess
 import uuid
+import json
 
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
@@ -26,6 +27,7 @@ from core.config import PdfReader, docx, FILES_DIR, KNOWLEDGE_DOCS_DIR
 from schemas import AnalyzeRequestModel, AnalyzeResponseModel
 from core.llm_client import call_llm_for_review
 from core.providers import init_providers
+from core.dynamo_meta import DynamoMeta, sha256_bytes, sha256_text, _now_iso
 
 # Routers
 from flags.router import router as flags_router
@@ -355,6 +357,11 @@ app.add_middleware(
 # Models
 # ---------------------------------------------------------------------
 
+class ExtractByKeyRequest(BaseModel):
+    review_id: str
+    pdf_key: str
+
+
 class ExtractResponseModel(BaseModel):
     text: str
     type: str
@@ -467,6 +474,73 @@ async def extract(request: Request, file: UploadFile = File(...)):
 @app.post("/api/extract", response_model=ExtractResponseModel, include_in_schema=True)
 async def api_extract(request: Request, file: UploadFile = File(...)):
     return await _extract_impl(request=request, file=file)
+
+@app.post("/api/extract-by-key", response_model=ExtractResponseModel, include_in_schema=True)
+async def api_extract_by_key(req: ExtractByKeyRequest, request: Request):
+    """
+    Extract text from an existing PDF already stored in StorageProvider (S3).
+    Persists:
+      - extracted text artifact to S3
+      - extract.json to S3
+      - pointers + sha256 to Dynamo (REVIEW#{review_id}/META)
+    """
+    storage = request.app.state.providers.storage
+
+    review_id = (req.review_id or "").strip()
+    pdf_key = (req.pdf_key or "").strip()
+    if not review_id or not pdf_key:
+        raise HTTPException(status_code=400, detail="review_id and pdf_key are required")
+
+    try:
+        pdf_bytes = storage.get_object(pdf_key)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="PDF key not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read PDF from storage: {exc}")
+
+    if not pdf_bytes:
+        raise HTTPException(status_code=404, detail="PDF key not found")
+
+    # deterministic doc_id for review PDF
+    doc_id = review_id
+    pdf_url = f"/files/{pdf_key}"
+
+    text = _extract_text_from_pdf_stream(BytesIO(pdf_bytes))
+    raw_text = (text or "").encode("utf-8", errors="ignore")
+
+    # Write extracted artifacts to S3 (under stores/)
+    extract_text_key = f"extract/{review_id}/raw_text.txt"
+    extract_json_key = f"extract/{review_id}/extract.json"
+
+    extract_payload = {
+        "review_id": review_id,
+        "pdf_key": pdf_key,
+        "pdf_sha256": sha256_bytes(pdf_bytes),
+        "extract_text_sha256": sha256_bytes(raw_text),
+        "created_at": _now_iso(),
+    }
+    extract_json = json.dumps(extract_payload, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
+
+    try:
+        storage.put_object(key=extract_text_key, data=raw_text, content_type="text/plain; charset=utf-8", metadata=None)
+        storage.put_object(key=extract_json_key, data=extract_json, content_type="application/json", metadata=None)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to store extract artifacts: {exc}")
+
+    # Write pointers + hashes to Dynamo
+    meta = DynamoMeta()
+    meta.upsert_review_meta(
+        review_id,
+        pdf_key=pdf_key,
+        pdf_sha256=sha256_bytes(pdf_bytes),
+        pdf_size=len(pdf_bytes),
+        extract_text_key=extract_text_key,
+        extract_text_sha256=sha256_bytes(raw_text),
+        extract_json_key=extract_json_key,
+        extract_json_sha256=sha256_bytes(extract_json),
+    )
+
+    return ExtractResponseModel(text=text, type="pdf", pdf_url=pdf_url, pages=None, doc_id=doc_id, filename=None)
 
 
 # ---------------------------------------------------------------------
