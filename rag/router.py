@@ -1,10 +1,11 @@
 # rag/router.py
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
 import os
 import traceback
 from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from core.providers import providers_from_request
 from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse
@@ -36,7 +37,6 @@ def _ensure_section_owners(payload: Any) -> Any:
             return payload
 
         for sec in sections:
-            # read id + owner (dict OR model)
             if isinstance(sec, dict):
                 sid_val = sec.get("id")
                 owner_val = sec.get("owner")
@@ -49,7 +49,6 @@ def _ensure_section_owners(payload: Any) -> Any:
 
             if not owner:
                 owner = _owner_for_section(sid)
-
                 if isinstance(sec, dict):
                     sec["owner"] = owner
                 else:
@@ -60,7 +59,6 @@ def _ensure_section_owners(payload: Any) -> Any:
 
         return payload
     except Exception:
-        # Never fail the endpoint because of a guardrail; main response validation still applies.
         return payload
 
 
@@ -85,10 +83,7 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
             debug=req.debug,
         )
 
-        # API boundary backstop: owner must always be present for sections
         result = _ensure_section_owners(result)
-
-        # Ensure the response is validated/coerced into the declared contract
         return RagAnalyzeResponse.model_validate(result)
 
     except KeyError as e:
@@ -96,8 +91,6 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        # Preserve stack traces in logs; give a stable message to callers.
         if str(os.getenv("RAG_TRACEBACK", "0")).strip() == "1":
             print("[RAG][TRACEBACK] " + traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"RAG analyze failed: {type(e).__name__}") from e
-
