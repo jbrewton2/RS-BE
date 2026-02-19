@@ -9,6 +9,7 @@ import re
 import tempfile
 import subprocess
 import uuid
+import json
 
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
