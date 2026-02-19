@@ -1,4 +1,4 @@
-﻿# backend/reviews/router.py
+# backend/reviews/router.py
 from __future__ import annotations
 
 from typing import List, Dict, Any
@@ -17,6 +17,14 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
+
+def _read_reviews_file(storage=None) -> List[Dict[str, Any]]:
+    """
+    COMPAT SHIM for older callers (ex: flags/router.py) that imported _read_reviews_file.
+    Returns a list of review META rows from Dynamo.
+    """
+    meta = DynamoMeta()
+    return meta.list_reviews()
 
 def _build_hit_key(doc_id: str, flag_id: str, line: int, index: int) -> str:
     return f"{doc_id}:{flag_id}:{line}:{index}"
