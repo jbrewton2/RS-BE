@@ -509,8 +509,8 @@ async def api_extract_by_key(req: ExtractByKeyRequest, request: Request):
     raw_text = (text or "").encode("utf-8", errors="ignore")
 
     # Write extracted artifacts to S3 (under stores/)
-    extract_text_key = f"stores/extract/{review_id}/raw_text.txt"
-    extract_json_key = f"stores/extract/{review_id}/extract.json"
+    extract_text_key = f"extract/{review_id}/raw_text.txt"
+    extract_json_key = f"extract/{review_id}/extract.json"
 
     extract_payload = {
         "review_id": review_id,
