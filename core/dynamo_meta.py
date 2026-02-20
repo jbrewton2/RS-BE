@@ -1,4 +1,4 @@
-﻿# core/dynamo_meta.py
+# core/dynamo_meta.py
 from __future__ import annotations
 
 import os

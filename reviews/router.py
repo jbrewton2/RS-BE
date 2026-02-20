@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from typing import List, Dict, Any
+from uuid import uuid4
+
 from fastapi import APIRouter, HTTPException, Depends
 
 from auth.jwt import get_current_user
 from core.deps import StorageDep  # still used for pdf/text pointers later
 from core.dynamo_meta import DynamoMeta
-
 from flags.service import scan_text_for_flags
-
 
 router = APIRouter(
     prefix="/reviews",
@@ -25,6 +25,7 @@ def _read_reviews_file(storage=None) -> List[Dict[str, Any]]:
     """
     meta = DynamoMeta()
     return meta.list_reviews()
+
 
 def _build_hit_key(doc_id: str, flag_id: str, line: int, index: int) -> str:
     return f"{doc_id}:{flag_id}:{line}:{index}"
@@ -86,10 +87,27 @@ def _attach_auto_flags_to_review(review: Dict[str, Any]) -> Dict[str, Any]:
     return review
 
 
+def _ensure_id_contract(item: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Frontend expects `id`. Dynamo meta uses `review_id`.
+    We support both, but we ALWAYS return `id` in API responses.
+    """
+    if not isinstance(item, dict):
+        return item
+    rid = item.get("id") or item.get("review_id")
+    if rid:
+        item["id"] = rid
+        item["review_id"] = rid
+    return item
+
+
 @router.get("")
 async def list_reviews():
     meta = DynamoMeta()
-    return meta.list_reviews()
+    items = meta.list_reviews() or []
+    for it in items:
+        _ensure_id_contract(it)
+    return items
 
 
 @router.get("/{review_id}")
@@ -98,26 +116,46 @@ async def get_review(review_id: str):
     item = meta.get_review_meta(review_id)
     if not item:
         raise HTTPException(status_code=404, detail="Review not found")
-    return item
+    return _ensure_id_contract(item)
 
 
 @router.post("")
 async def upsert_review(review: Dict[str, Any], storage: StorageDep):
-    if "id" not in review:
-        raise HTTPException(status_code=400, detail="Review must include 'id'.")
+    """
+    Create/update a review META row.
 
-    # recompute deterministic flags from docs in payload
+    IMPORTANT API CONTRACT:
+    - Frontend expects response JSON to include `id`.
+    - Client may POST without id (create) -> backend generates id.
+    - Dynamo meta storage uses `review_id` internally; we return both.
+    """
+    if not isinstance(review, dict):
+        raise HTTPException(status_code=400, detail="Invalid review payload (expected JSON object).")
+
+    # Accept either id or review_id, otherwise generate one (create flow)
+    review_id = (review.get("id") or review.get("review_id") or "").strip()
+    if not review_id:
+        review_id = str(uuid4())
+
+    # Normalize incoming payload so downstream code can rely on both
+    review["id"] = review_id
+    review["review_id"] = review_id
+
+    # recompute deterministic flags from docs in payload (safe even if docs absent)
     review = _attach_auto_flags_to_review(review)
 
-    review_id = str(review["id"])
     pdf_key = (review.get("pdf_key") or review.get("pdfKey") or "").strip() or None
 
-    # NOTE: we are not hashing PDF bytes here (that is set by extract-by-key or upload pipeline)
+    # NOTE: DynamoMeta currently persists META + pointers (pdf_key/extract pointers etc)
     meta = DynamoMeta()
     out = meta.upsert_review_meta(review_id, pdf_key=pdf_key)
 
-    # store the full review payload as an artifact in S3 (optional) - for now keep it in Dynamo meta only
-    # If you want full payload persisted, we can add a pointer+hash in Dynamo to an S3 JSON.
+    # Ensure response includes id (UI expects it) and normalize review_id
+    if isinstance(out, dict):
+        out["review_id"] = review_id
+        out["id"] = review_id
+    else:
+        out = {"review_id": review_id, "id": review_id}
 
     return out
 

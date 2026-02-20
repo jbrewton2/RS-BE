@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -149,7 +149,7 @@ def retrieve_context(
     snippet_cap: int,
     intent: str,
     profile: str,
-    query_review_fn: Callable[..., List[Dict[str, Any]]],
+    query_review_fn: Optional[Callable[..., List[Dict[str, Any]]]] = None,
     env_get_fn: Callable[[str, str], str],
     effective_context_chars_fn: Callable[[str], int],
     heuristic_hits: Optional[List[Dict[str, Any]]] = None,
@@ -167,20 +167,90 @@ def retrieve_context(
              EVIDENCE: <snippet> (Doc: <doc> span: <cs>-<ce>)
     """
 
+    # --- resolve query function (back-compat) ---
+    def _resolve_query_fn() -> Callable[..., List[Dict[str, Any]]]:
+        if callable(query_review_fn):
+            return query_review_fn  # user-provided
+
+        # Prefer vector.query_review if present (most explicit)
+        cand = getattr(vector, "query_review", None)
+        if callable(cand):
+            return cand
+
+        # Common alternatives
+        cand = getattr(vector, "query", None)
+        if callable(cand):
+            return cand
+
+        cand = getattr(vector, "search", None)
+        if callable(cand):
+            return cand
+
+        raise TypeError(
+            "retrieve_context: no query function available. "
+            "Provide query_review_fn=... or implement vector.query_review / vector.query / vector.search."
+        )
+
+    qfn = _resolve_query_fn()
+
+    def _call_query_fn(*, question: str) -> List[Dict[str, Any]]:
+        """
+        Tolerant wrapper because different vector stores use different parameter names.
+        Tries a few common calling conventions in order.
+        """
+        # 1) Preferred internal convention used by earlier code paths
+        try:
+            return (
+                qfn(
+                    vector=vector,
+                    llm=llm,
+                    question=question,
+                    top_k=effective_top_k,
+                    filters=filters,
+                )
+                or []
+            )
+        except TypeError:
+            pass
+
+        # 2) Common convention: qfn(question=..., top_k=..., filters=...)
+        try:
+            return (
+                qfn(
+                    question=question,
+                    top_k=effective_top_k,
+                    filters=filters,
+                )
+                or []
+            )
+        except TypeError:
+            pass
+
+        # 3) Common convention: qfn(query=..., k=..., filters=...)
+        try:
+            return (
+                qfn(
+                    query=question,
+                    k=effective_top_k,
+                    filters=filters,
+                )
+                or []
+            )
+        except TypeError:
+            pass
+
+        # 4) Minimal: qfn(question)
+        try:
+            return qfn(question) or []
+        except TypeError:
+            # 5) Minimal: qfn(query)
+            return qfn(question) or []
+
     retrieved: Dict[str, List[Dict[str, Any]]] = {}
 
     # ---- retrieve per question ----
     for q in questions:
-        retrieved[q] = (
-            query_review_fn(
-                vector=vector,
-                llm=llm,
-                question=q,
-                top_k=effective_top_k,
-                filters=filters,
-            )
-            or []
-        )
+        retrieved[q] = _call_query_fn(question=q)
 
     def _fmt_ev_block(h: Dict[str, Any]) -> str:
         meta = h.get("meta") or {}
@@ -202,6 +272,7 @@ def retrieve_context(
             f"DOC: {doc} | score={score} | span={cs_s}-{ce_s}\n"
             f"EVIDENCE: {snippet} (Doc: {doc} span: {cs_s}-{ce_s})\n"
             "===END CONTRACT EVIDENCE==="
+
         )
 
     # ---- build context blocks deterministically ----
@@ -283,4 +354,5 @@ def retrieve_context(
     except Exception:
         signals = []
 
+    return retrieved, context, max_chars, signals
     return retrieved, context, max_chars, signals
