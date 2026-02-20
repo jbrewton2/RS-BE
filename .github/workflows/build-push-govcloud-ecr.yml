@@ -60,6 +60,7 @@ jobs:
           echo "Pushed: ${IMAGE}:${TAG}"
 
   deploy_css_mock:
+  if: github.ref == 'refs/heads/feat/aws-govcloud-migration-v1'
     needs: build_push
     runs-on: [self-hosted, Windows, X64, css-mock]
 
@@ -102,4 +103,5 @@ jobs:
 concurrency:
   group: css-mock-deploy
   cancel-in-progress: false
+
 
