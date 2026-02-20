@@ -16,8 +16,7 @@ env:
   AWS_ACCOUNT_ID: "354962495083"
   ECR_REPOSITORY: "css/css-backend"
   IMAGE_TAG_PREFIX: "aws-"
-  # TODO: set your real cluster name
-  EKS_CLUSTER_NAME: "css-mock"   # <-- CHANGE ME if different
+  EKS_CLUSTER_NAME: "launchpad-observer"
 
 jobs:
   build_push:
@@ -29,7 +28,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS creds (GovCloud) via OIDC
+      - name: Configure AWS creds (GovCloud) for ECR via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws-us-gov:iam::354962495083:role/github-actions-css-backend-ecr
@@ -53,13 +52,11 @@ jobs:
           SHA7="${GITHUB_SHA::7}"
           TAG="${IMAGE_TAG_PREFIX}${SHA7}"
 
-          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
-
-          echo "Building ${IMAGE}:${TAG}"
           docker build -t "css-backend:${TAG}" .
           docker tag "css-backend:${TAG}" "${IMAGE}:${TAG}"
           docker push "${IMAGE}:${TAG}"
 
+          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Pushed: ${IMAGE}:${TAG}"
 
   deploy_css_mock:
@@ -70,29 +67,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS creds (GovCloud) via OIDC
+      - name: Configure AWS creds (GovCloud) for EKS deploy via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws-us-gov:iam::354962495083:role/github-actions-css-backend-ecr
+          role-to-assume: arn:aws-us-gov:iam::354962495083:role/github-actions-css-backend-deploy
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for EKS
+        shell: pwsh
+        run: |
+          $ErrorActionPreference="Stop"
+          aws sts get-caller-identity
+          aws eks update-kubeconfig --name "${{ env.EKS_CLUSTER_NAME }}" --region "${{ env.AWS_REGION }}"
+          kubectl config current-context
+          kubectl -n css-mock get deploy
 
       - name: Deploy to css-mock using repo script
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference="Stop"
           cd "$env:GITHUB_WORKSPACE"
-
           $tag = "${{ needs.build_push.outputs.image_tag }}"
           Write-Host "Deploying ImageTag=$tag"
-   
-      - name: Configure kubeconfig for GovCloud EKS
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          .\scripts\deploy-css-mock.ps1 -ImageTag $tag
+
+      - name: Post-deploy checks
         shell: pwsh
         run: |
-          $ErrorActionPreference="Stop"
-          $region  = "us-gov-east-1"
-          $cluster = "<PUT_CLUSTER_NAME_HERE>"
-          aws eks update-kubeconfig --name $cluster --region $region
-          kubectl config current-context
-          kubectl -n css-mock get deploy
-
-          .\scripts\deploy-css-mock.ps1 -ImageTag $tag
+          $ErrorActionPreference="Continue"
+          kubectl -n css-mock get deploy css-backend -o wide
+          kubectl -n css-mock get pods -l app=css-backend -o wide
