@@ -98,3 +98,8 @@ jobs:
           $ErrorActionPreference="Continue"
           kubectl -n css-mock get deploy css-backend -o wide
           kubectl -n css-mock get pods -l app=css-backend -o wide
+
+concurrency:
+  group: css-mock-deploy
+  cancel-in-progress: false
+
