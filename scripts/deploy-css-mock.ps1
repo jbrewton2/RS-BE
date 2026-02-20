@@ -208,7 +208,8 @@ Guardrails -renderedYaml $rendered
 
 Write-Host "Deploy via Helm..." -ForegroundColor Cyan
 $timeout = "{0}m" -f $TimeoutMinutes
-& helm upgrade $Release $ChartPath -n $Namespace -f $OverridePath --wait --timeout $timeout --rollback-on-failure
+& helm upgrade $Release $ChartPath -n $Namespace -f $OverridePath --atomic --timeout $timeout
+if ($LASTEXITCODE -ne 0) { throw "helm upgrade failed ($LASTEXITCODE)" }
 
 if (!$SkipVerify) {
   Verify-External -baseUrl "https://css-mock.shipcom.ai"
@@ -216,3 +217,4 @@ if (!$SkipVerify) {
 }
 
 Write-Host "DEPLOY OK" -ForegroundColor Green
+

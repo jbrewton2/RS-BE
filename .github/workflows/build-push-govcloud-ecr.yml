@@ -84,5 +84,15 @@ jobs:
 
           $tag = "${{ needs.build_push.outputs.image_tag }}"
           Write-Host "Deploying ImageTag=$tag"
+   
+      - name: Configure kubeconfig for GovCloud EKS
+        shell: pwsh
+        run: |
+          $ErrorActionPreference="Stop"
+          $region  = "us-gov-east-1"
+          $cluster = "<PUT_CLUSTER_NAME_HERE>"
+          aws eks update-kubeconfig --name $cluster --region $region
+          kubectl config current-context
+          kubectl -n css-mock get deploy
 
           .\scripts\deploy-css-mock.ps1 -ImageTag $tag
