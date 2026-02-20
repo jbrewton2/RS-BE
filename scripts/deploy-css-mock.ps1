@@ -58,6 +58,20 @@ param(
 
 $ErrorActionPreference="Stop"
 
+# --- AWS credential behavior (local vs GitHub Actions) ---
+# In GitHub Actions, credentials come from OIDC env vars. DO NOT force AWS_PROFILE.
+# Locally, default to css-gov if no env creds are present.
+try {
+    $isGh = ($env:GITHUB_ACTIONS -eq "true")
+    $hasEnvCreds = -not [string]::IsNullOrWhiteSpace($env:AWS_ACCESS_KEY_ID)
+    if (-not $isGh -and -not $hasEnvCreds) {
+        if ([string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) {
+            $env:AWS_PROFILE = "css-gov"
+        }
+    }
+} catch { }
+# -------------------------------------------------------
+
 function Require-Cmd([string]$name) {
   if (!(Get-Command $name -ErrorAction SilentlyContinue)) {
     throw "Missing required command '$name'. Install it and retry."
@@ -191,6 +205,7 @@ Write-Host "Using ImageTag: $ImageTag"
 
 # Region preference order: AWS_REGION env var -> default us-gov-east-1
 $region = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION } else { "us-gov-east-1" }
+    $ProfileArgs = @(); if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $ProfileArgs = @("--profile",$env:AWS_PROFILE) }
 
 # ECR preflight (repo name is fixed for this env)
 Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $region
@@ -217,4 +232,6 @@ if (!$SkipVerify) {
 }
 
 Write-Host "DEPLOY OK" -ForegroundColor Green
+
+
 
