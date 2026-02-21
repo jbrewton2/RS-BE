@@ -1,9 +1,9 @@
 # core/dynamo_meta.py
 from __future__ import annotations
 
+import hashlib
 import os
 import time
-import hashlib
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -64,6 +64,10 @@ class DynamoMeta:
 
         Returns number of DOC items deleted.
         """
+        review_id = (review_id or "").strip()
+        if not review_id:
+            return 0
+
         pk = self._pk(review_id)
         deleted = 0
 
@@ -262,7 +266,11 @@ class DynamoMeta:
 
             docs = review.get("docs") or []
             try:
-                doc_count = int(review.get("doc_count") or review.get("docCount") or (len(docs) if isinstance(docs, list) else 0))
+                doc_count = int(
+                    review.get("doc_count")
+                    or review.get("docCount")
+                    or (len(docs) if isinstance(docs, list) else 0)
+                )
             except Exception:
                 doc_count = len(docs) if isinstance(docs, list) else 0
 
