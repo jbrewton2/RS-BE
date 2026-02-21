@@ -1282,6 +1282,27 @@ def rag_analyze_review(
         "stats": stats if debug else {"top_k_effective": int(effective_top_k)},
     }
 
+    def _owner_for_section(section_id: str) -> str:
+    """
+    Back-compat export for rag.router import.
+    Keep logic deterministic.
+    """
+    sid = (section_id or "").strip().lower()
+    m = {
+        "overview": "Program/PM",
+        "mission-objective": "Program/PM",
+        "scope-of-work": "Program/PM",
+        "deliverables-timelines": "Program/PM",
+        "security-compliance-hosting-constraints": "Security/ISSO",
+        "eligibility-personnel-constraints": "Program/PM",
+        "legal-data-rights-risks": "Legal/Contracts",
+        "financial-risks": "Finance",
+        "submission-instructions-deadlines": "Program/PM",
+        "contradictions-inconsistencies": "Legal/Contracts",
+        "gaps-questions-for-the-government": "Program/PM",
+        "recommended-internal-actions": "Program/PM",
+    }
+    return m.get(sid, "Program/PM")
     if _timing_enabled():
         print("[RAG] analyze done", round(time.time() - t0, 3), "s")
 
