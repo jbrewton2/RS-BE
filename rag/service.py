@@ -1259,6 +1259,142 @@ def _materialize_inference_risks(inference_candidates: Optional[List[str]]) -> L
 
 
 # -----------------------------
+# OpenSearch ingest helpers (AWS-only, review-scoped)
+# -----------------------------
+def _chunk_text_windowed(text: str, *, chunk_size: int = 1400, overlap: int = 200) -> List[Dict[str, Any]]:
+    """
+    Minimal deterministic chunker.
+    Outputs: chunk_id, chunk_text, meta{char_start,char_end,chunk_index}
+    """
+    t = (text or "").strip()
+    if not t:
+        return []
+
+    chunk_size = max(200, int(chunk_size))
+    overlap = max(0, min(int(overlap), chunk_size - 1))
+
+    out: List[Dict[str, Any]] = []
+    i = 0
+    start = 0
+    while start < len(t):
+        end = min(len(t), start + chunk_size)
+        chunk_text = t[start:end].strip()
+        if chunk_text:
+            out.append(
+                {
+                    "chunk_id": f"{i}:{start}:{end}",
+                    "chunk_text": chunk_text,
+                    "meta": {"char_start": start, "char_end": end, "chunk_index": i},
+                }
+            )
+            i += 1
+        if end >= len(t):
+            break
+        start = max(0, end - overlap)
+    return out
+
+
+def _read_extracted_text_for_doc(storage: StorageProvider, *, doc_id: str) -> str:
+    """
+    Reads extract/<doc_id>/raw_text.txt from configured storage.
+    With STORAGE_MODE=s3, StorageProvider handles S3_BUCKET/S3_PREFIX.
+    """
+    key = f"extract/{doc_id}/raw_text.txt"
+    b = storage.get_object(key=key)
+    if b is None:
+        return ""
+    if isinstance(b, (bytes, bytearray)):
+        return b.decode("utf-8", errors="ignore").strip()
+    return str(b).strip()
+
+
+def _ingest_review_into_vectorstore(
+    *,
+    storage: StorageProvider,
+    llm: Any,
+    vector: VectorStore,
+    review: Dict[str, Any],
+    review_id: str,
+    profile: str,
+) -> Dict[str, Any]:
+    """
+    Ingest review docs into OpenSearch:
+      - delete_by_document(doc_id)
+      - upsert_chunks(document_id=doc_id, chunks=[...])
+    Each chunk stores:
+      - top-level review_id (keyword field)
+      - meta.review_id (defensive)
+    """
+    docs = review.get("docs") or []
+    if not isinstance(docs, list) or not docs:
+        return {"ingested_docs": 0, "ingested_chunks": 0, "skipped_docs": 0, "reason": "no_docs"}
+
+    # Keep chunk size aligned with your snippet cap expectations
+    chunk_size = 1400 if (profile or "").lower() == "deep" else (1000 if (profile or "").lower() == "balanced" else 900)
+    overlap = 200
+
+    ingested_docs = 0
+    ingested_chunks = 0
+    skipped_docs = 0
+
+    for d in docs:
+        if not isinstance(d, dict):
+            skipped_docs += 1
+            continue
+
+        doc_id = (d.get("doc_id") or d.get("id") or "").strip()
+        if not doc_id:
+            skipped_docs += 1
+            continue
+
+        doc_name = (d.get("name") or d.get("filename") or d.get("title") or f"review:{review_id}").strip()
+
+        raw_text = _read_extracted_text_for_doc(storage, doc_id=doc_id)
+        if not raw_text:
+            skipped_docs += 1
+            continue
+
+        chunks = _chunk_text_windowed(raw_text, chunk_size=chunk_size, overlap=overlap)
+        if not chunks:
+            skipped_docs += 1
+            continue
+
+        texts = [c["chunk_text"] for c in chunks]
+        embeddings = llm.embed_texts(texts)  # Bedrock embeddings supported via providers/impl/llm_bedrock.py
+
+        if not isinstance(embeddings, list) or len(embeddings) != len(chunks):
+            raise RuntimeError(f"embed_texts returned {len(embeddings) if isinstance(embeddings, list) else 'non-list'} embeddings; expected {len(chunks)}")
+
+        upsert_payload: List[Dict[str, Any]] = []
+        for c, emb in zip(chunks, embeddings):
+            meta = c.get("meta") or {}
+            meta = dict(meta) if isinstance(meta, dict) else {}
+            meta["review_id"] = str(review_id)
+            meta["doc_id"] = str(doc_id)
+            meta["doc_name"] = str(doc_name)
+
+            upsert_payload.append(
+                {
+                    "review_id": str(review_id),
+                    "chunk_id": str(c.get("chunk_id") or ""),
+                    "chunk_text": str(c.get("chunk_text") or ""),
+                    "doc_name": str(doc_name),
+                    "meta": meta,
+                    "embedding": emb,
+                }
+            )
+
+        # Replace semantics per document id
+        vector.delete_by_document(str(doc_id))
+        vector.upsert_chunks(document_id=str(doc_id), chunks=upsert_payload)
+
+        ingested_docs += 1
+        ingested_chunks += len(upsert_payload)
+
+    return {"ingested_docs": ingested_docs, "ingested_chunks": ingested_chunks, "skipped_docs": skipped_docs}
+
+
+# -----------------------------
 # Main entry
 # -----------------------------
 def rag_analyze_review(
@@ -1288,6 +1424,7 @@ def rag_analyze_review(
           * AutoFlags (e.g., "DFARS 7012") when present
       - Deterministic risks ALWAYS materialize from review.autoFlags.hits for intent=risk_triage
       - Avoids dependency on optional helpers whose names drift (prompt builders, response builders, etc.)
+      - AWS-only vector store path: OpenSearch ingest happens on force_reingest
     """
 
     def _s(v: Any, max_len: int = 220) -> str:
@@ -1337,7 +1474,7 @@ def rag_analyze_review(
     except Exception:
         review = {}
 
-    # 2) Pull from FakeStorage._reviews (this is what your probe showed)
+    # 2) Pull from FakeStorage._reviews
     if not review:
         try:
             v = getattr(storage, "_reviews", None)
@@ -1363,6 +1500,25 @@ def rag_analyze_review(
 
     if not isinstance(review, dict):
         review = {}
+
+    # --------------------------------------------
+    # NEW: OpenSearch ingest (review-scoped) on force_reingest
+    # --------------------------------------------
+    ingest_stats: Optional[Dict[str, Any]] = None
+    if force_reingest:
+        try:
+            ingest_stats = _ingest_review_into_vectorstore(
+                storage=storage,
+                llm=llm,
+                vector=vector,
+                review=review,
+                review_id=review_id,
+                profile=profile,
+            )
+            print("[RAG] ingest_stats", ingest_stats)
+        except Exception as e:
+            print("[RAG] ERROR: force_reingest ingest failed:", repr(e))
+            ingest_stats = {"error": repr(e)}
 
     # --------------------------------------------
     # Retrieval + context (best effort)
@@ -1524,6 +1680,10 @@ def rag_analyze_review(
         "top_k_effective": int(effective_top_k),
         "max_context_chars": int(max_chars) if isinstance(max_chars, int) else None,
     }
+
+    if ingest_stats is not None:
+        stats["ingest"] = ingest_stats
+
     if debug:
         stats["debug_context"] = context
         # helpful if anything still goes weird (won't break your tests)
@@ -1548,6 +1708,3 @@ def rag_analyze_review(
         print("[RAG] analyze done", round(time.time() - t0, 3), "s")
 
     return result
-
-
-
