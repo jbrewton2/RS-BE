@@ -27,6 +27,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug Git SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "GITHUB_REF=\"
+          echo "GITHUB_SHA=\"
+          echo "SHA7=\"
       - name: Configure AWS creds (GovCloud) for ECR via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -67,6 +74,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug Git SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "GITHUB_REF=\"
+          echo "GITHUB_SHA=\"
+          echo "SHA7=\"
       - name: Configure AWS creds (GovCloud) for EKS deploy via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -102,6 +116,7 @@ jobs:
 concurrency:
   group: css-mock-deploy
   cancel-in-progress: false
+
 
 
 
