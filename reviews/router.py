@@ -107,6 +107,21 @@ async def list_reviews():
     items = meta.list_reviews() or []
     for it in items:
         _ensure_id_contract(it)
+
+        # Contract normalization for UI compatibility:
+        # - UI may still read `name` instead of `title`
+        # - List view should rely on doc_count, not docs[]
+        title = (it.get("title") or it.get("name") or "").strip()
+        if not title:
+            title = "Untitled"
+        it["title"] = title
+        it["name"] = title  # compat alias
+
+        try:
+            it["doc_count"] = int(it.get("doc_count") or it.get("docCount") or 0)
+        except Exception:
+            it["doc_count"] = 0
+
     return items
 
 
@@ -148,7 +163,7 @@ async def upsert_review(review: Dict[str, Any], storage: StorageDep):
 
     # NOTE: DynamoMeta currently persists META + pointers (pdf_key/extract pointers etc)
     meta = DynamoMeta()
-        # Persist review meta fields + doc_count
+    # Persist review meta fields + doc_count
     out = meta.upsert_review_meta(review_id, review=review, pdf_key=pdf_key)
 
     # Persist docs as child items (DOC#...)
