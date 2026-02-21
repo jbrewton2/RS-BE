@@ -3,7 +3,9 @@ name: build-and-push-backend-to-govcloud-ecr
 on:
   push:
     branches:
-      - feat/aws-govcloud-migration-v1
+      - main
+      - feat/**
+      - fix/**
   workflow_dispatch:
 
 permissions:
