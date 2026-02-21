@@ -3,6 +3,7 @@
 on:
   push:
     branches:
+      - main
       - feat/aws-govcloud-migration-v1
   workflow_dispatch:
 
@@ -77,7 +78,7 @@ jobs:
           echo "Pushed: ${IMAGE}:${TAG}"
 
   deploy_css_mock:
-    if: github.ref == 'refs/heads/feat/aws-govcloud-migration-v1'
+    if: github.ref == 'refs/heads/main'
     needs: build_push
     runs-on: [self-hosted, Windows, X64, css-mock]
 
