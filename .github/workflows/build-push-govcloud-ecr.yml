@@ -10,6 +10,10 @@ permissions:
   id-token: write
   contents: read
 
+concurrency:
+  group: css-mock-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   AWS_REGION: us-gov-east-1
   AWS_ACCOUNT_ID: "354962495083"
@@ -27,14 +31,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+<<<<<<< HEAD
+=======
 
+>>>>>>> github/main
       - name: Debug Git SHA
         shell: bash
         run: |
           set -euo pipefail
+<<<<<<< HEAD
+          echo "github.ref=${{ github.ref }}"
+          echo "github.sha=${{ github.sha }}"
+          SHA="${{ github.sha }}"
+          echo "sha7=${SHA:0:7}"
+
+=======
           echo "GITHUB_REF=${GITHUB_REF}"
           echo "GITHUB_SHA=${GITHUB_SHA}"
           echo "SHA7=${GITHUB_SHA::7}"
+>>>>>>> github/main
       - name: Configure AWS creds (GovCloud) for ECR via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -49,21 +64,28 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${REGISTRY}"
 
-      - name: Build and push image
+      - name: Compute image tag
         id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA7="${GITHUB_SHA::7}"
+          TAG="${IMAGE_TAG_PREFIX}${SHA7}"
+          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Computed TAG=${TAG}"
+
+      - name: Build and push image
         shell: bash
         run: |
           set -euo pipefail
           REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           IMAGE="${REGISTRY}/${ECR_REPOSITORY}"
-          SHA7="${GITHUB_SHA::7}"
-          TAG="${IMAGE_TAG_PREFIX}${SHA7}"
+          TAG="${{ steps.meta.outputs.image_tag }}"
 
+          echo "Building ${IMAGE}:${TAG}"
           docker build -t "css-backend:${TAG}" .
           docker tag "css-backend:${TAG}" "${IMAGE}:${TAG}"
           docker push "${IMAGE}:${TAG}"
-
-          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Pushed: ${IMAGE}:${TAG}"
 
   deploy_css_mock:
@@ -104,24 +126,16 @@ jobs:
           $ErrorActionPreference="Stop"
           cd "$env:GITHUB_WORKSPACE"
           $tag = "${{ needs.build_push.outputs.image_tag }}"
-          Write-Host "Deploying ImageTag=$tag"
+          Write-Host "Deploy tag from build output: $tag"
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
           .\scripts\deploy-css-mock.ps1 -ImageTag $tag
 
       - name: Post-deploy checks
         shell: pwsh
         run: |
-          $ErrorActionPreference="Continue"
-          kubectl -n css-mock get deploy css-backend -o wide
-          kubectl -n css-mock get pods -l app=css-backend -o wide
-
-concurrency:
-  group: css-mock-deploy
-  cancel-in-progress: false
-
-
-
-
+          $ErrorActionPreference="Stop"
+          kubectl -n css-mock get deploy css-backend -o jsonpath="{.spec.template.spec.containers[0].image}`n"
+          kubectl -n css-mock rollout status deploy/css-backend
 
 
 

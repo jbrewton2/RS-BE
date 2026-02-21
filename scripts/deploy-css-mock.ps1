@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   CSS Backend deployment SOURCE OF TRUTH for css-mock (GovCloud EKS).
 
