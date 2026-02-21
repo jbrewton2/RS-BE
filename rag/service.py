@@ -1,4 +1,4 @@
-# rag/service.py
+﻿# rag/service.py
 from __future__ import annotations
 
 import hashlib
@@ -965,7 +965,7 @@ def _llm_text(llm: Any, prompt: str) -> str:
     if not prompt:
         return ""
 
-    # Common patterns we�ve used across CSS
+    # Common patterns we’ve used across CSS
     for fn_name in ("generate", "complete", "generate_text", "chat"):
         fn = getattr(llm, fn_name, None)
         if callable(fn):
@@ -1281,8 +1281,7 @@ def rag_analyze_review(
         "warnings": [],
         "stats": stats if debug else {"top_k_effective": int(effective_top_k)},
     }
-
-    def _owner_for_section(section_id: str) -> str:
+def _owner_for_section(section_id: str) -> str:
     """
     Back-compat export for rag.router import.
     Keep logic deterministic.
@@ -1303,7 +1302,5 @@ def rag_analyze_review(
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
-    if _timing_enabled():
-        print("[RAG] analyze done", round(time.time() - t0, 3), "s")
 
-    return result
+
