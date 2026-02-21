@@ -5,7 +5,6 @@ on:
     branches:
       - feat/aws-govcloud-migration-v1
   workflow_dispatch:
-
 permissions:
   id-token: write
   contents: read
@@ -136,6 +135,7 @@ jobs:
           $ErrorActionPreference="Stop"
           kubectl -n css-mock get deploy css-backend -o jsonpath="{.spec.template.spec.containers[0].image}`n"
           kubectl -n css-mock rollout status deploy/css-backend
+
 
 
 
