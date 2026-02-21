@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from typing import Any, Dict, List, Optional
@@ -202,27 +202,45 @@ class OpenSearchVectorStore(VectorStore):
 
         k = max(1, min(int(top_k or 10), 50))
 
-        # Build OpenSearch filter terms
-        filter_terms: List[dict] = []
+        # ---- harden embedding type (avoid VALUE_STRING in OpenSearch JSON) ----
+        vec = query_embedding
+        try:
+            if isinstance(vec, str):
+                import json as _json
+                vec = _json.loads(vec)
+            if isinstance(vec, tuple):
+                vec = list(vec)
+            vec = [float(x) for x in (vec or [])]
+        except Exception:
+            return []
+
+        if not vec:
+            return []
+
+        # ---- term filters ----
+        term_filters: List[dict] = []
         if filters:
             for fk, fv in filters.items():
                 if fv is None or fv == "":
                     continue
-                # NOTE: review_id/document_id/chunk_id are keyword fields in mapping.
-                filter_terms.append({"term": {fk: fv}})
+                term_filters.append({"term": {str(fk): fv}})
 
-        # More compatible kNN form for AWS OpenSearch:
-        # - knn as the main query
-        # - optional filter via bool/filter
+        # ---- OpenSearch kNN query form ----
         body: Dict[str, Any] = {
             "size": k,
             "query": {
-                "knn": {
-                    "embedding": {
-                        "vector": query_embedding,
-                        "k": k,
-                        **({"filter": {"bool": {"filter": filter_terms}}} if filter_terms else {}),
-                    }
+                "bool": {
+                    "must": [
+                        {
+                            "knn": {
+                                "embedding": {
+                                    "vector": vec,
+                                    "k": k,
+                                }
+                            }
+                        }
+                    ],
+                    "filter": term_filters,
                 }
             },
         }
