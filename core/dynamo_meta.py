@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import time
-import json
 import hashlib
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -48,22 +47,91 @@ class DynamoMeta:
         if not self.table_name:
             raise RuntimeError("DYNAMODB_TABLE env var is missing")
 
-        self.ddb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"))
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or None
+        self.ddb = boto3.resource("dynamodb", region_name=region)
         self.table = self.ddb.Table(self.table_name)
 
+    # ----------------------------
+    # Internal helpers
+    # ----------------------------
+    def _pk(self, review_id: str) -> str:
+        return f"REVIEW#{review_id}"
+
+    def _delete_all_review_docs(self, review_id: str) -> int:
+        """
+        Replace semantics helper:
+        Delete all DOC# child items for a review.
+
+        Returns number of DOC items deleted.
+        """
+        pk = self._pk(review_id)
+        deleted = 0
+
+        # Query all existing DOC# items (paginate)
+        last_evaluated_key = None
+        to_delete: List[Dict[str, str]] = []
+
+        while True:
+            kwargs: Dict[str, Any] = {
+                "KeyConditionExpression": Key("pk").eq(pk) & Key("sk").begins_with("DOC#"),
+                "ProjectionExpression": "pk, sk",
+            }
+            if last_evaluated_key:
+                kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+            resp = self.table.query(**kwargs)
+            items = resp.get("Items") or []
+            for it in items:
+                pkv = it.get("pk")
+                skv = it.get("sk")
+                if pkv and skv:
+                    to_delete.append({"pk": pkv, "sk": skv})
+
+            last_evaluated_key = resp.get("LastEvaluatedKey")
+            if not last_evaluated_key:
+                break
+
+        if not to_delete:
+            return 0
+
+        # Batch delete
+        with self.table.batch_writer() as batch:
+            for key in to_delete:
+                batch.delete_item(Key=key)
+                deleted += 1
+
+        return deleted
+
+    # ----------------------------
+    # Public API
+    # ----------------------------
     def upsert_review_docs(self, review_id: str, docs: List[Dict[str, Any]]) -> int:
         """
         Persist per-doc metadata as child items:
           pk = REVIEW#<id>
           sk = DOC#<doc_id>
 
+        Replace semantics:
+          - Delete all existing DOC# items for this review_id
+          - Write the provided docs list as the new truth
+
         NOTE: Do NOT store full doc content here.
         Store pointers + small metadata only.
         Returns the count of docs written.
         """
-        pk = f"REVIEW#{review_id}"
+        review_id = (review_id or "").strip()
+        if not review_id:
+            return 0
+
+        pk = self._pk(review_id)
         now = _now_iso()
+
+        # 1) DELETE old DOC# children to prevent duplication / zombie docs
+        self._delete_all_review_docs(review_id)
+
+        # 2) WRITE new DOC# children
         written = 0
+        to_write: List[Dict[str, Any]] = []
 
         for d in (docs or []):
             if not isinstance(d, dict):
@@ -103,21 +171,35 @@ class DynamoMeta:
                 "created_at": (d.get("created_at") or d.get("createdAt") or now),
                 "updated_at": now,
             }
-            item = {k: v for k, v in item.items() if v is not None}
 
-            self.table.put_item(Item=item)
-            written += 1
+            # drop Nones to keep Dynamo items clean
+            item = {k: v for k, v in item.items() if v is not None}
+            to_write.append(item)
+
+        if not to_write:
+            return 0
+
+        with self.table.batch_writer() as batch:
+            for item in to_write:
+                batch.put_item(Item=item)
+                written += 1
 
         return written
 
     def list_review_docs(self, review_id: str) -> List[Dict[str, Any]]:
-        pk = f"REVIEW#{review_id}"
+        review_id = (review_id or "").strip()
+        if not review_id:
+            return []
+        pk = self._pk(review_id)
         resp = self.table.query(
             KeyConditionExpression=Key("pk").eq(pk) & Key("sk").begins_with("DOC#")
         )
         return resp.get("Items") or []
 
     def get_review_detail(self, review_id: str) -> Optional[Dict[str, Any]]:
+        review_id = (review_id or "").strip()
+        if not review_id:
+            return None
         meta = self.get_review_meta(review_id)
         if not meta:
             return None
@@ -139,7 +221,11 @@ class DynamoMeta:
         extract_json_key: Optional[str] = None,
         extract_json_sha256: Optional[str] = None,
     ) -> Dict[str, Any]:
-        pk = f"REVIEW#{review_id}"
+        review_id = (review_id or "").strip()
+        if not review_id:
+            return {}
+
+        pk = self._pk(review_id)
         sk = "META"
         now = _now_iso()
 
@@ -154,7 +240,6 @@ class DynamoMeta:
         def add(name: str, value: Any):
             if value is None:
                 return
-            # avoid reserved words
             ph = f"#{name}"
             names[ph] = name
             vals[f":{name}"] = value
@@ -163,7 +248,6 @@ class DynamoMeta:
         add("review_id", review_id)
 
         # Optional "Review Contract" fields
-        # Normalize title/name + other optional fields from the provided review payload
         if isinstance(review, dict):
             title = (review.get("title") or review.get("name") or "").strip() or None
             status = (review.get("status") or "").strip() or None
@@ -178,7 +262,7 @@ class DynamoMeta:
 
             docs = review.get("docs") or []
             try:
-                doc_count = int(review.get("doc_count") or review.get("docCount") or len(docs))
+                doc_count = int(review.get("doc_count") or review.get("docCount") or (len(docs) if isinstance(docs, list) else 0))
             except Exception:
                 doc_count = len(docs) if isinstance(docs, list) else 0
 
@@ -195,6 +279,7 @@ class DynamoMeta:
                 summary = auto_flags.get("summary")
                 if isinstance(summary, str) and summary.strip():
                     add("autoFlags_summary", summary.strip()[:2000])
+
         add("pdf_s3_key", pdf_key)
         add("pdf_sha256", pdf_sha256)
         add("pdf_size", pdf_size)
@@ -205,13 +290,16 @@ class DynamoMeta:
 
         update_expr = "SET " + ", ".join(sets)
 
-        resp = self.table.update_item(
-            Key={"pk": pk, "sk": sk},
-            UpdateExpression=update_expr,
-            ExpressionAttributeValues=vals,
-            ExpressionAttributeNames=names if names else None,
-            ReturnValues="ALL_NEW",
-        )
+        kwargs: Dict[str, Any] = {
+            "Key": {"pk": pk, "sk": sk},
+            "UpdateExpression": update_expr,
+            "ExpressionAttributeValues": vals,
+            "ReturnValues": "ALL_NEW",
+        }
+        if names:
+            kwargs["ExpressionAttributeNames"] = names
+
+        resp = self.table.update_item(**kwargs)
         return resp.get("Attributes") or {}
 
     def list_reviews(self) -> List[Dict[str, Any]]:
@@ -227,14 +315,33 @@ class DynamoMeta:
         return items
 
     def get_review_meta(self, review_id: str) -> Optional[Dict[str, Any]]:
-        resp = self.table.get_item(Key={"pk": f"REVIEW#{review_id}", "sk": "META"})
+        review_id = (review_id or "").strip()
+        if not review_id:
+            return None
+        resp = self.table.get_item(Key={"pk": self._pk(review_id), "sk": "META"})
         return resp.get("Item")
 
-    def put_rag_run(self, review_id: str, run_id: str, *, rag_key: str, rag_sha256: str, params_hash: str, analysis_intent: str, context_profile: str, top_k: int) -> None:
+    def put_rag_run(
+        self,
+        review_id: str,
+        run_id: str,
+        *,
+        rag_key: str,
+        rag_sha256: str,
+        params_hash: str,
+        analysis_intent: str,
+        context_profile: str,
+        top_k: int,
+    ) -> None:
+        review_id = (review_id or "").strip()
+        run_id = (run_id or "").strip()
+        if not review_id or not run_id:
+            return
+
         now = _now_iso()
         self.table.put_item(
             Item={
-                "pk": f"REVIEW#{review_id}",
+                "pk": self._pk(review_id),
                 "sk": f"RAGRUN#{run_id}",
                 "review_id": review_id,
                 "run_id": run_id,
