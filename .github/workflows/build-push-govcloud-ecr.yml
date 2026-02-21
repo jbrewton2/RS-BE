@@ -40,6 +40,11 @@ jobs:
           echo "GITHUB_REF=${GITHUB_REF}"
           echo "GITHUB_SHA=${GITHUB_SHA}"
           echo "SHA7=${GITHUB_SHA::7}"
+      - name: Configure AWS creds (GovCloud) for ECR via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws-us-gov:iam::354962495083:role/github-actions-css-backend-ecr
+          aws-region: ${{ env.AWS_REGION }}
       - name: Login to ECR (GovCloud)
         shell: bash
         run: |
