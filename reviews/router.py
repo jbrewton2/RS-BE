@@ -113,7 +113,7 @@ async def list_reviews():
 @router.get("/{review_id}")
 async def get_review(review_id: str):
     meta = DynamoMeta()
-    item = meta.get_review_meta(review_id)
+    item = meta.get_review_detail(review_id)
     if not item:
         raise HTTPException(status_code=404, detail="Review not found")
     return _ensure_id_contract(item)
@@ -148,7 +148,15 @@ async def upsert_review(review: Dict[str, Any], storage: StorageDep):
 
     # NOTE: DynamoMeta currently persists META + pointers (pdf_key/extract pointers etc)
     meta = DynamoMeta()
-    out = meta.upsert_review_meta(review_id, pdf_key=pdf_key)
+        # Persist review meta fields + doc_count
+    out = meta.upsert_review_meta(review_id, review=review, pdf_key=pdf_key)
+
+    # Persist docs as child items (DOC#...)
+    docs = review.get("docs") or []
+    if isinstance(docs, list) and docs:
+        meta.upsert_review_docs(review_id, docs)
+        # Refresh doc_count in META to match what we wrote
+        out = meta.upsert_review_meta(review_id, review={"doc_count": len(docs)}, pdf_key=pdf_key)
 
     # Ensure response includes id (UI expects it) and normalize review_id
     if isinstance(out, dict):
@@ -157,9 +165,9 @@ async def upsert_review(review: Dict[str, Any], storage: StorageDep):
     else:
         out = {"review_id": review_id, "id": review_id}
 
-    return out
-
-
+    # Return detail payload so UI can immediately show title + docs
+    detail = meta.get_review_detail(review_id) or out
+    return _ensure_id_contract(detail)
 @router.delete("/{review_id}")
 async def delete_review(review_id: str):
     # Minimal delete: delete META row only (for mock). Later we can delete DOC*/RAGRUN* rows too.
