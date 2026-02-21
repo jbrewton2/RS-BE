@@ -5,6 +5,7 @@ on:
     branches:
       - feat/aws-govcloud-migration-v1
   workflow_dispatch:
+
 permissions:
   id-token: write
   contents: read
@@ -30,25 +31,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-<<<<<<< HEAD
-=======
-
->>>>>>> github/main
       - name: Debug Git SHA
         shell: bash
         run: |
           set -euo pipefail
-<<<<<<< HEAD
           echo "github.ref=${{ github.ref }}"
           echo "github.sha=${{ github.sha }}"
           SHA="${{ github.sha }}"
           echo "sha7=${SHA:0:7}"
 
-=======
-          echo "GITHUB_REF=${GITHUB_REF}"
-          echo "GITHUB_SHA=${GITHUB_SHA}"
-          echo "SHA7=${GITHUB_SHA::7}"
->>>>>>> github/main
       - name: Configure AWS creds (GovCloud) for ECR via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -60,8 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-          aws ecr get-login-password --region "${AWS_REGION}" \
-            | docker login --username AWS --password-stdin "${REGISTRY}"
+          aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${REGISTRY}"
 
       - name: Compute image tag
         id: meta
@@ -80,7 +70,6 @@ jobs:
           REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           IMAGE="${REGISTRY}/${ECR_REPOSITORY}"
           TAG="${{ steps.meta.outputs.image_tag }}"
-
           echo "Building ${IMAGE}:${TAG}"
           docker build -t "css-backend:${TAG}" .
           docker tag "css-backend:${TAG}" "${IMAGE}:${TAG}"
@@ -96,14 +85,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-
-      - name: Debug Git SHA
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "GITHUB_REF=${GITHUB_REF}"
-          echo "GITHUB_SHA=${GITHUB_SHA}"
-          echo "SHA7=${GITHUB_SHA::7}"
       - name: Configure AWS creds (GovCloud) for EKS deploy via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -135,7 +116,3 @@ jobs:
           $ErrorActionPreference="Stop"
           kubectl -n css-mock get deploy css-backend -o jsonpath="{.spec.template.spec.containers[0].image}`n"
           kubectl -n css-mock rollout status deploy/css-backend
-
-
-
-
