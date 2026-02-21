@@ -1,4 +1,4 @@
-﻿name: build-and-push-backend-to-govcloud-ecr
+name: build-and-push-backend-to-govcloud-ecr
 
 on:
   push:
@@ -31,25 +31,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-<<<<<<< HEAD
-=======
-
->>>>>>> github/main
       - name: Debug Git SHA
         shell: bash
         run: |
           set -euo pipefail
-<<<<<<< HEAD
-          echo "github.ref=${{ github.ref }}"
-          echo "github.sha=${{ github.sha }}"
-          SHA="${{ github.sha }}"
-          echo "sha7=${SHA:0:7}"
-
-=======
           echo "GITHUB_REF=${GITHUB_REF}"
           echo "GITHUB_SHA=${GITHUB_SHA}"
           echo "SHA7=${GITHUB_SHA::7}"
->>>>>>> github/main
       - name: Configure AWS creds (GovCloud) for ECR via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
