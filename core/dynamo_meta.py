@@ -6,8 +6,10 @@ import time
 import json
 import hashlib
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 
 def _now_iso() -> str:
@@ -49,10 +51,86 @@ class DynamoMeta:
         self.ddb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"))
         self.table = self.ddb.Table(self.table_name)
 
+    def upsert_review_docs(self, review_id: str, docs: List[Dict[str, Any]]) -> int:
+        """
+        Persist per-doc metadata as child items:
+          pk = REVIEW#<id>
+          sk = DOC#<doc_id>
+
+        NOTE: Do NOT store full doc content here.
+        Store pointers + small metadata only.
+        Returns the count of docs written.
+        """
+        pk = f"REVIEW#{review_id}"
+        now = _now_iso()
+        written = 0
+
+        for d in (docs or []):
+            if not isinstance(d, dict):
+                continue
+
+            doc_id = (d.get("id") or d.get("doc_id") or "").strip()
+            if not doc_id:
+                doc_id = str(uuid4())
+
+            name = (d.get("name") or d.get("filename") or d.get("title") or "Document").strip()
+            filename = (d.get("filename") or d.get("name") or "").strip() or None
+            mime_type = (d.get("mimeType") or d.get("mime_type") or "").strip() or None
+
+            size_bytes = d.get("size_bytes")
+            if size_bytes is None:
+                size_bytes = d.get("sizeBytes")
+            try:
+                size_bytes = int(size_bytes) if size_bytes is not None else None
+            except Exception:
+                size_bytes = None
+
+            pdf_url = (d.get("pdf_url") or d.get("pdfUrl") or "").strip() or None
+            pdf_s3_key = (d.get("pdf_s3_key") or d.get("pdfKey") or d.get("pdf_key") or "").strip() or None
+
+            item = {
+                "pk": pk,
+                "sk": f"DOC#{doc_id}",
+                "review_id": review_id,
+                "doc_id": doc_id,
+                "id": doc_id,
+                "name": name,
+                "filename": filename,
+                "mimeType": mime_type,
+                "size_bytes": size_bytes,
+                "pdf_url": pdf_url,
+                "pdf_s3_key": pdf_s3_key,
+                "created_at": (d.get("created_at") or d.get("createdAt") or now),
+                "updated_at": now,
+            }
+            item = {k: v for k, v in item.items() if v is not None}
+
+            self.table.put_item(Item=item)
+            written += 1
+
+        return written
+
+    def list_review_docs(self, review_id: str) -> List[Dict[str, Any]]:
+        pk = f"REVIEW#{review_id}"
+        resp = self.table.query(
+            KeyConditionExpression=Key("pk").eq(pk) & Key("sk").begins_with("DOC#")
+        )
+        return resp.get("Items") or []
+
+    def get_review_detail(self, review_id: str) -> Optional[Dict[str, Any]]:
+        meta = self.get_review_meta(review_id)
+        if not meta:
+            return None
+        docs = self.list_review_docs(review_id)
+        meta["docs"] = docs
+        meta["doc_count"] = int(meta.get("doc_count") or len(docs))
+        return meta
+
     def upsert_review_meta(
         self,
         review_id: str,
         *,
+        review: Optional[Dict[str, Any]] = None,
         pdf_key: Optional[str] = None,
         pdf_sha256: Optional[str] = None,
         pdf_size: Optional[int] = None,
@@ -83,6 +161,40 @@ class DynamoMeta:
             sets.append(f"{ph} = :{name}")
 
         add("review_id", review_id)
+
+        # Optional "Review Contract" fields
+        # Normalize title/name + other optional fields from the provided review payload
+        if isinstance(review, dict):
+            title = (review.get("title") or review.get("name") or "").strip() or None
+            status = (review.get("status") or "").strip() or None
+            if not status:
+                status = "Draft"
+
+            department = (review.get("department") or "").strip() or None
+            reviewer = (review.get("reviewer") or "").strip() or None
+
+            # Canonical: data_type (snake_case). Accept dataType as input.
+            data_type = (review.get("data_type") or review.get("dataType") or "").strip() or None
+
+            docs = review.get("docs") or []
+            try:
+                doc_count = int(review.get("doc_count") or review.get("docCount") or len(docs))
+            except Exception:
+                doc_count = len(docs) if isinstance(docs, list) else 0
+
+            add("title", title)
+            add("status", status)
+            add("department", department)
+            add("reviewer", reviewer)
+            add("data_type", data_type)
+            add("doc_count", int(doc_count))
+
+            # Optional: store a compact autoFlags summary only (avoid large payloads)
+            auto_flags = review.get("autoFlags")
+            if isinstance(auto_flags, dict):
+                summary = auto_flags.get("summary")
+                if isinstance(summary, str) and summary.strip():
+                    add("autoFlags_summary", summary.strip()[:2000])
         add("pdf_s3_key", pdf_key)
         add("pdf_sha256", pdf_sha256)
         add("pdf_size", pdf_size)
@@ -108,7 +220,11 @@ class DynamoMeta:
             FilterExpression="begins_with(pk, :p) AND sk = :sk",
             ExpressionAttributeValues={":p": "REVIEW#", ":sk": "META"},
         )
-        return resp.get("Items") or []
+        items = resp.get("Items") or []
+        for it in items:
+            if "doc_count" not in it:
+                it["doc_count"] = 0
+        return items
 
     def get_review_meta(self, review_id: str) -> Optional[Dict[str, Any]]:
         resp = self.table.get_item(Key={"pk": f"REVIEW#{review_id}", "sk": "META"})
