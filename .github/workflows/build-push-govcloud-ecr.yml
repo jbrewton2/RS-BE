@@ -31,15 +31,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> github/main
       - name: Debug Git SHA
         shell: bash
         run: |
           set -euo pipefail
+<<<<<<< HEAD
           echo "github.ref=${{ github.ref }}"
           echo "github.sha=${{ github.sha }}"
           SHA="${{ github.sha }}"
           echo "sha7=${SHA:0:7}"
 
+=======
+          echo "GITHUB_REF=${GITHUB_REF}"
+          echo "GITHUB_SHA=${GITHUB_SHA}"
+          echo "SHA7=${GITHUB_SHA::7}"
+>>>>>>> github/main
       - name: Configure AWS creds (GovCloud) for ECR via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -87,6 +97,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+
+      - name: Debug Git SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "GITHUB_REF=${GITHUB_REF}"
+          echo "GITHUB_SHA=${GITHUB_SHA}"
+          echo "SHA7=${GITHUB_SHA::7}"
       - name: Configure AWS creds (GovCloud) for EKS deploy via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -118,4 +136,6 @@ jobs:
           $ErrorActionPreference="Stop"
           kubectl -n css-mock get deploy css-backend -o jsonpath="{.spec.template.spec.containers[0].image}`n"
           kubectl -n css-mock rollout status deploy/css-backend
+
+
 
