@@ -1,4 +1,4 @@
-﻿# Normalize text files to LF in repo (Windows working copies may still be CRLF depending on tools)
+# Normalize text files to LF in repo (Windows working copies may still be CRLF depending on tools)
 * text=auto eol=lf
 
 # PowerShell scripts: keep as text, normalize to LF in repo
