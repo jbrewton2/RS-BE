@@ -84,6 +84,29 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
         )
 
         result = _ensure_section_owners(result)
+
+        # API contract guardrail: ensure required response fields are always present.
+        # Some internal paths may omit top_k/summary; we normalize here at the boundary.
+        if not isinstance(result, dict):
+            try:
+                result = result.model_dump()
+            except Exception:
+                result = dict(result)
+
+        result.setdefault("review_id", req.review_id)
+        result.setdefault("mode", req.mode)
+        result.setdefault("top_k", req.top_k)
+        result.setdefault("analysis_intent", req.analysis_intent)
+        result.setdefault("context_profile", req.context_profile)
+
+        # summary is required by RagAnalyzeResponse; use empty string if not materialized
+        summary_val = result.get("summary")
+        if summary_val is None:
+            result["summary"] = ""
+        elif not isinstance(summary_val, str):
+            # enforce schema: summary must be a string
+            result["summary"] = str(summary_val)
+
         return RagAnalyzeResponse.model_validate(result)
 
     except KeyError as e:
