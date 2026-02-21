@@ -1,3 +1,4 @@
+﻿# main.py
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -14,7 +15,7 @@ import json
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, HTMLResponse, JSONResponse
+from fastapi.responses import Response, HTMLResponse
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from pydantic import BaseModel
 
@@ -27,7 +28,7 @@ from core.config import PdfReader, docx, FILES_DIR, KNOWLEDGE_DOCS_DIR
 from schemas import AnalyzeRequestModel, AnalyzeResponseModel
 from core.llm_client import call_llm_for_review
 from core.providers import init_providers
-from core.dynamo_meta import DynamoMeta, sha256_bytes, sha256_text, _now_iso
+from core.dynamo_meta import DynamoMeta, sha256_bytes, _now_iso
 
 # Routers
 from flags.router import router as flags_router
@@ -187,6 +188,71 @@ def _convert_docx_bytes_to_pdf_bytes(
                 return f.read()
         except Exception:
             return None
+
+
+def _pdf_key_for_doc_id(doc_id: str) -> str:
+    # Canonical: do not use filename as key (avoids collision)
+    return f"review_pdfs/{doc_id}.pdf"
+
+
+def _extract_artifact_keys(doc_id: str) -> tuple[str, str]:
+    """
+    Canonical extract artifact locations (MUST be doc_id-scoped):
+      - extract/<doc_id>/raw_text.txt
+      - extract/<doc_id>/extract.json
+    """
+    did = (doc_id or "").strip()
+    return (f"extract/{did}/raw_text.txt", f"extract/{did}/extract.json")
+
+
+def _write_extract_artifacts(
+    *,
+    storage,
+    doc_id: str,
+    review_id: Optional[str],
+    filename: Optional[str],
+    source_key: Optional[str],
+    source_sha256: Optional[str],
+    raw_text: str,
+) -> tuple[str, str, str, str]:
+    """
+    Persist extracted artifacts under extract/<doc_id>/...
+
+    Returns:
+      (extract_text_key, extract_json_key, extract_text_sha256, extract_json_sha256)
+    """
+    extract_text_key, extract_json_key = _extract_artifact_keys(doc_id)
+
+    raw_text_bytes = (raw_text or "").encode("utf-8", errors="ignore")
+    extract_text_sha = sha256_bytes(raw_text_bytes)
+
+    payload = {
+        "doc_id": doc_id,
+        "review_id": (review_id or "").strip() or None,
+        "filename": (filename or "").strip() or None,
+        "source_key": (source_key or "").strip() or None,
+        "source_sha256": (source_sha256 or "").strip() or None,
+        "extract_text_s3_key": extract_text_key,
+        "extract_text_sha256": extract_text_sha,
+        "created_at": _now_iso(),
+    }
+    extract_json_bytes = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
+    extract_json_sha = sha256_bytes(extract_json_bytes)
+
+    storage.put_object(
+        key=extract_text_key,
+        data=raw_text_bytes,
+        content_type="text/plain; charset=utf-8",
+        metadata=None,
+    )
+    storage.put_object(
+        key=extract_json_key,
+        data=extract_json_bytes,
+        content_type="application/json; charset=utf-8",
+        metadata=None,
+    )
+
+    return (extract_text_key, extract_json_key, extract_text_sha, extract_json_sha)
 
 
 # ---------------------------------------------------------------------
@@ -358,8 +424,14 @@ app.add_middleware(
 # ---------------------------------------------------------------------
 
 class ExtractByKeyRequest(BaseModel):
+    # REVIEW this PDF belongs to (routing/authorization)
     review_id: str
+    # Source PDF key in StorageProvider (S3)
     pdf_key: str
+    # REQUIRED: the doc_id that your review.docs[] points to
+    doc_id: str
+    # Optional: filename for metadata/debug
+    filename: Optional[str] = None
 
 
 class ExtractResponseModel(BaseModel):
@@ -379,10 +451,6 @@ class ExtractResponseModel(BaseModel):
 async def get_file(key: str, request: Request):
     """
     Serve stored files from the StorageProvider.
-
-    IMPORTANT:
-    - This reads from the active StorageProvider (MinIO now, S3 later).
-    - No local filesystem reads occur here.
     """
     storage = request.app.state.providers.storage
     if not key:
@@ -399,11 +467,6 @@ async def get_file(key: str, request: Request):
         raise HTTPException(status_code=404, detail="File not found")
 
     return Response(content=data, media_type=_guess_media_type(key))
-
-
-def _pdf_key_for_doc_id(doc_id: str) -> str:
-    # Canonical: do not use filename as key (avoids collision)
-    return f"review_pdfs/{doc_id}.pdf"
 
 
 async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseModel:
@@ -430,9 +493,12 @@ async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseMo
 
         pdf_bytes = _convert_docx_bytes_to_pdf_bytes(contents)
         pdf_url = None
+        pdf_key = None
+        pdf_sha = None
 
         if pdf_bytes:
             pdf_key = _pdf_key_for_doc_id(doc_id)
+            pdf_sha = sha256_bytes(pdf_bytes)
             try:
                 storage.put_object(key=pdf_key, data=pdf_bytes, content_type="application/pdf", metadata=None)
                 pdf_url = f"/files/{pdf_key}"
@@ -440,7 +506,29 @@ async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseMo
                 # Non-blocking by design
                 pdf_url = None
 
-        return ExtractResponseModel(text=text, type="docx", pdf_url=pdf_url, pages=None, doc_id=doc_id, filename=filename)
+        # ✅ KEY FIX: always persist extract artifacts under extract/<doc_id>/...
+        try:
+            _write_extract_artifacts(
+                storage=storage,
+                doc_id=doc_id,
+                review_id=None,
+                filename=filename,
+                source_key=pdf_key,          # best available canonical source (pdf)
+                source_sha256=pdf_sha,
+                raw_text=text,
+            )
+        except Exception:
+            # Extraction must still succeed even if artifact write fails
+            pass
+
+        return ExtractResponseModel(
+            text=text,
+            type="docx",
+            pdf_url=pdf_url,
+            pages=None,
+            doc_id=doc_id,
+            filename=filename,
+        )
 
     # -------------------------
     # PDF: store PDF + extract text
@@ -454,7 +542,29 @@ async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseMo
 
         pdf_url = f"/files/{pdf_key}"
         text = _extract_text_from_pdf_stream(BytesIO(contents))
-        return ExtractResponseModel(text=text, type="pdf", pdf_url=pdf_url, pages=None, doc_id=doc_id, filename=filename)
+
+        # ✅ KEY FIX: persist extract artifacts under extract/<doc_id>/...
+        try:
+            _write_extract_artifacts(
+                storage=storage,
+                doc_id=doc_id,
+                review_id=None,
+                filename=filename,
+                source_key=pdf_key,
+                source_sha256=sha256_bytes(contents),
+                raw_text=text,
+            )
+        except Exception:
+            pass
+
+        return ExtractResponseModel(
+            text=text,
+            type="pdf",
+            pdf_url=pdf_url,
+            pages=None,
+            doc_id=doc_id,
+            filename=filename,
+        )
 
     # -------------------------
     # TXT or fallback
@@ -463,6 +573,21 @@ async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseMo
         text = contents.decode("utf-8", errors="replace").strip()
     except Exception:
         text = ""
+
+    # ✅ Persist extract artifacts for plaintext too (doc_id-scoped)
+    try:
+        _write_extract_artifacts(
+            storage=storage,
+            doc_id=doc_id,
+            review_id=None,
+            filename=filename,
+            source_key=None,
+            source_sha256=sha256_bytes(contents),
+            raw_text=text,
+        )
+    except Exception:
+        pass
+
     return ExtractResponseModel(text=text, type=ext.lstrip(".") or "txt", pdf_url=None, pages=None, doc_id=doc_id, filename=filename)
 
 
@@ -475,21 +600,25 @@ async def extract(request: Request, file: UploadFile = File(...)):
 async def api_extract(request: Request, file: UploadFile = File(...)):
     return await _extract_impl(request=request, file=file)
 
+
 @app.post("/api/extract-by-key", response_model=ExtractResponseModel, include_in_schema=True)
 async def api_extract_by_key(req: ExtractByKeyRequest, request: Request):
     """
     Extract text from an existing PDF already stored in StorageProvider (S3).
-    Persists:
-      - extracted text artifact to S3
-      - extract.json to S3
-      - pointers + sha256 to Dynamo (REVIEW#{review_id}/META)
+
+    ✅ KEY FIX:
+      - extract artifacts are stored under extract/<doc_id>/... (NOT extract/<review_id>/...)
+      - doc_id is required in the request because review.docs[] is doc-scoped
     """
     storage = request.app.state.providers.storage
 
     review_id = (req.review_id or "").strip()
     pdf_key = (req.pdf_key or "").strip()
-    if not review_id or not pdf_key:
-        raise HTTPException(status_code=400, detail="review_id and pdf_key are required")
+    doc_id = (req.doc_id or "").strip()
+    filename = (req.filename or "").strip() or None
+
+    if not review_id or not pdf_key or not doc_id:
+        raise HTTPException(status_code=400, detail="review_id, pdf_key, and doc_id are required")
 
     try:
         pdf_bytes = storage.get_object(pdf_key)
@@ -501,46 +630,28 @@ async def api_extract_by_key(req: ExtractByKeyRequest, request: Request):
     if not pdf_bytes:
         raise HTTPException(status_code=404, detail="PDF key not found")
 
-    # deterministic doc_id for review PDF
-    doc_id = review_id
     pdf_url = f"/files/{pdf_key}"
-
     text = _extract_text_from_pdf_stream(BytesIO(pdf_bytes))
-    raw_text = (text or "").encode("utf-8", errors="ignore")
 
-    # Write extracted artifacts to S3 (under stores/)
-    extract_text_key = f"extract/{review_id}/raw_text.txt"
-    extract_json_key = f"extract/{review_id}/extract.json"
-
-    extract_payload = {
-        "review_id": review_id,
-        "pdf_key": pdf_key,
-        "pdf_sha256": sha256_bytes(pdf_bytes),
-        "extract_text_sha256": sha256_bytes(raw_text),
-        "created_at": _now_iso(),
-    }
-    extract_json = json.dumps(extract_payload, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
-
+    # ✅ Persist extracted artifacts under extract/<doc_id>/...
     try:
-        storage.put_object(key=extract_text_key, data=raw_text, content_type="text/plain; charset=utf-8", metadata=None)
-        storage.put_object(key=extract_json_key, data=extract_json, content_type="application/json", metadata=None)
+        _write_extract_artifacts(
+            storage=storage,
+            doc_id=doc_id,
+            review_id=review_id,
+            filename=filename,
+            source_key=pdf_key,
+            source_sha256=sha256_bytes(pdf_bytes),
+            raw_text=text,
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to store extract artifacts: {exc}")
 
-    # Write pointers + hashes to Dynamo
-    meta = DynamoMeta()
-    meta.upsert_review_meta(
-        review_id,
-        pdf_key=pdf_key,
-        pdf_sha256=sha256_bytes(pdf_bytes),
-        pdf_size=len(pdf_bytes),
-        extract_text_key=extract_text_key,
-        extract_text_sha256=sha256_bytes(raw_text),
-        extract_json_key=extract_json_key,
-        extract_json_sha256=sha256_bytes(extract_json),
-    )
+    # NOTE: we do NOT write review-level META pointers here (those fields are review-scoped,
+    # not doc-scoped). The review's DOC items already point to doc_id/pdf_url.
+    # DynamoMeta remains used by reviews router.
 
-    return ExtractResponseModel(text=text, type="pdf", pdf_url=pdf_url, pages=None, doc_id=doc_id, filename=None)
+    return ExtractResponseModel(text=text, type="pdf", pdf_url=pdf_url, pages=None, doc_id=doc_id, filename=filename)
 
 
 # ---------------------------------------------------------------------
@@ -625,6 +736,8 @@ app.include_router(llm_config_router, prefix="/api")
 app.include_router(pricing_router, prefix="/api")
 app.include_router(llm_status_router, prefix="/api")
 app.include_router(rag_router, prefix="/api")
+
+
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "CSS backend running"}
@@ -632,8 +745,3 @@ async def root():
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
-
-
-
-
