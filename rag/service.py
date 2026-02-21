@@ -1382,7 +1382,7 @@ def rag_analyze_review(
             llm=llm,
             questions=questions,
             effective_top_k=effective_top_k,
-            filters={"document_id": str(review_id)},
+            filters={"review_id": str(review_id)},
             snippet_cap=_effective_snippet_chars(profile),
             intent=intent,
             profile=profile,

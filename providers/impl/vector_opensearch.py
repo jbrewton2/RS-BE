@@ -114,6 +114,9 @@ class OpenSearchVectorStore(VectorStore):
             },
             "mappings": {
                 "properties": {
+                    # IMPORTANT: used for retrieval scoping in RAG (filter by review_id)
+                    "review_id": {"type": "keyword"},
+                    # still useful for doc-scoped retrieval/cleanup
                     "document_id": {"type": "keyword"},
                     "chunk_id": {"type": "keyword"},
                     "doc_name": {"type": "keyword"},
@@ -125,6 +128,26 @@ class OpenSearchVectorStore(VectorStore):
         }
 
         self.client.indices.create(index=self.index, body=body)
+
+    @staticmethod
+    def _extract_review_id(ch: Dict[str, Any]) -> str:
+        """
+        Minimal-impact: derive review_id from commonly-used places without changing
+        upstream chunk builders.
+
+        Preference order:
+          1) ch["review_id"] / ch["reviewId"]
+          2) ch["meta"]["review_id"] / ch["meta"]["reviewId"]
+        """
+        meta = ch.get("meta") or {}
+        rid = (
+            ch.get("review_id")
+            or ch.get("reviewId")
+            or (meta.get("review_id") if isinstance(meta, dict) else None)
+            or (meta.get("reviewId") if isinstance(meta, dict) else None)
+            or ""
+        )
+        return str(rid).strip()
 
     def upsert_chunks(self, document_id: str, chunks: List[Dict[str, Any]]) -> None:
         if not document_id or not chunks:
@@ -141,7 +164,11 @@ class OpenSearchVectorStore(VectorStore):
             if not isinstance(emb, list) or not emb:
                 continue
 
+            # MINIMAL CHANGE: store review_id as a TOP-LEVEL keyword for filtering
+            review_id = self._extract_review_id(ch)
+
             doc = {
+                "review_id": review_id,  # <-- enables filters={"review_id": ...}
                 "document_id": document_id,
                 "chunk_id": chunk_id,
                 "doc_name": str(ch.get("doc_name") or ch.get("doc") or ""),
@@ -175,30 +202,27 @@ class OpenSearchVectorStore(VectorStore):
 
         k = max(1, min(int(top_k or 10), 50))
 
-        must_filters: List[dict] = []
+        # Build OpenSearch filter terms
+        filter_terms: List[dict] = []
         if filters:
             for fk, fv in filters.items():
                 if fv is None or fv == "":
                     continue
-                must_filters.append({"term": {fk: fv}})
+                # NOTE: review_id/document_id/chunk_id are keyword fields in mapping.
+                filter_terms.append({"term": {fk: fv}})
 
-        # NOTE: we intentionally keep this query form because you already proved
-        # filter + knn works in your domain.
+        # More compatible kNN form for AWS OpenSearch:
+        # - knn as the main query
+        # - optional filter via bool/filter
         body: Dict[str, Any] = {
             "size": k,
             "query": {
-                "bool": {
-                    "must": must_filters,
-                    "filter": [
-                        {
-                            "knn": {
-                                "embedding": {
-                                    "vector": query_embedding,
-                                    "k": k,
-                                }
-                            }
-                        }
-                    ],
+                "knn": {
+                    "embedding": {
+                        "vector": query_embedding,
+                        "k": k,
+                        **({"filter": {"bool": {"filter": filter_terms}}} if filter_terms else {}),
+                    }
                 }
             },
         }
@@ -211,6 +235,7 @@ class OpenSearchVectorStore(VectorStore):
             src = h.get("_source") or {}
             out.append(
                 {
+                    "review_id": src.get("review_id"),
                     "document_id": src.get("document_id"),
                     "chunk_id": src.get("chunk_id"),
                     "doc_name": src.get("doc_name"),
