@@ -33,18 +33,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Debug Git SHA (Windows)
-        shell: pwsh
+      - name: Debug Git SHA
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
-          Write-Host "GITHUB_REF=$env:GITHUB_REF"
-          Write-Host "GITHUB_SHA=$env:GITHUB_SHA"
-          Write-Host ("SHA7=" + $env:GITHUB_SHA.Substring(0,7))      - name: Configure AWS creds (GovCloud) for ECR via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws-us-gov:iam::354962495083:role/github-actions-css-backend-ecr
-          aws-region: ${{ env.AWS_REGION }}
-
+          set -euo pipefail
+          echo "GITHUB_REF=${GITHUB_REF}"
+          echo "GITHUB_SHA=${GITHUB_SHA}"
+          echo "SHA7=${GITHUB_SHA::7}"
       - name: Login to ECR (GovCloud)
         shell: bash
         run: |
