@@ -2,31 +2,35 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import time
+from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.config import PdfReader
+from core.dynamo_meta import DynamoMeta
 from providers.storage import StorageProvider
 from providers.vectorstore import VectorStore
 from rag.service_helpers import retrieve_context
 from reviews.router import _read_reviews_file  # uses StorageProvider
 
 
-# -----------------------------
+# =============================================================================
 # SECTION OUTPUT NORMALIZATION
 # - Keep evidence in section.evidence[]
 # - Keep findings[] as short bullets only
-# -----------------------------
+# =============================================================================
 
 # Tuning knobs (UI ergonomics)
-_SECTION_MAX_FINDINGS = 6          # clamp findings bullets per section (tight default)
-_SECTION_MAX_EVIDENCE = 6          # clamp evidence snippets per section (tight default)
-_FINDING_MAX_LEN = 160             # clamp bullet length (tight default)
-_DROP_TRAILING_PERIODS = True      # normalize bullets by removing trailing periods
+_SECTION_MAX_FINDINGS = 6  # clamp findings bullets per section (tight default)
+_SECTION_MAX_EVIDENCE = 6  # clamp evidence snippets per section (tight default)
+_FINDING_MAX_LEN = 160  # clamp bullet length (tight default)
+_DROP_TRAILING_PERIODS = True  # normalize bullets by removing trailing periods
 
 _EVIDENCE_LINE_RE = re.compile(
-    r'^\s*EVIDENCE:\s*(?P<snippet>.+?)\s*\(Doc:\s*(?P<doc>.+?)\s*span:\s*(?P<cs>\d+)\-(?P<ce>\d+)\)\s*$',
+    r"^\s*EVIDENCE:\s*(?P<snippet>.+?)\s*\(Doc:\s*(?P<doc>.+?)\s*span:\s*(?P<cs>\d+)\-(?P<ce>\d+)\)\s*$",
     re.IGNORECASE,
 )
 
@@ -49,7 +53,7 @@ def _extract_evidence_from_finding_line(line: str) -> Optional[Dict[str, Any]]:
         cs, ce = None, None
 
     return {
-        "docId": doc,   # best-effort (we only have doc name here)
+        "docId": doc,  # best-effort
         "doc": doc,
         "text": snippet,
         "charStart": cs,
@@ -93,26 +97,26 @@ def _normalize_bullet_text(t: str) -> str:
 
     # Verb-first normalization (reduce repetitive "Review ...")
     if sl.startswith("review and ensure "):
-        s = "Ensure " + s[len("review and ensure "):].lstrip()
+        s = "Ensure " + s[len("review and ensure ") :].lstrip()
     elif sl.startswith("review and verify "):
-        s = "Verify " + s[len("review and verify "):].lstrip()
+        s = "Verify " + s[len("review and verify ") :].lstrip()
     elif sl.startswith("review and assess "):
-        s = "Assess " + s[len("review and assess "):].lstrip()
+        s = "Assess " + s[len("review and assess ") :].lstrip()
     elif sl.startswith("review and understand "):
-        s = "Understand " + s[len("review and understand "):].lstrip()
+        s = "Understand " + s[len("review and understand ") :].lstrip()
     elif sl.startswith("review to ensure "):
-        s = "Ensure " + s[len("review to ensure "):].lstrip()
+        s = "Ensure " + s[len("review to ensure ") :].lstrip()
     elif sl.startswith("review to verify "):
-        s = "Verify " + s[len("review to verify "):].lstrip()
+        s = "Verify " + s[len("review to verify ") :].lstrip()
 
     # Normalize "X that ..." -> "X ..." (shorter)
     sl = s.lower()
     if sl.startswith("verify that "):
-        s = "Verify " + s[len("verify that "):].lstrip()
+        s = "Verify " + s[len("verify that ") :].lstrip()
     elif sl.startswith("ensure that "):
-        s = "Ensure " + s[len("ensure that "):].lstrip()
+        s = "Ensure " + s[len("ensure that ") :].lstrip()
     elif sl.startswith("confirm that "):
-        s = "Confirm " + s[len("confirm that "):].lstrip()
+        s = "Confirm " + s[len("confirm that ") :].lstrip()
 
     # Remove trailing periods (UI consistency)
     if _DROP_TRAILING_PERIODS:
@@ -124,7 +128,7 @@ def _normalize_bullet_text(t: str) -> str:
     if len(s) > _FINDING_MAX_LEN:
         s = s[:_FINDING_MAX_LEN].rstrip() + "..."
 
-    # Deterministic output hardening: strip any non-ASCII (prevents mojibake leaking to UI)
+    # Hardening: strip any non-ASCII (prevents mojibake leaking to UI)
     try:
         s = s.encode("ascii", "ignore").decode("ascii")
     except Exception:
@@ -165,7 +169,6 @@ def _clean_findings_line(s: str) -> Optional[str]:
     # Drop markdown-ish headers / department headers
     if tl.endswith("**") or tl.endswith(":**"):
         return None
-    # e.g. "Security:", "Legal:", "Engineering:", "PM (Program Management):"
     if re.match(r"^[a-z0-9 /()_-]+:\s*$", t, flags=re.IGNORECASE):
         return None
 
@@ -232,9 +235,9 @@ def _normalize_section_outputs(section: Dict[str, Any], *, max_findings: int = _
     section["findings"] = cleaned
 
 
-# -----------------------------
+# =============================================================================
 # Contract: modes + defaults
-# -----------------------------
+# =============================================================================
 RAG_MODE_REVIEW_SUMMARY = "review_summary"
 RAG_MODE_DEFAULT = RAG_MODE_REVIEW_SUMMARY
 
@@ -271,14 +274,12 @@ def _timing_enabled() -> bool:
 
 
 def _fast_enabled() -> bool:
-    # NOTE: you wanted RAG_FAST=1 by default going forward.
     return (_env("RAG_FAST", "0").strip() == "1")
 
 
 def _normalize_text(s: str) -> str:
     if not s:
         return ""
-    # Hardening: normalize newlines + common unicode punctuation
     s = s.replace("\r\n", "\n").replace("\r", "\n")
     s = s.replace("\x00", "")
     s = s.replace("\u2013", "-").replace("\u2014", "-")
@@ -289,7 +290,7 @@ def _normalize_text(s: str) -> str:
 
 _PLACEHOLDER_PATTERNS = [
     r"\[insert[^\]]*\]",
-    r"\(\"\.\.\.\"\)",
+    r'\("\.\.\."\)',
     r"\.\.\.\s*$",
 ]
 
@@ -349,11 +350,9 @@ def _render_sections_in_order(sections: Dict[str, str], order: List[str]) -> str
 def _postprocess_review_summary(text: str) -> str:
     text = _strip_markdown_headers(text)
     text = _strip_placeholders(text)
-
     parsed = _split_sections(text)
     if not parsed:
         parsed = {"OVERVIEW": text.strip() or INSUFFICIENT}
-
     hardened = _render_sections_in_order(parsed, RAG_REVIEW_SUMMARY_SECTIONS)
     return _collapse_blank_lines(hardened)
 
@@ -369,32 +368,22 @@ def _canonical_mode(mode: Optional[str]) -> str:
     return m
 
 
-# -----------------------------
+# =============================================================================
 # Profile-driven caps
-# -----------------------------
+# =============================================================================
 def _effective_top_k(req_top_k: int, context_profile: str) -> int:
-    """
-    Compute top_k based on request + context_profile.
-    IMPORTANT: deep/balanced override fast caps (RAG_FAST) to allow real triage.
-    """
     k = max(1, min(int(req_top_k or 12), 50))
     p = (context_profile or "fast").strip().lower()
-
     if p == "deep":
         return min(k, 40)
     if p == "balanced":
         return min(k, 18)
-
-    # fast profile
     if _fast_enabled():
         return min(k, 6)
     return min(k, 12)
 
 
 def _effective_context_chars(context_profile: str) -> int:
-    """
-    Target context budget for the prompt, BEFORE hard ceiling.
-    """
     p = (context_profile or "fast").strip().lower()
     if p == "deep":
         return 60000
@@ -406,9 +395,6 @@ def _effective_context_chars(context_profile: str) -> int:
 
 
 def _effective_snippet_chars(context_profile: str) -> int:
-    """
-    How much of each chunk to include in the prompt context.
-    """
     p = (context_profile or "fast").strip().lower()
     if p == "deep":
         return 1400
@@ -417,14 +403,10 @@ def _effective_snippet_chars(context_profile: str) -> int:
     return 900
 
 
-# -----------------------------
+# =============================================================================
 # Questions and routing
-# -----------------------------
+# =============================================================================
 def _question_section_map(intent: str) -> List[Tuple[str, str]]:
-    """
-    Authoritative routing for evidence attachment.
-    Each tuple is (SECTION TITLE, QUESTION).
-    """
     intent = (intent or "strict_summary").strip().lower()
 
     if intent == "risk_triage":
@@ -446,7 +428,10 @@ def _question_section_map(intent: str) -> List[Tuple[str, str]]:
                 "ELIGIBILITY & PERSONNEL CONSTRAINTS",
                 "Identify subcontractor / flowdown / staffing constraints and risks (citizenship, clearance, facility, export).",
             ),
-            ("DELIVERABLES & TIMELINES", "Identify delivery/acceptance gates and required approvals (CDRLs, QA, test, acceptance criteria)."),
+            (
+                "DELIVERABLES & TIMELINES",
+                "Identify delivery/acceptance gates and required approvals (CDRLs, QA, test, acceptance criteria).",
+            ),
             ("FINANCIAL RISKS", "Identify financial and invoicing risks (ceilings, overruns, payment terms, reporting cadence)."),
             ("DELIVERABLES & TIMELINES", "Identify schedule risks (IMS, milestones, reporting cadence, penalties)."),
             ("CONTRADICTIONS & INCONSISTENCIES", "Identify ambiguous/undefined terms and contradictions that require clarification."),
@@ -458,12 +443,17 @@ def _question_section_map(intent: str) -> List[Tuple[str, str]]:
             ("RECOMMENDED INTERNAL ACTIONS", "What internal actions should we take next (security/legal/PM/engineering/finance)?"),
         ]
 
-    # strict_summary
     return [
         ("MISSION & OBJECTIVE", "What is the mission and objective of this effort?"),
         ("SCOPE OF WORK", "What is the scope of work and required deliverables?"),
-        ("SECURITY, COMPLIANCE & HOSTING CONSTRAINTS", "What are the security, compliance, and hosting constraints (IL levels, NIST, DFARS, CUI, ATO/RMF, logging)?"),
-        ("ELIGIBILITY & PERSONNEL CONSTRAINTS", "What are the eligibility and personnel constraints (citizenship, clearances, facility, location, export controls)?"),
+        (
+            "SECURITY, COMPLIANCE & HOSTING CONSTRAINTS",
+            "What are the security, compliance, and hosting constraints (IL levels, NIST, DFARS, CUI, ATO/RMF, logging)?",
+        ),
+        (
+            "ELIGIBILITY & PERSONNEL CONSTRAINTS",
+            "What are the eligibility and personnel constraints (citizenship, clearances, facility, location, export controls)?",
+        ),
         ("LEGAL & DATA RIGHTS RISKS", "What are key legal and data rights risks (IP/data rights, audit rights, flowdowns)?"),
         ("FINANCIAL RISKS", "What are key financial risks (pricing model, ceilings, invoicing systems, payment terms)?"),
         ("SUBMISSION INSTRUCTIONS & DEADLINES", "What are submission instructions and deadlines, including required formats and delivery method?"),
@@ -473,9 +463,9 @@ def _question_section_map(intent: str) -> List[Tuple[str, str]]:
     ]
 
 
-# -----------------------------
+# =============================================================================
 # Sections parsing for UI
-# -----------------------------
+# =============================================================================
 def _slug(s: str) -> str:
     s = (s or "").strip().lower()
     out: List[str] = []
@@ -507,7 +497,7 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
         start = header_to_idx[h]
         end = header_to_idx[headers[j + 1]] if j + 1 < len(headers) else len(lines)
 
-        block_lines = [x.rstrip() for x in lines[start + 1: end]]
+        block_lines = [x.rstrip() for x in lines[start + 1 : end]]
         block = "\n".join(block_lines).strip()
 
         sec: Dict[str, Any] = {
@@ -528,7 +518,7 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
             sections.append(sec)
             continue
 
-        mode: Optional[str] = None  # "findings" | "evidence" | "gaps" | "recommended_actions"
+        mode: Optional[str] = None
         for ln in block_lines:
             t = (ln or "").strip()
             if not t:
@@ -563,16 +553,17 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
 
         sections.append(sec)
 
-    # If nothing parsed, keep a single fallback section for UI.
     if not sections:
-        sections = [{
-            "id": "overview",
-            "title": "OVERVIEW",
-            "findings": [text.strip() or INSUFFICIENT],
-            "evidence": [],
-            "gaps": [],
-            "recommended_actions": [],
-        }]
+        sections = [
+            {
+                "id": "overview",
+                "title": "OVERVIEW",
+                "findings": [text.strip() or INSUFFICIENT],
+                "evidence": [],
+                "gaps": [],
+                "recommended_actions": [],
+            }
+        ]
     return sections
 
 
@@ -617,13 +608,9 @@ def _has_obligation_signal(text: str) -> bool:
 
 
 def _evidence_signal_score(text: str) -> int:
-    """
-    Deterministic heuristic score: higher = more likely to be obligations/risk language.
-    """
     t = (text or "").strip()
     if not t:
         return 0
-
     score = 0
     if _SIGNAL_RE.search(t):
         score += 3
@@ -631,15 +618,10 @@ def _evidence_signal_score(text: str) -> int:
         score += 2
     if _is_glossary_text(t):
         score -= 3
-
     return score
 
 
 def _extract_obligation_excerpt(text: str, max_len: int = 1200) -> str:
-    """
-    Make evidence popups more useful:
-    take an excerpt around the first obligation/compliance cue, otherwise truncate.
-    """
     t = _normalize_text(text or "").strip()
     if not t:
         return ""
@@ -658,12 +640,6 @@ def _attach_evidence_to_sections(
     citations: List[Dict[str, Any]],
     retrieved: Dict[str, List[Dict[str, Any]]],
 ) -> List[Dict[str, Any]]:
-    """
-    Attach evidence to parsed sections deterministically, with:
-    - explicit section routing (question -> section)
-    - glossary suppression unless it contains real obligation signals
-    - evidence excerpts that are useful for popups
-    """
     max_per_section = _env_int("RAG_EVIDENCE_MAX_PER_SECTION", 3)
     allow_glossary = _env_bool("RAG_EVIDENCE_ALLOW_GLOSSARY", False)
     min_signal = _env_int("RAG_EVIDENCE_MIN_SIGNAL", 1)
@@ -708,19 +684,12 @@ def _attach_evidence_to_sections(
     def accept_text(text: str, sec_id: str) -> bool:
         if not text:
             return False
-
         sig = _evidence_signal_score(text)
-
-        # Glossary handling:
-        # - reject pure glossary unless it also has obligation/compliance signal
-        # - allow glossary only when explicitly allowed OR has signal
         if _is_glossary_text(text):
             if not allow_glossary and (not _has_obligation_signal(text)):
                 return False
-            # outside overview, require at least min_signal if it smells like glossary
             if sec_id != "overview" and sig < min_signal:
                 return False
-
         return sig >= min_signal
 
     # 1) Attach from retrieved (explicit routing)
@@ -752,7 +721,7 @@ def _attach_evidence_to_sections(
             if kept >= max_per_section:
                 break
 
-    # 2) Fallback from citations if section has no evidence: use first mapped question for that section
+    # 2) Fallback from citations if section has no evidence
     q_for_section: Dict[str, str] = {}
     for sec_title, q in section_question_map:
         if sec_title not in q_for_section:
@@ -793,479 +762,10 @@ def _attach_evidence_to_sections(
     return sections
 
 
-# -----------------------------
-# Plain-English finding synthesis (deterministic)
-# -----------------------------
-_SENT_SPLIT_RE = re.compile(r"(?<=[\.\!\?])\s+|\n+")
-
-
-def _best_signal_sentence(text: str, max_len: int = 260) -> str:
-    """
-    Pick a concise sentence that contains obligation/compliance signals.
-    Deterministic: no LLM, just regex + sentence scan.
-    """
-    t = _normalize_text(text or "").strip()
-    if not t:
-        return ""
-    parts = [p.strip() for p in _SENT_SPLIT_RE.split(t) if p and p.strip()]
-    if not parts:
-        return t[:max_len]
-
-    scored = []
-    for p in parts:
-        sig = _evidence_signal_score(p)
-        length_penalty = 0
-        if len(p) < 40:
-            length_penalty = 1
-        if len(p) > 320:
-            length_penalty = 2
-        scored.append((sig, -length_penalty, -len(p), p))
-    scored.sort(reverse=True)
-
-    best = scored[0][3].replace("\r", " ").replace("\n", " ").strip()
-    return best if len(best) <= max_len else (best[:max_len].rstrip() + "...")
-
-
-def _why_it_matters(section_id: str, sentence: str) -> str:
-    sid = (section_id or "").strip().lower()
-    s = (sentence or "").lower()
-    if sid == "mission-objective":
-        return "This explains what success looks like. If it is vague, the proposal and delivery plan can miss the mark."
-    if sid == "scope-of-work":
-        return "This drives cost and staffing. If tasks are bigger than expected, you will take schedule and margin risk."
-    if sid == "deliverables-timelines":
-        return "This affects your delivery plan. Missing a required deliverable or due date can make you non-compliant."
-    if sid == "security-compliance-hosting-constraints":
-        return "These requirements can force architecture changes and add compliance work (ATO/RMF, logging, encryption)."
-    if sid == "eligibility-personnel-constraints":
-        return "These constraints can block staffing (clearance/citizenship) or limit subcontractor options."
-    if sid == "legal-data-rights-risks":
-        return "These terms can create long-term legal exposure (data rights, audits, penalties, flowdowns)."
-    if sid == "financial-risks":
-        return "These terms affect cash flow and profitability (ceilings, reporting, invoicing cadence, overrun notice)."
-    if sid == "submission-instructions-deadlines":
-        return "This affects proposal compliance. Wrong format or missed instructions can get you rejected."
-    if sid == "contradictions-inconsistencies":
-        return "Conflicting requirements cause rework and risk. These should be clarified before committing."
-    if sid == "gaps-questions-for-the-government":
-        return "These are open questions. Unanswered items are proposal risk and should be clarified early."
-    if sid == "recommended-internal-actions":
-        return "These are concrete next steps to reduce risk and produce an accurate, compliant response."
-
-    if sid == "overview":
-        if any(x in s for x in ["shall", "must", "required", "prohibited"]):
-            return "This looks like a binding requirement. Confirm it early and assign an owner."
-        return "This is a key point to validate and assign to the right team."
-
-    return "This is relevant to delivery/compliance. Confirm and assign an owner."
-
-
-def _plain_finding_from_evidence(section_id: str, ev_text: str) -> List[str]:
-    """
-    Return 2 bullets: Requirement/Key point + Why it matters.
-    Deterministic and derived from evidence only.
-    """
-    sent = _best_signal_sentence(ev_text or "")
-    if not sent:
-        return []
-    label = "Requirement" if _has_obligation_signal(sent) else "Key point"
-    return [
-        f"{label}: {sent}",
-        f"Why it matters: {_why_it_matters(section_id, sent)}",
-    ]
-
-
-def _owner_for_section(section_id: str) -> str:
-    sid = (section_id or "").strip().lower()
-    m = {
-        "overview": "Program/PM",
-        "mission-objective": "Program/PM",
-        "scope-of-work": "Program/PM",
-        "deliverables-timelines": "Program/PM",
-        "security-compliance-hosting-constraints": "Security/ISSO",
-        "eligibility-personnel-constraints": "Program/PM",
-        "legal-data-rights-risks": "Legal/Contracts",
-        "financial-risks": "Finance",
-        "submission-instructions-deadlines": "Program/PM",
-        "contradictions-inconsistencies": "Legal/Contracts",
-        "gaps-questions-for-the-government": "Program/PM",
-        "recommended-internal-actions": "Program/PM",
-    }
-    return m.get(sid, "Program/PM")
-
-
-def _risk_blurb_for_section(section_id: str, ev_text: str) -> str:
-    sid = (section_id or "").strip().lower()
-    t = (ev_text or "").strip()
-
-    def short(s: str, n: int = 160) -> str:
-        s = (s or "").replace("\r", " ").replace("\n", " ").strip()
-        return s if len(s) <= n else (s[:n] + "...")
-
-    if sid == "security-compliance-hosting-constraints":
-        return "Security/compliance constraint found. Confirm IL level, RMF/ATO split, logging/CONMON, and any prohibited actions. Evidence: " + short(t)
-    if sid == "legal-data-rights-risks":
-        return "Legal/data-rights obligation found. Confirm IP/data rights, audit rights, disclosure penalties, and flowdowns. Evidence: " + short(t)
-    if sid == "financial-risks":
-        return "Financial obligation found. Confirm reporting, overruns notification, ceilings, and invoicing cadence. Evidence: " + short(t)
-    if sid == "deliverables-timelines":
-        return "Deliverable/acceptance requirement found. Confirm CDRLs, due dates, acceptance criteria, and Government approval gates. Evidence: " + short(t)
-    if sid == "eligibility-personnel-constraints":
-        return "Staffing/eligibility constraint found. Confirm citizenship/clearance requirements, subcontractor restrictions, and access constraints. Evidence: " + short(t)
-    if sid == "submission-instructions-deadlines":
-        return "Submission requirement found. Confirm format, due dates, delivery mechanism, and required attachments. Evidence: " + short(t)
-    if sid == "contradictions-inconsistencies":
-        return "Potential ambiguity/inconsistency. Clarify conflicting requirements or undefined terms. Evidence: " + short(t)
-    if sid == "scope-of-work":
-        return "Scope/task requirement found. Confirm who does what, required tasks, and dependencies. Evidence: " + short(t)
-    if sid == "mission-objective":
-        return "Mission/objective may be unclear in retrieved text. Confirm purpose and success criteria in the solicitation. Evidence: " + short(t)
-
-    return "Requirement language found. Confirm scope, acceptance gates, and Gov vs Contractor responsibilities. Evidence: " + short(t)
-
-
-def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str) -> List[Dict[str, Any]]:
-    intent = (intent or "strict_summary").strip().lower()
-    is_triage = intent == "risk_triage"
-
-    for sec in sections:
-        sid = (sec.get("id") or "").strip().lower()
-
-        findings = list(sec.get("findings") or [])
-        gaps = list(sec.get("gaps") or [])
-        actions = list(sec.get("recommended_actions") or [])
-        evidence = list(sec.get("evidence") or [])
-
-        # If we have evidence, remove the generic insufficient gap.
-        if evidence:
-            gaps = [g for g in gaps if "Insufficient evidence retrieved" not in str(g)]
-
-        # If no findings but evidence exists, synthesize a few deterministic bullets.
-        if evidence and not findings:
-            kept = 0
-            for ev in evidence[:3]:
-                findings.extend(_plain_finding_from_evidence(sid, (ev.get("text") or "")))
-                kept += 1
-                if kept >= 3:
-                    break
-
-        # Risk marker (triage): add a single POTENTIAL RISK line if strong obligation signal.
-        if is_triage and evidence:
-            ev0 = (evidence[0].get("text") or "").lower()
-            if any(x in ev0 for x in ["shall", "must", "required", "prohibited"]) and sid not in ("overview",):
-                findings.append(
-                    f"POTENTIAL RISK (Owner: {_owner_for_section(sid)}): "
-                    + _risk_blurb_for_section(sid, evidence[0].get("text") or "")
-                )
-
-        # If nothing, add default gap + action
-        if (not findings) and (not evidence):
-            if not gaps:
-                gaps.append("Insufficient evidence retrieved for this section. Confirm relevant contract sections and rerun analysis.")
-            if not actions:
-                actions.append("Request the relevant section(s) and rerun RAG analysis.")
-
-        # Section-specific action nudges (only if evidence exists and nothing else was provided)
-        if sid == "security-compliance-hosting-constraints" and evidence and not actions:
-            actions.append("Confirm IL level, ATO boundary responsibilities (Gov vs Contractor), and required RMF artifacts/acceptance gates.")
-        if sid == "deliverables-timelines" and evidence and not actions:
-            actions.append("Extract deliverables/approval gates into a tracker (CDRLs, cadence, acceptance criteria) and confirm IMS requirements.")
-        if sid == "eligibility-personnel-constraints" and evidence and not actions:
-            actions.append("Confirm staffing/citizenship/clearance/flowdown constraints and ensure subcontractor vetting language is feasible.")
-
-        sec["findings"] = findings
-        sec["gaps"] = gaps
-        sec["recommended_actions"] = actions
-        sec["evidence"] = evidence
-
-    return sections
-
-
-def _clamp01(x: float) -> float:
-    try:
-        if x < 0.0:
-            return 0.0
-        if x > 1.0:
-            return 1.0
-        return float(x)
-    except Exception:
-        return 0.0
-
-
-def _confidence_for_section(section: Dict[str, Any]) -> Tuple[str, int]:
-    """
-    Returns (confidence_label, confidence_pct).
-
-    Inputs:
-      - evidence count
-      - evidence signal strength (via _evidence_signal_score)
-
-    Output:
-      confidence: missing | weak | moderate | strong
-      confidence_pct: 0-100
-    """
-    ev_list = section.get("evidence") or []
-    if not isinstance(ev_list, list) or len(ev_list) == 0:
-        return ("missing", 0)
-
-    ev_count = len(ev_list)
-    count_factor = _clamp01(ev_count / 6.0)
-
-    sigs: List[float] = []
-    for ev in ev_list:
-        txt = str((ev or {}).get("text") or "")
-        sig = _evidence_signal_score(txt)
-        sigs.append(max(0.0, float(sig)))
-
-    avg_sig = (sum(sigs) / max(1.0, float(len(sigs)))) if sigs else 0.0
-    signal_factor = _clamp01(avg_sig / 5.0)
-
-    pct = int(round(100.0 * _clamp01(0.60 * count_factor + 0.40 * signal_factor)))
-
-    if pct >= 80:
-        label = "strong"
-    elif pct >= 55:
-        label = "moderate"
-    else:
-        label = "weak"
-
-    return (label, pct)
-
-
-def _apply_confidence(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    for sec in sections or []:
-        if not isinstance(sec, dict):
-            continue
-        label, pct = _confidence_for_section(sec)
-        sec["confidence"] = label
-        sec["confidence_pct"] = pct
-    return sections
-
-
-def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    ov = None
-    for s in sections:
-        if (s.get("id") or "").strip().lower() == "overview":
-            ov = s
-            break
-    if ov is None:
-        return sections
-
-    pool: List[Dict[str, Any]] = []
-    for s in sections:
-        for ev in (s.get("evidence") or []):
-            if isinstance(ev, dict):
-                pool.append(ev)
-
-    def score_ev(ev: Dict[str, Any]) -> Any:
-        t = (ev.get("text") or "")
-        sig = _evidence_signal_score(t)
-        vs = ev.get("score")
-        try:
-            vsf = float(vs) if vs is not None else 0.0
-        except Exception:
-            vsf = 0.0
-        return (-sig, -vsf)
-
-    pool = sorted(pool, key=score_ev)
-
-    ov.setdefault("findings", [])
-    existing = list(ov.get("findings") or [])
-    ov["findings"] = existing
-
-    # Inject up to 3 evidence bullets at the top, but only if we haven't already done so
-    if not any(str(x).strip().lower().startswith("evidence:") for x in ov["findings"]):
-        injected: List[str] = []
-        for ev in pool[:3]:
-            doc = ev.get("doc") or ev.get("docId") or "UnknownDoc"
-            cs = ev.get("charStart")
-            ce = ev.get("charEnd")
-            snippet = (ev.get("text") or "").replace("\r", " ").replace("\n", " ").strip()[:220]
-            injected.append(f"EVIDENCE: {snippet} (Doc: {doc} span: {cs}-{ce})")
-        ov["findings"] = injected + ov["findings"]
-
-    if not ov.get("recommended_actions"):
-        ov["recommended_actions"] = [
-            "Review the obligations/constraints above and assign owners (Security/ISSO, PM, Engineering, Legal, Finance) for validation and response planning."
-        ]
-
-    return sections
-
-
-# -----------------------------
-# Risk materialization
-# -----------------------------
-def _materialize_risks_from_sections(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Deterministically materialize Risk Register items from section findings.
-
-    Inputs:
-      - sections[*].findings[] lines that start with:
-          POTENTIAL RISK ...
-          POTENTIAL INFERRED RISK ...
-          POTENTIAL RISK (Owner: X): ...
-    Output:
-      - stable id (hash), clean title, clean owner
-    """
-    owner_re = re.compile(r"\(Owner:\s*([^)]+)\)\s*:\s*(.*)$", re.I)
-    out: List[Dict[str, Any]] = []
-
-    for sec in (sections or []):
-        sid = str(sec.get("id") or "").strip() or "unknown"
-        sec_owner = str(sec.get("owner") or "").strip() or None
-
-        for line in (sec.get("findings") or []):
-            raw = str(line or "").strip()
-            if not raw:
-                continue
-
-            low = raw.lower()
-            if not (low.startswith("potential risk") or low.startswith("potential inferred risk")):
-                continue
-
-            owner = sec_owner
-            title = raw
-
-            m = owner_re.search(raw)
-            if m:
-                owner = (m.group(1) or "").strip() or owner
-                title = (m.group(2) or "").strip() or title
-            else:
-                if ":" in raw:
-                    title = raw.split(":", 1)[1].strip()
-
-            if " evidence:" in title.lower():
-                # keep title readable
-                parts = re.split(r"\bevidence:\b", title, flags=re.I)
-                title = (parts[0] if parts else title).strip()
-
-            if not title:
-                continue
-
-            h = hashlib.sha1(f"{sid}|{title}".encode("utf-8")).hexdigest()[:12]
-            rid = f"{sid}:{h}"
-
-            out.append(
-                {
-                    "id": rid,
-                    "title": title,
-                    "severity": "Medium",
-                    "owner": owner,
-                    "confidence": "Inferred" if low.startswith("potential inferred risk") else "Moderate",
-                    "source_type": "DETERMINISTIC",
-                    "source_confidence_tier": 2,
-                    "section_id": sid,
-                    "evidence_ids": [],
-                    "flag_ids": [],
-                    "rationale": raw,
-                    "source": ["sections"],
-                }
-            )
-
-    # de-dupe by id
-    seen = set()
-    deduped: List[Dict[str, Any]] = []
-    for r in out:
-        if r["id"] in seen:
-            continue
-        seen.add(r["id"])
-        deduped.append(r)
-    return deduped
-
-
-def _materialize_risks_from_flags(review: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Tier 3 deterministic risks derived from review.autoFlags.hits.
-
-    IMPORTANT:
-    - Tests/callers may provide minimal hit objects (no docId/docName/snippet).
-    - We must still materialize stable items from label/id/severity.
-    """
-    auto = (review or {}).get("autoFlags") or {}
-    hits = auto.get("hits") or []
-    out: List[Dict[str, Any]] = []
-
-    for i, h in enumerate(hits):
-        if not isinstance(h, dict):
-            continue
-
-        label = (h.get("label") or h.get("id") or h.get("flagId") or "").strip()
-        if not label:
-            continue
-
-        severity = (h.get("severity") or "High").strip()
-        hit_key = (h.get("hit_key") or h.get("hitKey") or "").strip() or f"autoflag:{label}:{i}"
-
-        doc_id = (h.get("docId") or h.get("doc_id") or "").strip()
-        doc_name = (h.get("docName") or h.get("doc_name") or "").strip()
-        snippet = (h.get("snippet") or h.get("match") or "").strip()
-
-        risk_id = f"flag::{hit_key}"
-
-        out.append(
-            {
-                "id": risk_id,
-                "title": label,
-                "severity": severity,
-                "owner": "Security/ISSO",
-                "confidence": "High",
-                "source_type": "FLAG",
-                "source_confidence_tier": 3,
-                "section_id": None,
-                "evidence_ids": [],
-                "flag_ids": [label],
-                "rationale": "Deterministic flag hit",
-                "source": ["autoFlags"],
-                "evidence": {
-                    "hit_key": hit_key,
-                    "doc_id": doc_id,
-                    "doc_name": doc_name,
-                    "snippet": snippet[:240],
-                },
-            }
-        )
-
-    return out
-
-
-def _materialize_inference_risks(inference_candidates: Optional[List[str]]) -> List[Dict[str, Any]]:
-    """
-    Tier 1 (lowest confidence) inference placeholders: these are *not* contract-evidence-backed.
-    They should be treated as analyst prompts, not findings.
-    """
-    out: List[Dict[str, Any]] = []
-    for i, s in enumerate(inference_candidates or []):
-        title = str(s or "").strip()
-        if not title:
-            continue
-        h = hashlib.sha1(f"infer|{title}".encode("utf-8")).hexdigest()[:12]
-        out.append(
-            {
-                "id": f"infer::{h}",
-                "title": title,
-                "severity": "Low",
-                "owner": "Unassigned",
-                "confidence": "Inferred",
-                "source_type": "LLM_INFERENCE",
-                "source_confidence_tier": 1,
-                "section_id": None,
-                "evidence_ids": [],
-                "flag_ids": [],
-                "rationale": "Inference candidate (requires validation).",
-                "source": ["inference_candidates"],
-            }
-        )
-    return out
-
-
-# -----------------------------
+# =============================================================================
 # OpenSearch ingest helpers (AWS-only, review-scoped)
-# -----------------------------
+# =============================================================================
 def _chunk_text_windowed(text: str, *, chunk_size: int = 1400, overlap: int = 200) -> List[Dict[str, Any]]:
-    """
-    Minimal deterministic chunker.
-    Outputs: chunk_id, chunk_text, meta{char_start,char_end,chunk_index}
-    """
     t = (text or "").strip()
     if not t:
         return []
@@ -1294,18 +794,79 @@ def _chunk_text_windowed(text: str, *, chunk_size: int = 1400, overlap: int = 20
     return out
 
 
+def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
+    if PdfReader is None:
+        return ""
+    try:
+        reader = PdfReader(BytesIO(pdf_bytes))
+        texts: List[str] = []
+        for page in reader.pages:
+            try:
+                page_text = page.extract_text() or ""
+            except Exception:
+                page_text = ""
+            if page_text.strip():
+                texts.append(page_text)
+        return "\n".join(texts).strip()
+    except Exception:
+        return ""
+
+
 def _read_extracted_text_for_doc(storage: StorageProvider, *, doc_id: str) -> str:
     """
-    Reads extract/<doc_id>/raw_text.txt from configured storage.
-    With STORAGE_MODE=s3, StorageProvider handles S3_BUCKET/S3_PREFIX.
+    Preferred: extract/<doc_id>/raw_text.txt
+    Fallback (self-heal): review_pdfs/<doc_id>.pdf -> extract text -> write extract/<doc_id>/ artifacts
     """
-    key = f"extract/{doc_id}/raw_text.txt"
-    b = storage.get_object(key=key)
-    if b is None:
+    doc_id = (doc_id or "").strip()
+    if not doc_id:
         return ""
-    if isinstance(b, (bytes, bytearray)):
-        return b.decode("utf-8", errors="ignore").strip()
-    return str(b).strip()
+
+    extract_key = f"extract/{doc_id}/raw_text.txt"
+
+    # 1) Preferred: already extracted
+    try:
+        b = storage.get_object(key=extract_key)
+        if isinstance(b, (bytes, bytearray)):
+            t = b.decode("utf-8", errors="ignore").strip()
+            if t:
+                return t
+    except Exception:
+        pass
+
+    # 2) Fallback: derive from PDF
+    pdf_key = f"review_pdfs/{doc_id}.pdf"
+    try:
+        pdf_bytes = storage.get_object(key=pdf_key)
+    except Exception:
+        pdf_bytes = None
+
+    if not isinstance(pdf_bytes, (bytes, bytearray)) or not pdf_bytes:
+        return ""
+
+    text = _extract_text_from_pdf_bytes(bytes(pdf_bytes))
+    if not text:
+        return ""
+
+    # 3) Persist artifacts (best-effort)
+    try:
+        raw_text_bytes = text.encode("utf-8", errors="ignore")
+        extract_json_key = f"extract/{doc_id}/extract.json"
+
+        payload = {
+            "doc_id": doc_id,
+            "pdf_key": pdf_key,
+            "pdf_sha256": hashlib.sha256(bytes(pdf_bytes)).hexdigest(),
+            "extract_text_sha256": hashlib.sha256(raw_text_bytes).hexdigest(),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        extract_json_bytes = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8", errors="ignore")
+
+        storage.put_object(key=extract_key, data=raw_text_bytes, content_type="text/plain; charset=utf-8", metadata=None)
+        storage.put_object(key=extract_json_key, data=extract_json_bytes, content_type="application/json", metadata=None)
+    except Exception:
+        pass
+
+    return text
 
 
 def _ingest_review_into_vectorstore(
@@ -1313,24 +874,15 @@ def _ingest_review_into_vectorstore(
     storage: StorageProvider,
     llm: Any,
     vector: VectorStore,
-    review: Dict[str, Any],
+    docs: List[Dict[str, Any]],
     review_id: str,
     profile: str,
 ) -> Dict[str, Any]:
-    """
-    Ingest review docs into OpenSearch:
-      - delete_by_document(doc_id)
-      - upsert_chunks(document_id=doc_id, chunks=[...])
-    Each chunk stores:
-      - top-level review_id (keyword field)
-      - meta.review_id (defensive)
-    """
-    docs = review.get("docs") or []
     if not isinstance(docs, list) or not docs:
         return {"ingested_docs": 0, "ingested_chunks": 0, "skipped_docs": 0, "reason": "no_docs"}
 
-    # Keep chunk size aligned with your snippet cap expectations
-    chunk_size = 1400 if (profile or "").lower() == "deep" else (1000 if (profile or "").lower() == "balanced" else 900)
+    p = (profile or "").lower()
+    chunk_size = 1400 if p == "deep" else (1000 if p == "balanced" else 900)
     overlap = 200
 
     ingested_docs = 0
@@ -1359,8 +911,11 @@ def _ingest_review_into_vectorstore(
             skipped_docs += 1
             continue
 
+        # embeddings
         texts = [c["chunk_text"] for c in chunks]
-        embeddings = llm.embed_texts(texts)  # Bedrock embeddings supported via providers/impl/llm_bedrock.py
+        if not hasattr(llm, "embed_texts"):
+            raise RuntimeError("LLM provider does not implement embed_texts() required for vector ingest")
+        embeddings = llm.embed_texts(texts)
 
         if not isinstance(embeddings, list) or len(embeddings) != len(chunks):
             raise RuntimeError(f"embed_texts returned {len(embeddings) if isinstance(embeddings, list) else 'non-list'} embeddings; expected {len(chunks)}")
@@ -1384,7 +939,7 @@ def _ingest_review_into_vectorstore(
                 }
             )
 
-        # Replace semantics per document id
+        # Replace semantics per doc_id
         vector.delete_by_document(str(doc_id))
         vector.upsert_chunks(document_id=str(doc_id), chunks=upsert_payload)
 
@@ -1394,9 +949,89 @@ def _ingest_review_into_vectorstore(
     return {"ingested_docs": ingested_docs, "ingested_chunks": ingested_chunks, "skipped_docs": skipped_docs}
 
 
-# -----------------------------
+# =============================================================================
+# LLM call helpers (robust / duck-typed)
+# =============================================================================
+def _llm_text(llm: Any, prompt: str) -> str:
+    """
+    Minimal, robust bridge across providers:
+      - BedrockLLMProvider.generate(prompt=...)
+      - BedrockLLMProvider.complete(prompt=...)
+      - Ollama style: generate(prompt=...)
+      - fallback: call llm(prompt) if callable
+
+    Returns empty string if no supported method exists.
+    """
+    if not prompt:
+        return ""
+
+    # Common patterns we’ve used across CSS
+    for fn_name in ("generate", "complete", "generate_text", "chat"):
+        fn = getattr(llm, fn_name, None)
+        if callable(fn):
+            try:
+                out = fn(prompt)  # type: ignore[arg-type]
+                if isinstance(out, dict):
+                    # common: {"text": "..."}
+                    txt = out.get("text")
+                    return (txt or "").strip()
+                if isinstance(out, str):
+                    return out.strip()
+            except TypeError:
+                # Some providers require named arg
+                try:
+                    out = fn(prompt=prompt)  # type: ignore[call-arg]
+                    if isinstance(out, dict):
+                        return str(out.get("text") or "").strip()
+                    if isinstance(out, str):
+                        return out.strip()
+                except Exception:
+                    continue
+            except Exception:
+                continue
+
+    # Callable fallback
+    try:
+        if callable(llm):
+            out = llm(prompt)
+            if isinstance(out, dict):
+                return str(out.get("text") or "").strip()
+            if isinstance(out, str):
+                return out.strip()
+    except Exception:
+        pass
+
+    return ""
+
+
+def _build_review_summary_prompt(*, intent: str, context_profile: str, context: str, section_headers: List[str]) -> str:
+    """
+    Keep it deterministic and compatible with your parser:
+    - output MUST include the headers verbatim
+    - do not add extra headers
+    """
+    headers = "\n".join(section_headers)
+
+    return (
+        "You are Contract Security Studio.\n"
+        "Produce a structured solicitation review summary.\n\n"
+        "RULES:\n"
+        f"- Output MUST include these section headers EXACTLY, each on its own line:\n{headers}\n"
+        "- Under each header, write short bullets.\n"
+        "- Do NOT invent facts. Use only the provided CONTEXT.\n"
+        "- If insufficient, write: Insufficient evidence retrieved for this section.\n"
+        "- Do NOT include an 'EVIDENCE:' subsection; evidence is attached separately.\n\n"
+        f"MODE:\n- intent={intent}\n- context_profile={context_profile}\n\n"
+        "CONTEXT:\n"
+        "----------------\n"
+        f"{context}\n"
+        "----------------\n"
+    )
+
+
+# =============================================================================
 # Main entry
-# -----------------------------
+# =============================================================================
 def rag_analyze_review(
     *,
     storage: StorageProvider,
@@ -1414,19 +1049,16 @@ def rag_analyze_review(
     inference_candidates: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Contract-stable RAG entrypoint for CSS tests.
+    Robust RAG entrypoint.
 
-    Guarantees:
-      - Always returns a dict with keys: review_id, sections, risks
-      - When debug=True, result['stats']['debug_context'] includes:
-          * "===BEGIN DETERMINISTIC SIGNALS==="
-          * "NOT CONTRACT EVIDENCE"
-          * AutoFlags (e.g., "DFARS 7012") when present
-      - Deterministic risks ALWAYS materialize from review.autoFlags.hits for intent=risk_triage
-      - Avoids dependency on optional helpers whose names drift (prompt builders, response builders, etc.)
-      - AWS-only vector store path: OpenSearch ingest happens on force_reingest
+    Key behaviors:
+    - For force_reingest: ingests per-doc chunks into OpenSearch using:
+        extract/<doc_id>/raw_text.txt
+      with fallback self-heal from review_pdfs/<doc_id>.pdf.
+    - Retrieves with filters={"review_id": <review_id>}.
+    - Calls LLM for a structured sectioned summary (headers must match).
+    - Parses sections and attaches deterministic evidence.
     """
-
     def _s(v: Any, max_len: int = 220) -> str:
         try:
             if v is None:
@@ -1441,7 +1073,7 @@ def rag_analyze_review(
     t0 = time.time() if _timing_enabled() else 0.0
     m = _canonical_mode(mode)
 
-    # DEV guardrail: avoid expensive re-ingest loops during fast mode unless explicitly allowed.
+    # Guardrail: avoid expensive re-ingest loops during fast mode unless explicitly allowed.
     if _fast_enabled() and force_reingest and (_env("RAG_ALLOW_FORCE_REINGEST", "0").strip() != "1"):
         print("[RAG] WARN: force_reingest requested but skipped because RAG_FAST=1 and RAG_ALLOW_FORCE_REINGEST!=1")
         force_reingest = False
@@ -1452,58 +1084,66 @@ def rag_analyze_review(
     if _timing_enabled():
         print("[RAG] analyze start", review_id, f"mode={m} intent={intent} profile={profile}")
 
-    # --------------------------------------------
-    # Robust review lookup (FakeStorage uses _reviews)
-    # --------------------------------------------
+    # -----------------------------------------------------------------
+    # Review lookup:
+    # - Prefer DynamoMeta for real cluster
+    # - Fallback to legacy storage file readers for local/unit tests
+    # -----------------------------------------------------------------
     review: Dict[str, Any] = {}
+    docs: List[Dict[str, Any]] = []
 
-    # 1) Try canonical helper
+    # A) DynamoMeta
     try:
-        candidate = _read_reviews_file(storage, review_id)
+        meta = DynamoMeta()
+        detail = meta.get_review_detail(review_id) or {}
+        if isinstance(detail, dict) and detail:
+            review = detail
+            docs = detail.get("docs") or []
     except Exception:
-        candidate = None
+        pass
 
-    try:
-        if isinstance(candidate, dict) and candidate.get("id") == review_id:
-            review = candidate
-        elif isinstance(candidate, list):
-            for r in candidate:
-                if isinstance(r, dict) and r.get("id") == review_id:
-                    review = r
-                    break
-    except Exception:
-        review = {}
-
-    # 2) Pull from FakeStorage._reviews
+    # B) Legacy helper
     if not review:
         try:
-            v = getattr(storage, "_reviews", None)
-            if isinstance(v, list):
-                for r in v:
+            candidate = _read_reviews_file(storage, review_id)
+        except Exception:
+            candidate = None
+        try:
+            if isinstance(candidate, dict) and candidate.get("id") == review_id:
+                review = candidate
+            elif isinstance(candidate, list):
+                for r in candidate:
                     if isinstance(r, dict) and r.get("id") == review_id:
                         review = r
                         break
         except Exception:
-            pass
+            review = {}
 
-    # 3) Try storage.reviews as fallback
+    # C) Test harness fallbacks (FakeStorage)
     if not review:
-        try:
-            v = getattr(storage, "reviews", None)
-            if isinstance(v, list):
-                for r in v:
-                    if isinstance(r, dict) and r.get("id") == review_id:
-                        review = r
-                        break
-        except Exception:
-            pass
+        for attr in ("_reviews", "reviews"):
+            try:
+                v = getattr(storage, attr, None)
+                if isinstance(v, list):
+                    for r in v:
+                        if isinstance(r, dict) and r.get("id") == review_id:
+                            review = r
+                            break
+            except Exception:
+                pass
 
     if not isinstance(review, dict):
         review = {}
 
-    # --------------------------------------------
-    # NEW: OpenSearch ingest (review-scoped) on force_reingest
-    # --------------------------------------------
+    if not docs:
+        try:
+            docs = review.get("docs") or []
+        except Exception:
+            docs = []
+
+    # -----------------------------------------------------------------
+    # force_reingest ingest into OpenSearch
+    # -----------------------------------------------------------------
     ingest_stats: Optional[Dict[str, Any]] = None
     if force_reingest:
         try:
@@ -1511,7 +1151,7 @@ def rag_analyze_review(
                 storage=storage,
                 llm=llm,
                 vector=vector,
-                review=review,
+                docs=docs,
                 review_id=review_id,
                 profile=profile,
             )
@@ -1520,9 +1160,9 @@ def rag_analyze_review(
             print("[RAG] ERROR: force_reingest ingest failed:", repr(e))
             ingest_stats = {"error": repr(e)}
 
-    # --------------------------------------------
-    # Retrieval + context (best effort)
-    # --------------------------------------------
+    # -----------------------------------------------------------------
+    # Retrieval + context
+    # -----------------------------------------------------------------
     section_question_map = _question_section_map(intent)
     questions = [q for (_sec, q) in (section_question_map or [])]
     effective_top_k = _effective_top_k(top_k, profile)
@@ -1546,7 +1186,9 @@ def rag_analyze_review(
             effective_context_chars_fn=_effective_context_chars,
             heuristic_hits=heuristic_hits,
         )
-    except Exception:
+    except Exception as e:
+        if debug:
+            print("[RAG] retrieve_context failed:", repr(e))
         retrieved, context, max_chars = {}, "", 0
 
     retrieved_counts: Dict[str, int] = {}
@@ -1559,149 +1201,85 @@ def rag_analyze_review(
     if _timing_enabled():
         print("[RAG] retrieval done", round(time.time() - t_ret0, 3), "s")
 
-    # --------------------------------------------
-    # Normalize heuristics -> signals (for display + deterministic block)
-    # --------------------------------------------
-    signals: List[Dict[str, Any]] = []
-    try:
-        for h in (heuristic_hits or []):
-            if not isinstance(h, dict):
-                continue
-            sid = _s(h.get("id") or h.get("hit_id") or h.get("key") or "")
-            lbl = _s(h.get("label") or h.get("name") or h.get("title") or h.get("rule") or sid, 200)
-            sev = _s(h.get("severity") or h.get("level") or h.get("risk") or "", 40)
-            why = _s(h.get("why") or h.get("rationale") or h.get("reason") or "", 220)
-            if not (sid or lbl):
-                continue
-            signals.append({"id": sid or lbl, "label": lbl, "severity": sev, "source": "heuristic", "why": why})
-    except Exception:
-        signals = []
+    # -----------------------------------------------------------------
+    # LLM summary (sectioned)
+    # -----------------------------------------------------------------
+    prompt = _build_review_summary_prompt(
+        intent=intent,
+        context_profile=profile,
+        context=context,
+        section_headers=RAG_REVIEW_SUMMARY_SECTIONS,
+    )
+    llm_text = _llm_text(llm, prompt)
+    summary = _postprocess_review_summary(llm_text or "")
 
-    # --------------------------------------------
-    # Deterministic signals block (required by tests)
-    # --------------------------------------------
-    if intent == "risk_triage":
-        det_lines: List[str] = []
-        det_lines.append("===BEGIN DETERMINISTIC SIGNALS===")
-        det_lines.append("NOT CONTRACT EVIDENCE")
-        det_lines.append("These are deterministic flags/heuristics only; not retrieved contract text.")
+    # -----------------------------------------------------------------
+    # Parse sections + attach evidence deterministically
+    # -----------------------------------------------------------------
+    sections = _parse_review_summary_sections(summary)
+    sections = _attach_evidence_to_sections(
+        sections,
+        section_question_map=section_question_map,
+        citations=[],
+        retrieved=retrieved,
+    )
 
-        # AutoFlags
-        try:
-            af = (review or {}).get("autoFlags") or {}
-            hits = af.get("hits") or []
-            if isinstance(hits, list) and hits:
-                det_lines.append("AUTOFLAGS:")
-                for h in hits:
-                    if not isinstance(h, dict):
-                        continue
-                    lbl = _s(h.get("label") or h.get("name") or h.get("id") or "", 200)
-                    sev = _s(h.get("severity") or "", 40)
-                    hk = _s(h.get("hit_key") or h.get("key") or "", 140)
-                    if lbl:
-                        det_lines.append("- " + lbl + " | src=autoFlag | severity=" + sev + " | key=" + hk)
-            else:
-                det_lines.append("AUTOFLAGS: (none)")
-        except Exception:
-            det_lines.append("AUTOFLAGS: (error)")
+    # Normalize section outputs (findings/evidence clamp)
+    for s in sections:
+        _normalize_section_outputs(s)
 
-        # Heuristics
-        try:
-            if signals:
-                det_lines.append("HEURISTICS:")
-                for s in signals:
-                    if not isinstance(s, dict):
-                        continue
-                    lbl = _s(s.get("label") or s.get("id") or "", 200)
-                    sev = _s(s.get("severity") or "", 40)
-                    why = _s(s.get("why") or "", 220)
-                    if lbl:
-                        det_lines.append("- " + lbl + " | src=heuristic | severity=" + sev + " | why=" + why)
-            else:
-                det_lines.append("HEURISTICS: (none)")
-        except Exception:
-            det_lines.append("HEURISTICS: (error)")
-
-        det_lines.append("===END DETERMINISTIC SIGNALS===")
-        det_block = "\n".join(det_lines)
-
-        # prepend to context so stats.debug_context shows it
-        context = det_block + "\n\n" + (context or "")
-
-        # Re-cap to max_chars (retrieve_context capped before we added det_block)
-        try:
-            if isinstance(max_chars, int) and max_chars > 0 and len(context) > max_chars:
-                context = context[:max_chars]
-        except Exception:
-            pass
-
-    # --------------------------------------------
-    # Deterministic risks (required by tests)
-    # --------------------------------------------
+    # -----------------------------------------------------------------
+    # Deterministic risks (minimal, keep your existing shape)
+    # -----------------------------------------------------------------
     risks: List[Dict[str, Any]] = []
-
     if intent == "risk_triage":
-        # Primary: autoFlags.hits -> risks
+        # Prefer autoFlags.hits if present in review payload
         try:
             af = (review or {}).get("autoFlags") or {}
             hits = af.get("hits") or []
             if isinstance(hits, list) and hits:
-                for h in hits:
+                for i, h in enumerate(hits):
                     if not isinstance(h, dict):
                         continue
                     lbl = _s(h.get("label") or h.get("name") or h.get("id") or "", 200)
                     if not lbl:
                         continue
-                    rid = _s(h.get("id") or h.get("hit_key") or h.get("key") or lbl, 200)
+                    rid = _s(h.get("hit_key") or h.get("key") or h.get("id") or f"autoflag:{lbl}:{i}", 240)
                     sev = _s(h.get("severity") or "", 40) or "High"
-                    hk = _s(h.get("hit_key") or h.get("key") or "", 140)
-                    risks.append({"id": rid, "label": lbl, "severity": sev, "source": "autoFlag", "provenance": hk})
+                    risks.append({"id": rid, "label": lbl, "severity": sev, "source": "autoFlag"})
         except Exception:
             pass
 
-        # Fallback: if hits missing but summary.counts exists, synthesize 1 deterministic risk
-        if not risks:
-            try:
-                af = (review or {}).get("autoFlags") or {}
-                summary = af.get("summary") or {}
-                counts = (summary.get("counts") if isinstance(summary, dict) else {}) or {}
-                if isinstance(counts, dict) and counts:
-                    k = sorted([str(x) for x in counts.keys()])[0]
-                    risks.append({"id": "autoFlag:" + k, "label": k, "severity": "High", "source": "autoFlag", "provenance": "summary.counts"})
-            except Exception:
-                pass
-
-    # --------------------------------------------
+    # -----------------------------------------------------------------
     # stats/debug
-    # --------------------------------------------
+    # -----------------------------------------------------------------
     stats: Dict[str, Any] = {
-        "retrieved_counts": retrieved_counts,
         "top_k_requested": int(top_k),
         "top_k_effective": int(effective_top_k),
         "max_context_chars": int(max_chars) if isinstance(max_chars, int) else None,
+        "retrieved_counts": retrieved_counts,
     }
-
     if ingest_stats is not None:
         stats["ingest"] = ingest_stats
 
     if debug:
         stats["debug_context"] = context
-        # helpful if anything still goes weird (won't break your tests)
         stats["debug_review_keys"] = sorted(list((review or {}).keys()))
-        stats["debug_has_autoflags"] = bool(((review or {}).get("autoFlags") or {}).get("hits"))
+        stats["debug_docs_len"] = len(docs or [])
+        stats["debug_llm_text_len"] = len(llm_text or "")
 
     result: Dict[str, Any] = {
         "review_id": review_id,
         "mode": m,
         "analysis_intent": intent,
         "context_profile": profile,
-        "sections": [],
+        "summary": summary,
+        "sections": sections,
         "citations": [],
-        "signals": signals,
-        "risk_register": risks,
+        "retrieved_counts": retrieved_counts,
         "risks": risks,
-        "stats": stats if debug else {},
-        "debug": stats if debug else {},
+        "warnings": [],
+        "stats": stats if debug else {"top_k_effective": int(effective_top_k)},
     }
 
     if _timing_enabled():
