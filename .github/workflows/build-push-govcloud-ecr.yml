@@ -30,7 +30,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo GITHUB_REF=\
-          echo GITHUB_SHA=\
-          echo SHA7=\
+          echo "github.ref=${{ github.ref }}"
+          echo "github.sha=${{ github.sha }}"
+          SHA="${{ github.sha }}"
+          echo "sha7=${SHA:0:7}"
 
