@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: css-mock-deploy
+  group: css-mock-deploy-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -118,3 +118,4 @@ jobs:
           $ErrorActionPreference="Stop"
           kubectl -n css-mock get deploy css-backend -o jsonpath="{.spec.template.spec.containers[0].image}`n"
           kubectl -n css-mock rollout status deploy/css-backend
+
