@@ -1281,6 +1281,43 @@ def rag_analyze_review(
         "warnings": [],
         "stats": stats if debug else {"top_k_effective": int(effective_top_k)},
     }
+
+    # SAFETY_RETURN_NONNONE: rag_analyze_review must never return None (router expects dict-like output)
+    try:
+        _summary = locals().get('summary') or locals().get('summary_text') or locals().get('final_summary') or ''
+        _sections = locals().get('sections') or locals().get('sections_out') or locals().get('section_summaries') or []
+        _risks = locals().get('risks') or locals().get('risk_items') or locals().get('risk_register') or []
+        _warnings = locals().get('warnings') or []
+        _retrieved_counts = locals().get('retrieved_counts') or {}
+        _stats = locals().get('stats') or {}
+        return {
+            'review_id': review_id,
+            'mode': mode,
+            'analysis_intent': analysis_intent,
+            'context_profile': context_profile,
+            'top_k': top_k,
+            'summary': _summary if isinstance(_summary, str) else str(_summary),
+            'sections': _sections,
+            'risks': _risks,
+            'warnings': _warnings,
+            'retrieved_counts': _retrieved_counts,
+            'stats': _stats,
+        }
+    except Exception:
+        return {
+            'review_id': review_id,
+            'mode': mode,
+            'analysis_intent': analysis_intent,
+            'context_profile': context_profile,
+            'top_k': top_k,
+            'summary': '',
+            'sections': [],
+            'risks': [],
+            'warnings': ['rag_analyze_review_failed_to_materialize_response'],
+            'retrieved_counts': {},
+            'stats': {},
+        }
+
 def _owner_for_section(section_id: str) -> str:
     """
     Back-compat export for rag.router import.
