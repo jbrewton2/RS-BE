@@ -281,6 +281,54 @@ class DynamoMeta:
             add("data_type", data_type)
             add("doc_count", int(doc_count))
 
+            # Persist AI analysis outputs (UI contract)
+            # NOTE: Dynamo item size is limited (~400KB). Keep payload bounded.
+            last_analysis_at = review.get("lastAnalysisAt") or review.get("last_analysis_at") or None
+            if isinstance(last_analysis_at, str) and last_analysis_at.strip():
+                add("lastAnalysisAt", last_analysis_at.strip())
+
+            ai_summary = review.get("aiSummary")
+            if isinstance(ai_summary, str) and ai_summary.strip():
+                add("aiSummary", ai_summary.strip()[:50000])
+
+            ai_risks = review.get("aiRisks")
+            if isinstance(ai_risks, list):
+                # cap to avoid oversized items
+                add("aiRisks", ai_risks[:200])
+
+            rag = review.get("rag")
+            if isinstance(rag, dict):
+                # store a compact RAG blob only
+                rag_compact: Dict[str, Any] = {}
+                s = rag.get("summary")
+                if isinstance(s, str) and s.strip():
+                    rag_compact["summary"] = s.strip()[:50000]
+                rc = rag.get("retrieved_counts")
+                if isinstance(rc, dict):
+                    rag_compact["retrieved_counts"] = rc
+                w = rag.get("warnings")
+                if isinstance(w, list):
+                    rag_compact["warnings"] = w[:50]
+                st = rag.get("stats")
+                if isinstance(st, dict):
+                    rag_compact["stats"] = st
+                secs = rag.get("sections")
+                if isinstance(secs, list):
+                    safe_secs: List[Dict[str, Any]] = []
+                    for sec in secs[:30]:
+                        if not isinstance(sec, dict):
+                            continue
+                        safe_secs.append({
+                            "id": sec.get("id"),
+                            "title": sec.get("title"),
+                            "owner": sec.get("owner"),
+                            "findings": (sec.get("findings") or [])[:10] if isinstance(sec.get("findings"), list) else sec.get("findings"),
+                            "gaps": (sec.get("gaps") or [])[:10] if isinstance(sec.get("gaps"), list) else sec.get("gaps"),
+                            "recommended_actions": (sec.get("recommended_actions") or [])[:10] if isinstance(sec.get("recommended_actions"), list) else sec.get("recommended_actions"),
+                            "evidence": (sec.get("evidence") or [])[:10] if isinstance(sec.get("evidence"), list) else sec.get("evidence"),
+                        })
+                    rag_compact["sections"] = safe_secs
+                add("rag", rag_compact)
             # Optional: store a compact autoFlags summary only (avoid large payloads)
             auto_flags = review.get("autoFlags")
             if isinstance(auto_flags, dict):
