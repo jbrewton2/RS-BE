@@ -258,6 +258,9 @@ def _postprocess_review_summary(text: str) -> str:
     if not parsed:
         parsed = {"OVERVIEW": (text or "").strip() or INSUFFICIENT}
     hardened = _render_sections_in_order(parsed, RAG_REVIEW_SUMMARY_SECTIONS)
+        # Normalize common mojibake bullets from model output
+    hardened = hardened.replace("ΓÇó", "-")
+    hardened = hardened.replace("•", "-")
     return _collapse_blank_lines(hardened)
 
 
@@ -1041,3 +1044,4 @@ def _owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
