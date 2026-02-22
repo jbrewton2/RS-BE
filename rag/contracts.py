@@ -5,13 +5,18 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-# Modes remain backward-compatible. Keep tight/explicit.
+# =============================================================================
+# Enums / Literals
+# =============================================================================
+# Keep tight and backward-compatible.
 RagMode = Literal["review_summary"]
-
 AnalysisIntent = Literal["strict_summary", "risk_triage"]
 ContextProfile = Literal["fast", "balanced", "deep"]
 
 
+# =============================================================================
+# Request
+# =============================================================================
 class RagAnalyzeRequest(BaseModel):
     """
     Request body for POST /api/rag/analyze
@@ -20,30 +25,32 @@ class RagAnalyzeRequest(BaseModel):
     review_id: str = Field(..., min_length=1)
     mode: RagMode = Field(default="review_summary")
 
-    # Behavior intent
     analysis_intent: AnalysisIntent = Field(
         default="strict_summary",
-        description="strict_summary = conservative, contract-locked sections; risk_triage = broader human-in-loop risk surfacing.",
+        description=(
+            "strict_summary = conservative, contract-locked sections; "
+            "risk_triage = broader human-in-loop risk surfacing."
+        ),
     )
 
-    # Retrieval breadth (independent of RAG_FAST)
     context_profile: ContextProfile = Field(
         default="fast",
         description="fast|balanced|deep. Deep overrides fast caps to allow scanning for risks.",
     )
 
-    # Retrieval knobs
     top_k: int = Field(default=12, ge=1, le=50)
     force_reingest: bool = Field(default=False)
 
     # Optional deterministic Tier-2 signals provided by caller (NOT contract evidence)
     heuristic_hits: Optional[List[Dict[str, Any]]] = Field(default=None)
 
-
-    # Debug: include compact per-question hit lists
+    # Debug: include extra stats and retrieval debug payload
     debug: bool = Field(default=False)
 
 
+# =============================================================================
+# Evidence / Section Models
+# =============================================================================
 class RagCitation(BaseModel):
     question: str
     doc: str
@@ -74,12 +81,20 @@ class RagSection(BaseModel):
     gaps: List[str] = Field(default_factory=list)
     recommended_actions: List[str] = Field(default_factory=list)
 
-    # Optional UI hint
+    # Optional UI hints
     confidence: Optional[Literal["strong", "moderate", "weak", "missing"]] = None
-
-
     confidence_pct: Optional[int] = None  # 0-100 deterministic confidence
+
+
+# =============================================================================
+# Legacy / Typed Stats (kept for compatibility, but not enforced on response)
+# =============================================================================
 class RagAnalyzeStats(BaseModel):
+    """
+    Legacy typed stats. Kept so older code that imports RagAnalyzeStats doesn't break.
+    NOTE: The API response now returns stats as Dict[str, Any] to preserve debug keys.
+    """
+
     top_k_effective: Optional[int] = None
     analysis_intent: Optional[str] = None
     context_profile: Optional[str] = None
@@ -91,9 +106,13 @@ class RagAnalyzeStats(BaseModel):
 
     fast_mode: Optional[bool] = None
 
-
-    # Materialization stats (AI RiskObjects) Ã¢â‚¬â€ additive
+    # Materialization stats (AI RiskObjects) – additive
     risk_objects: Optional[Dict[str, int]] = None
+
+
+# =============================================================================
+# Response
+# =============================================================================
 class RagAnalyzeResponse(BaseModel):
     review_id: str
     mode: RagMode
@@ -109,12 +128,12 @@ class RagAnalyzeResponse(BaseModel):
 
     sections: Optional[List[RagSection]] = None
     risks: Optional[List[Dict[str, Any]]] = None
-    stats: Optional[RagAnalyzeStats] = None
+
+    # IMPORTANT:
+    # stats is intentionally untyped to preserve debug payload keys (debug_context, retrieval_debug, ingest, etc.).
+    stats: Dict[str, Any] = Field(default_factory=dict)
+
     warnings: List[str] = Field(default_factory=list)
 
     # Debug payload (only when debug=true)
     retrieved: Optional[Dict[str, list]] = None
-
-
-
-
