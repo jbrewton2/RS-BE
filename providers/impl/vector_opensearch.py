@@ -149,7 +149,7 @@ class OpenSearchVectorStore(VectorStore):
         )
         return str(rid).strip()
 
-    def upsert_chunks(self, document_id: str, chunks: List[Dict[str, Any]]) -> None:
+    def upsert_chunks(self, document_id: str, chunks: List[Dict[str, Any]], review_id: str = "") -> None:
         if not document_id or not chunks:
             return
 
@@ -165,7 +165,7 @@ class OpenSearchVectorStore(VectorStore):
                 continue
 
             # MINIMAL CHANGE: store review_id as a TOP-LEVEL keyword for filtering
-            review_id = self._extract_review_id(ch)
+            review_id = (review_id or self._extract_review_id(ch)).strip()
 
             doc = {
                 "review_id": review_id,  # <-- enables filters={"review_id": ...}
@@ -270,3 +270,4 @@ class OpenSearchVectorStore(VectorStore):
             return
         body = {"query": {"term": {"document_id": document_id}}}
         self.client.delete_by_query(index=self.index, body=body, refresh=True, conflicts="proceed")
+
