@@ -126,6 +126,9 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except HTTPException as e:
+        raise
     except Exception as e:
         logger.exception("RAG analyze failed")
         raise HTTPException(status_code=500, detail=f"RAG analyze failed: {type(e).__name__}") from e
+
