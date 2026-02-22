@@ -1273,6 +1273,10 @@ def rag_analyze_review(
         stats["ingest"] = ingest_stats
     if debug:
         stats["debug_context_len"] = len(context or "")
+        # Keep debug payload bounded so responses don't explode
+        stats["debug_context"] = (context or "")[:6000]
+        stats["debug_prompt_prefix"] = (prompt or "")[:1500]
+        stats["debug_llm_raw_prefix"] = (llm_text or "")[:1500]
         stats["debug_llm_text_len"] = len(llm_text or "")
         stats["retrieval_debug"] = retrieval_debug
 
@@ -1314,6 +1318,7 @@ def _owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
 
 
 
