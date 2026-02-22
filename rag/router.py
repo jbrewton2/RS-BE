@@ -1,4 +1,4 @@
-# rag/router.py
+﻿# rag/router.py
 from __future__ import annotations
 
 import logging
@@ -83,6 +83,19 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
             force_reingest=req.force_reingest,
             debug=req.debug,
         )
+
+        if result is None:
+            logger.error(
+                "rag_analyze_review returned None (review_id=%s mode=%s intent=%s profile=%s top_k=%s reingest=%s)",
+                req.review_id,
+                req.mode,
+                req.analysis_intent,
+                req.context_profile,
+                req.top_k,
+                req.force_reingest,
+            )
+            raise HTTPException(status_code=500, detail="RAG analyze failed: service returned no result")
+
 
         result = _ensure_section_owners(result)
 
