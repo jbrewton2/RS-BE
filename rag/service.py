@@ -941,7 +941,7 @@ def _ingest_review_into_vectorstore(
 
         # Replace semantics per doc_id
         vector.delete_by_document(str(doc_id))
-        vector.upsert_chunks(document_id=str(doc_id), chunks=upsert_payload)
+        vector.upsert_chunks(document_id=str(doc_id), chunks=upsert_payload, review_id=review_id)
 
         ingested_docs += 1
         ingested_chunks += len(upsert_payload)
@@ -1339,5 +1339,6 @@ def _owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
 
 
