@@ -919,45 +919,79 @@ def _ingest_review_into_vectorstore(
 # =============================================================================
 # LLM call helpers (robust / duck-typed)
 # =============================================================================
-def _llm_text(llm: Any, prompt: str) -> str:
+def _llm_text(llm: Any, prompt: str) -> Tuple[str, Optional[str]]:
     """
-    Minimal, robust bridge across providers.
+    Robust bridge across providers. Returns (text, error_repr_or_None).
+    Never silently swallows provider exceptions without surfacing the reason.
     """
     if not prompt:
-        return ""
+        return "", None
 
-    for fn_name in ("generate", "complete", "generate_text", "chat"):
+    last_err: Optional[str] = None
+
+    def _extract(out: Any) -> str:
+        if out is None:
+            return ""
+        if isinstance(out, str):
+            return out.strip()
+        if isinstance(out, dict):
+            for k in ("text", "completion", "outputText", "output", "message", "content"):
+                v = out.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+                if isinstance(v, dict):
+                    vc = v.get("content")
+                    if isinstance(vc, str) and vc.strip():
+                        return vc.strip()
+            ch = out.get("choices")
+            if isinstance(ch, list) and ch:
+                m = ch[0]
+                if isinstance(m, dict):
+                    msg = m.get("message") or {}
+                    if isinstance(msg, dict):
+                        c = msg.get("content")
+                        if isinstance(c, str) and c.strip():
+                            return c.strip()
+            return ""
+        return str(out).strip()
+
+    for fn_name in ("generate", "complete", "generate_text"):
         fn = getattr(llm, fn_name, None)
         if callable(fn):
             try:
-                out = fn(prompt)  # type: ignore[arg-type]
-                if isinstance(out, dict):
-                    return str(out.get("text") or "").strip()
-                if isinstance(out, str):
-                    return out.strip()
+                txt = _extract(fn(prompt))
+                return txt, None
             except TypeError:
                 try:
-                    out = fn(prompt=prompt)  # type: ignore[call-arg]
-                    if isinstance(out, dict):
-                        return str(out.get("text") or "").strip()
-                    if isinstance(out, str):
-                        return out.strip()
-                except Exception:
-                    continue
-            except Exception:
-                continue
+                    txt = _extract(fn(prompt=prompt))
+                    return txt, None
+                except Exception as e:
+                    last_err = repr(e)
+            except Exception as e:
+                last_err = repr(e)
+
+    chat_fn = getattr(llm, "chat", None)
+    if callable(chat_fn):
+        try:
+            txt = _extract(chat_fn([{"role": "user", "content": prompt}]))
+            return txt, None
+        except TypeError:
+            try:
+                txt = _extract(chat_fn(messages=[{"role": "user", "content": prompt}]))
+                return txt, None
+            except Exception as e:
+                last_err = repr(e)
+        except Exception as e:
+            last_err = repr(e)
 
     try:
         if callable(llm):
-            out = llm(prompt)
-            if isinstance(out, dict):
-                return str(out.get("text") or "").strip()
-            if isinstance(out, str):
-                return out.strip()
-    except Exception:
-        pass
+            txt = _extract(llm(prompt))
+            return txt, None
+    except Exception as e:
+        last_err = repr(e)
 
-    return ""
+    return "", last_err
 
 
 def _build_review_summary_prompt(*, intent: str, context_profile: str, context: str, section_headers: List[str]) -> str:
@@ -1216,14 +1250,34 @@ def rag_analyze_review(
     # -----------------------------------------------------------------
     # LLM summary (sectioned)
     # -----------------------------------------------------------------
-    prompt = _build_review_summary_prompt(
+        prompt = _build_review_summary_prompt(
         intent=intent,
         context_profile=profile,
         context=context,
         section_headers=RAG_REVIEW_SUMMARY_SECTIONS,
     )
-    llm_text = _llm_text(llm, prompt)
-    summary = _postprocess_review_summary(llm_text or "")
+
+    # Hard cap to prevent Bedrock ValidationException on oversized prompts
+    max_input_chars = int((_env("LLM_MAX_INPUT_CHARS", "18000") or "18000").strip() or "18000")
+    if max_input_chars > 1000 and len(prompt) > max_input_chars:
+        # Try to trim context portion while keeping header/rules intact
+        over = len(prompt) - max_input_chars
+        if over > 0 and context:
+            context_trimmed = context[:-over] if over < len(context) else ""
+            prompt = _build_review_summary_prompt(
+                intent=intent,
+                context_profile=profile,
+                context=context_trimmed,
+                section_headers=RAG_REVIEW_SUMMARY_SECTIONS,
+            )
+
+    llm_text, llm_err = _llm_text(llm, prompt)
+
+    warnings: List[str] = []
+    if debug and (llm_err or "").strip():
+        warnings.append("llm_error")
+    if debug and not (llm_text or "").strip():
+        warnings.append("llm_returned_empty")
 
     # -----------------------------------------------------------------
     # Parse sections + attach evidence deterministically
@@ -1273,7 +1327,7 @@ def rag_analyze_review(
         stats["ingest"] = ingest_stats
     if debug:
         stats["debug_context_len"] = len(context or "")
-        # Keep debug payload bounded so responses don't explode
+        stats["debug_llm_error"] = llm_err
         stats["debug_context"] = (context or "")[:6000]
         stats["debug_prompt_prefix"] = (prompt or "")[:1500]
         stats["debug_llm_raw_prefix"] = (llm_text or "")[:1500]
@@ -1290,7 +1344,7 @@ def rag_analyze_review(
         "citations": [],
         "retrieved_counts": retrieved_counts,
         "risks": risks,
-        "warnings": [],
+        "warnings": warnings,
         "stats": stats if debug else {"top_k_effective": int(effective_top_k)},
     }
 
