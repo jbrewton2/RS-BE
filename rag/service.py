@@ -385,7 +385,7 @@ def _effective_top_k(req_top_k: int, context_profile: str) -> int:
 def _effective_context_chars(context_profile: str) -> int:
     p = (context_profile or "fast").strip().lower()
     if p == "deep":
-        return 60000
+        return 120000
     if p == "balanced":
         return 24000
     if _fast_enabled():
@@ -396,7 +396,7 @@ def _effective_context_chars(context_profile: str) -> int:
 def _effective_snippet_chars(context_profile: str) -> int:
     p = (context_profile or "fast").strip().lower()
     if p == "deep":
-        return 1400
+        return 2500
     if p == "balanced":
         return 1000
     return 900
@@ -1060,7 +1060,8 @@ def _retrieve_context_local(
         ctx_parts.append(hdr)
         used += len(hdr)
 
-        for h in hits[:effective_top_k]:
+        per_q = min(max(effective_top_k, 8), 20)
+        for h in hits[:per_q]:
             txt = (h.get("chunk_text") or "").strip()
             if not txt:
                 continue
@@ -1313,3 +1314,6 @@ def _owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
+
+
