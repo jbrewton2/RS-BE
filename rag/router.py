@@ -1,8 +1,7 @@
 # rag/router.py
 from __future__ import annotations
 
-import os
-import traceback
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +10,7 @@ from core.providers import providers_from_request
 from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse
 from rag.service import rag_analyze_review, _owner_for_section  # noqa: F401
 
+logger = logging.getLogger(__name__)
 
 # main.py includes routers with prefix="/api"
 # so this must be "/rag" (not "/api/rag") to yield "/api/rag/*"
@@ -27,7 +27,6 @@ def _ensure_section_owners(payload: Any) -> Any:
     - Handles dict sections OR Pydantic model sections
     """
     try:
-        sections = None
         if isinstance(payload, dict):
             sections = payload.get("sections")
         else:
@@ -55,10 +54,12 @@ def _ensure_section_owners(payload: Any) -> Any:
                     try:
                         setattr(sec, "owner", owner)
                     except Exception:
+                        # If it's a frozen model or property, ignore
                         pass
 
         return payload
     except Exception:
+        # Never break the endpoint due to owner enrichment
         return payload
 
 
@@ -104,7 +105,6 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
         if summary_val is None:
             result["summary"] = ""
         elif not isinstance(summary_val, str):
-            # enforce schema: summary must be a string
             result["summary"] = str(summary_val)
 
         return RagAnalyzeResponse.model_validate(result)
@@ -114,6 +114,5 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        if str(os.getenv("RAG_TRACEBACK", "0")).strip() == "1":
-            print("[RAG][TRACEBACK] " + traceback.format_exc())
+        logger.exception("RAG analyze failed")
         raise HTTPException(status_code=500, detail=f"RAG analyze failed: {type(e).__name__}") from e
