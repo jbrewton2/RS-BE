@@ -13,7 +13,6 @@ from core.config import PdfReader
 from core.dynamo_meta import DynamoMeta
 from providers.storage import StorageProvider
 from providers.vectorstore import VectorStore
-from rag.service_helpers import retrieve_context
 from reviews.router import _read_reviews_file  # uses StorageProvider
 
 
@@ -567,7 +566,7 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
     return sections
 
 
-def _env_int(name: str, default: int) -> int:
+def _env_int_local(name: str, default: int) -> int:
     try:
         v = os.getenv(name)
         return default if v is None or str(v).strip() == "" else int(str(v).strip())
@@ -640,9 +639,9 @@ def _attach_evidence_to_sections(
     citations: List[Dict[str, Any]],
     retrieved: Dict[str, List[Dict[str, Any]]],
 ) -> List[Dict[str, Any]]:
-    max_per_section = _env_int("RAG_EVIDENCE_MAX_PER_SECTION", 3)
+    max_per_section = _env_int_local("RAG_EVIDENCE_MAX_PER_SECTION", 3)
     allow_glossary = _env_bool("RAG_EVIDENCE_ALLOW_GLOSSARY", False)
-    min_signal = _env_int("RAG_EVIDENCE_MIN_SIGNAL", 1)
+    min_signal = _env_int_local("RAG_EVIDENCE_MIN_SIGNAL", 1)
 
     for sec in sections:
         sec.setdefault("evidence", [])
@@ -719,41 +718,6 @@ def _attach_evidence_to_sections(
             add_ev(sec, ev)
             kept += 1
             if kept >= max_per_section:
-                break
-
-    # 2) Fallback from citations if section has no evidence
-    q_for_section: Dict[str, str] = {}
-    for sec_title, q in section_question_map:
-        if sec_title not in q_for_section:
-            q_for_section[sec_title] = q
-
-    for sec in sections:
-        if sec.get("evidence"):
-            continue
-        title = (sec.get("title") or "").strip()
-        if not title:
-            continue
-
-        q = q_for_section.get(title)
-        if not q:
-            continue
-
-        sid = (sec.get("id") or "").strip().lower()
-        for c in [x for x in citations if x.get("question") == q]:
-            text = (c.get("snippet") or "").strip()
-            if not accept_text(text, sid):
-                continue
-
-            ev = {
-                "docId": c.get("docId"),
-                "doc": c.get("doc"),
-                "text": _extract_obligation_excerpt(text, max_len=1200),
-                "charStart": c.get("charStart"),
-                "charEnd": c.get("charEnd"),
-                "score": c.get("score"),
-            }
-            add_ev(sec, ev)
-            if len(sec["evidence"]) >= max_per_section:
                 break
 
     for s in sections:
@@ -911,14 +875,16 @@ def _ingest_review_into_vectorstore(
             skipped_docs += 1
             continue
 
-        # embeddings
+        # embeddings (batch)
         texts = [c["chunk_text"] for c in chunks]
         if not hasattr(llm, "embed_texts"):
             raise RuntimeError("LLM provider does not implement embed_texts() required for vector ingest")
         embeddings = llm.embed_texts(texts)
 
         if not isinstance(embeddings, list) or len(embeddings) != len(chunks):
-            raise RuntimeError(f"embed_texts returned {len(embeddings) if isinstance(embeddings, list) else 'non-list'} embeddings; expected {len(chunks)}")
+            raise RuntimeError(
+                f"embed_texts returned {len(embeddings) if isinstance(embeddings, list) else 'non-list'} embeddings; expected {len(chunks)}"
+            )
 
         upsert_payload: List[Dict[str, Any]] = []
         for c, emb in zip(chunks, embeddings):
@@ -941,6 +907,7 @@ def _ingest_review_into_vectorstore(
 
         # Replace semantics per doc_id
         vector.delete_by_document(str(doc_id))
+        # IMPORTANT: pass review_id for top-level scoping
         vector.upsert_chunks(document_id=str(doc_id), chunks=upsert_payload, review_id=review_id)
 
         ingested_docs += 1
@@ -954,31 +921,21 @@ def _ingest_review_into_vectorstore(
 # =============================================================================
 def _llm_text(llm: Any, prompt: str) -> str:
     """
-    Minimal, robust bridge across providers:
-      - BedrockLLMProvider.generate(prompt=...)
-      - BedrockLLMProvider.complete(prompt=...)
-      - Ollama style: generate(prompt=...)
-      - fallback: call llm(prompt) if callable
-
-    Returns empty string if no supported method exists.
+    Minimal, robust bridge across providers.
     """
     if not prompt:
         return ""
 
-    # Common patterns we’ve used across CSS
     for fn_name in ("generate", "complete", "generate_text", "chat"):
         fn = getattr(llm, fn_name, None)
         if callable(fn):
             try:
                 out = fn(prompt)  # type: ignore[arg-type]
                 if isinstance(out, dict):
-                    # common: {"text": "..."}
-                    txt = out.get("text")
-                    return (txt or "").strip()
+                    return str(out.get("text") or "").strip()
                 if isinstance(out, str):
                     return out.strip()
             except TypeError:
-                # Some providers require named arg
                 try:
                     out = fn(prompt=prompt)  # type: ignore[call-arg]
                     if isinstance(out, dict):
@@ -990,7 +947,6 @@ def _llm_text(llm: Any, prompt: str) -> str:
             except Exception:
                 continue
 
-    # Callable fallback
     try:
         if callable(llm):
             out = llm(prompt)
@@ -1005,13 +961,7 @@ def _llm_text(llm: Any, prompt: str) -> str:
 
 
 def _build_review_summary_prompt(*, intent: str, context_profile: str, context: str, section_headers: List[str]) -> str:
-    """
-    Keep it deterministic and compatible with your parser:
-    - output MUST include the headers verbatim
-    - do not add extra headers
-    """
     headers = "\n".join(section_headers)
-
     return (
         "You are Contract Security Studio.\n"
         "Produce a structured solicitation review summary.\n\n"
@@ -1027,6 +977,112 @@ def _build_review_summary_prompt(*, intent: str, context_profile: str, context: 
         f"{context}\n"
         "----------------\n"
     )
+
+
+# =============================================================================
+# NEW: Deterministic retrieval (replaces retrieve_context)
+# =============================================================================
+def _retrieve_context_local(
+    *,
+    vector: VectorStore,
+    llm: Any,
+    questions: List[str],
+    review_id: str,
+    effective_top_k: int,
+    snippet_cap: int,
+    context_cap: int,
+    debug: bool,
+) -> Tuple[Dict[str, List[Dict[str, Any]]], str, Dict[str, int], List[Dict[str, Any]]]:
+    """
+    Deterministic retrieval:
+      - embed questions via llm.embed_texts (batch)
+      - vector.query(embedding, filters={"review_id": review_id})
+      - build a bounded context string
+    Returns:
+      retrieved, context, retrieved_counts, retrieval_debug
+    """
+    retrieved: Dict[str, List[Dict[str, Any]]] = {}
+    retrieved_counts: Dict[str, int] = {}
+    retrieval_debug: List[Dict[str, Any]] = []
+
+    if not questions:
+        return {}, "", {}, []
+
+    if not hasattr(llm, "embed_texts"):
+        raise RuntimeError("LLM provider does not implement embed_texts() required for retrieval")
+
+    # Batch embed (fast + consistent)
+    embs = llm.embed_texts(list(questions))
+    if not isinstance(embs, list) or len(embs) != len(questions):
+        raise RuntimeError(f"embed_texts returned {len(embs) if isinstance(embs, list) else 'non-list'} embeddings; expected {len(questions)}")
+
+    # Query per question
+    for q, emb in zip(questions, embs):
+        try:
+            hits = vector.query(emb, top_k=effective_top_k, filters={"review_id": str(review_id)})
+        except Exception as e:
+            hits = []
+            if debug:
+                retrieval_debug.append({"q": q, "error": repr(e)})
+
+        retrieved[q] = hits or []
+        retrieved_counts[q] = len(hits or [])
+
+        if debug:
+            retrieval_debug.append(
+                {
+                    "q": q,
+                    "hits": len(hits or []),
+                    "top": [
+                        {
+                            "doc_name": (h.get("doc_name") or ""),
+                            "chunk_id": (h.get("chunk_id") or ""),
+                            "score": h.get("score"),
+                        }
+                        for h in (hits or [])[:3]
+                    ],
+                }
+            )
+
+    # Build context (bounded)
+    ctx_parts: List[str] = []
+    used = 0
+
+    for q in questions:
+        hits = retrieved.get(q) or []
+        if not hits:
+            continue
+
+        # question header
+        hdr = f"Q: {q}\n"
+        if used + len(hdr) > context_cap:
+            break
+        ctx_parts.append(hdr)
+        used += len(hdr)
+
+        for h in hits[:effective_top_k]:
+            txt = (h.get("chunk_text") or "").strip()
+            if not txt:
+                continue
+            if snippet_cap > 0 and len(txt) > snippet_cap:
+                txt = txt[:snippet_cap].rstrip() + "..."
+
+            meta = h.get("meta") or {}
+            doc = meta.get("doc_name") or h.get("doc_name") or meta.get("doc_id") or h.get("document_id") or "doc"
+            cid = h.get("chunk_id") or ""
+            line = f"- ({doc} / {cid}) {txt}\n"
+            if used + len(line) > context_cap:
+                break
+            ctx_parts.append(line)
+            used += len(line)
+
+        ctx_parts.append("\n")
+        used += 1
+        if used >= context_cap:
+            break
+
+    context = "".join(ctx_parts).strip()
+    return retrieved, context, retrieved_counts, retrieval_debug
 
 
 # =============================================================================
@@ -1049,40 +1105,22 @@ def rag_analyze_review(
     inference_candidates: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Robust RAG entrypoint.
-
-    Key behaviors:
-    - For force_reingest: ingests per-doc chunks into OpenSearch using:
-        extract/<doc_id>/raw_text.txt
-      with fallback self-heal from review_pdfs/<doc_id>.pdf.
-    - Retrieves with filters={"review_id": <review_id>}.
-    - Calls LLM for a structured sectioned summary (headers must match).
-    - Parses sections and attaches deterministic evidence.
+    Robust RAG entrypoint (AWS/OpenSearch-first).
     """
-    def _s(v: Any, max_len: int = 220) -> str:
-        try:
-            if v is None:
-                return ""
-            out = str(v).strip()
-            if max_len > 0 and len(out) > max_len:
-                out = out[:max_len]
-            return out
-        except Exception:
-            return ""
-
     t0 = time.time() if _timing_enabled() else 0.0
     m = _canonical_mode(mode)
+
+    intent = (analysis_intent or "strict_summary").strip().lower()
+    profile = (context_profile or "fast").strip().lower()
+    review_id = str(review_id or "").strip()
+
+    if not review_id:
+        raise ValueError("review_id is required")
 
     # Guardrail: avoid expensive re-ingest loops during fast mode unless explicitly allowed.
     if _fast_enabled() and force_reingest and (_env("RAG_ALLOW_FORCE_REINGEST", "0").strip() != "1"):
         print("[RAG] WARN: force_reingest requested but skipped because RAG_FAST=1 and RAG_ALLOW_FORCE_REINGEST!=1")
         force_reingest = False
-
-    intent = (analysis_intent or "strict_summary").strip().lower()
-    profile = (context_profile or "fast").strip().lower()
-
-    if _timing_enabled():
-        print("[RAG] analyze start", review_id, f"mode={m} intent={intent} profile={profile}")
 
     # -----------------------------------------------------------------
     # Review lookup:
@@ -1092,7 +1130,6 @@ def rag_analyze_review(
     review: Dict[str, Any] = {}
     docs: List[Dict[str, Any]] = []
 
-    # A) DynamoMeta
     try:
         meta = DynamoMeta()
         detail = meta.get_review_detail(review_id) or {}
@@ -1102,7 +1139,6 @@ def rag_analyze_review(
     except Exception:
         pass
 
-    # B) Legacy helper
     if not review:
         try:
             candidate = _read_reviews_file(storage, review_id)
@@ -1119,22 +1155,8 @@ def rag_analyze_review(
         except Exception:
             review = {}
 
-    # C) Test harness fallbacks (FakeStorage)
-    if not review:
-        for attr in ("_reviews", "reviews"):
-            try:
-                v = getattr(storage, attr, None)
-                if isinstance(v, list):
-                    for r in v:
-                        if isinstance(r, dict) and r.get("id") == review_id:
-                            review = r
-                            break
-            except Exception:
-                pass
-
     if not isinstance(review, dict):
         review = {}
-
     if not docs:
         try:
             docs = review.get("docs") or []
@@ -1161,45 +1183,34 @@ def rag_analyze_review(
             ingest_stats = {"error": repr(e)}
 
     # -----------------------------------------------------------------
-    # Retrieval + context
+    # Retrieval + context (deterministic; bypasses retrieve_context helper)
     # -----------------------------------------------------------------
     section_question_map = _question_section_map(intent)
     questions = [q for (_sec, q) in (section_question_map or [])]
     effective_top_k = _effective_top_k(top_k, profile)
+    snippet_cap = _effective_snippet_chars(profile)
+    context_cap = _effective_context_chars(profile)
 
     retrieved: Dict[str, List[Dict[str, Any]]] = {}
+    retrieved_counts: Dict[str, int] = {}
+    retrieval_debug: List[Dict[str, Any]] = []
     context: str = ""
-    max_chars: int = 0
 
-    t_ret0 = time.time() if _timing_enabled() else 0.0
     try:
-        retrieved, context, max_chars, _signals_from_retrieve = retrieve_context(
+        retrieved, context, retrieved_counts, retrieval_debug = _retrieve_context_local(
             vector=vector,
             llm=llm,
             questions=questions,
+            review_id=review_id,
             effective_top_k=effective_top_k,
-            filters={"review_id": str(review_id)},
-            snippet_cap=_effective_snippet_chars(profile),
-            intent=intent,
-            profile=profile,
-            env_get_fn=_env,
-            effective_context_chars_fn=_effective_context_chars,
-            heuristic_hits=heuristic_hits,
+            snippet_cap=snippet_cap,
+            context_cap=context_cap,
+            debug=debug,
         )
     except Exception as e:
         if debug:
-            print("[RAG] retrieve_context failed:", repr(e))
-        retrieved, context, max_chars = {}, "", 0
-
-    retrieved_counts: Dict[str, int] = {}
-    try:
-        for q, hits in (retrieved or {}).items():
-            retrieved_counts[str(q)] = len(hits or [])
-    except Exception:
-        retrieved_counts = {}
-
-    if _timing_enabled():
-        print("[RAG] retrieval done", round(time.time() - t_ret0, 3), "s")
+            print("[RAG] retrieval failed:", repr(e))
+        retrieved, context, retrieved_counts, retrieval_debug = {}, "", {}, [{"error": repr(e)}]
 
     # -----------------------------------------------------------------
     # LLM summary (sectioned)
@@ -1224,16 +1235,14 @@ def rag_analyze_review(
         retrieved=retrieved,
     )
 
-    # Normalize section outputs (findings/evidence clamp)
     for s in sections:
         _normalize_section_outputs(s)
 
     # -----------------------------------------------------------------
-    # Deterministic risks (minimal, keep your existing shape)
+    # Deterministic risks (minimal)
     # -----------------------------------------------------------------
     risks: List[Dict[str, Any]] = []
     if intent == "risk_triage":
-        # Prefer autoFlags.hits if present in review payload
         try:
             af = (review or {}).get("autoFlags") or {}
             hits = af.get("hits") or []
@@ -1241,11 +1250,11 @@ def rag_analyze_review(
                 for i, h in enumerate(hits):
                     if not isinstance(h, dict):
                         continue
-                    lbl = _s(h.get("label") or h.get("name") or h.get("id") or "", 200)
+                    lbl = str(h.get("label") or h.get("name") or h.get("id") or "").strip()
                     if not lbl:
                         continue
-                    rid = _s(h.get("hit_key") or h.get("key") or h.get("id") or f"autoflag:{lbl}:{i}", 240)
-                    sev = _s(h.get("severity") or "", 40) or "High"
+                    rid = str(h.get("hit_key") or h.get("key") or h.get("id") or f"autoflag:{lbl}:{i}").strip()
+                    sev = str(h.get("severity") or "").strip() or "High"
                     risks.append({"id": rid, "label": lbl, "severity": sev, "source": "autoFlag"})
         except Exception:
             pass
@@ -1256,17 +1265,15 @@ def rag_analyze_review(
     stats: Dict[str, Any] = {
         "top_k_requested": int(top_k),
         "top_k_effective": int(effective_top_k),
-        "max_context_chars": int(max_chars) if isinstance(max_chars, int) else None,
+        "max_context_chars": int(context_cap),
         "retrieved_counts": retrieved_counts,
     }
     if ingest_stats is not None:
         stats["ingest"] = ingest_stats
-
     if debug:
-        stats["debug_context"] = context
-        stats["debug_review_keys"] = sorted(list((review or {}).keys()))
-        stats["debug_docs_len"] = len(docs or [])
+        stats["debug_context_len"] = len(context or "")
         stats["debug_llm_text_len"] = len(llm_text or "")
+        stats["retrieval_debug"] = retrieval_debug
 
     result: Dict[str, Any] = {
         "review_id": review_id,
@@ -1282,41 +1289,8 @@ def rag_analyze_review(
         "stats": stats if debug else {"top_k_effective": int(effective_top_k)},
     }
 
-    # SAFETY_RETURN_NONNONE: rag_analyze_review must never return None (router expects dict-like output)
-    try:
-        _summary = locals().get('summary') or locals().get('summary_text') or locals().get('final_summary') or ''
-        _sections = locals().get('sections') or locals().get('sections_out') or locals().get('section_summaries') or []
-        _risks = locals().get('risks') or locals().get('risk_items') or locals().get('risk_register') or []
-        _warnings = locals().get('warnings') or []
-        _retrieved_counts = locals().get('retrieved_counts') or {}
-        _stats = locals().get('stats') or {}
-        return {
-            'review_id': review_id,
-            'mode': mode,
-            'analysis_intent': analysis_intent,
-            'context_profile': context_profile,
-            'top_k': top_k,
-            'summary': _summary if isinstance(_summary, str) else str(_summary),
-            'sections': _sections,
-            'risks': _risks,
-            'warnings': _warnings,
-            'retrieved_counts': _retrieved_counts,
-            'stats': _stats,
-        }
-    except Exception:
-        return {
-            'review_id': review_id,
-            'mode': mode,
-            'analysis_intent': analysis_intent,
-            'context_profile': context_profile,
-            'top_k': top_k,
-            'summary': '',
-            'sections': [],
-            'risks': [],
-            'warnings': ['rag_analyze_review_failed_to_materialize_response'],
-            'retrieved_counts': {},
-            'stats': {},
-        }
+    return result
+
 
 def _owner_for_section(section_id: str) -> str:
     """
@@ -1339,6 +1313,3 @@ def _owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
-
-
-
