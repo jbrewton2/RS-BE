@@ -1,4 +1,4 @@
-﻿# rag/router.py
+# rag/router.py
 from __future__ import annotations
 
 import logging
@@ -54,7 +54,6 @@ def _ensure_section_owners(payload: Any) -> Any:
                     try:
                         setattr(sec, "owner", owner)
                     except Exception:
-                        # If it's a frozen model or property, ignore
                         pass
 
         return payload
@@ -96,24 +95,23 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
             )
             raise HTTPException(status_code=500, detail="RAG analyze failed: service returned no result")
 
-
         result = _ensure_section_owners(result)
 
-        # API contract guardrail: ensure required response fields are always present.
-        # Some internal paths may omit top_k/summary; we normalize here at the boundary.
+        # Normalize to dict for response model validation
         if not isinstance(result, dict):
             try:
                 result = result.model_dump()
             except Exception:
                 result = dict(result)
 
+        # Boundary defaults
         result.setdefault("review_id", req.review_id)
         result.setdefault("mode", req.mode)
         result.setdefault("top_k", req.top_k)
         result.setdefault("analysis_intent", req.analysis_intent)
         result.setdefault("context_profile", req.context_profile)
 
-        # summary is required by RagAnalyzeResponse; use empty string if not materialized
+        # summary required
         summary_val = result.get("summary")
         if summary_val is None:
             result["summary"] = ""
@@ -126,9 +124,9 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    except HTTPException as e:
+    except HTTPException:
+        # Do not wrap FastAPI errors
         raise
     except Exception as e:
         logger.exception("RAG analyze failed")
         raise HTTPException(status_code=500, detail=f"RAG analyze failed: {type(e).__name__}") from e
-
