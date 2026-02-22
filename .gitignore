@@ -108,3 +108,8 @@ out/
 *.bak
 *.bak.*
 rag/service.py.bak.*
+
+# local debug logs
+logs_*.txt
+tail_full_*.txt
+
