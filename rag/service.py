@@ -1,3 +1,4 @@
+# rag/service.py
 from __future__ import annotations
 
 import hashlib
@@ -27,6 +28,11 @@ _EVIDENCE_LINE_RE = re.compile(
     r"^\s*EVIDENCE:\s*(?P<snippet>.+?)\s*\(Doc:\s*(?P<doc>.+?)\s*span:\s*(?P<cs>\d+)\-(?P<ce>\d+)\)\s*$",
     re.IGNORECASE,
 )
+
+# Owner token stripping (LLM output hygiene)
+_OWNER_LINE_RE = re.compile(r"^\s*Owner\s*:\s*(?P<owner>.+?)\s*$", re.IGNORECASE)
+_OWNER_PAREN_TRAIL_RE = re.compile(r"\s*\(\s*Owner\s*:\s*[^)]+\)\s*$", re.IGNORECASE)
+_OWNER_INLINE_RE = re.compile(r"\bOwner\s*:\s*(Program/PM|Security/ISSO|Legal/Contracts|Finance)\b", re.IGNORECASE)
 
 INSUFFICIENT = "Insufficient evidence retrieved for this section."
 
@@ -66,7 +72,7 @@ HARD RULES
 - Plain text only. No markdown.
 - Do NOT fabricate facts. If you cannot support a claim from CONTRACT EVIDENCE, write: INSUFFICIENT EVIDENCE.
 - Do NOT cite or reference anything outside CONTRACT EVIDENCE.
-- Keep it concise but complete: 1Ã¢â‚¬â€œ2 sentences + bullets per section.
+- Keep it concise but complete: 1–2 sentences + bullets per section.
 - Avoid repeating the same fact in multiple sections.
 - Do NOT include an 'EVIDENCE:' subsection; evidence is attached separately.
 
@@ -226,8 +232,13 @@ def _postprocess_review_summary(text: str) -> str:
     if not parsed:
         parsed = {"OVERVIEW": (text or "").strip() or INSUFFICIENT}
     hardened = _render_sections_in_order(parsed, RAG_REVIEW_SUMMARY_SECTIONS)
+
+    # Common encoding artifacts seen in logs / copied text
     hardened = hardened.replace("ÃŽâ€œÃƒâ€¡ÃƒÂ³", "-")
     hardened = hardened.replace("Ã¢â‚¬Â¢", "-")
+    hardened = hardened.replace("â€¢", "-")
+    hardened = hardened.replace("•", "-")
+
     return _collapse_blank_lines(hardened)
 
 
@@ -261,12 +272,40 @@ def _evidence_key(ev: Dict[str, Any]) -> str:
     return f"{doc}|{text[:80]}"
 
 
+def _strip_owner_tokens(s: str) -> str:
+    """Remove Owner tags from LLM lines so UI doesn't show 'Owner:' as content."""
+    t = (s or "").strip()
+    if not t:
+        return t
+
+    # Drop pure Owner lines entirely (caller can treat as empty)
+    if _OWNER_LINE_RE.match(t):
+        return ""
+
+    # Remove trailing "(Owner: X)"
+    t = _OWNER_PAREN_TRAIL_RE.sub("", t).strip()
+
+    # Remove inline "Owner: X" tokens (rare but shows up)
+    t = _OWNER_INLINE_RE.sub("", t).strip()
+
+    # Also remove trailing separators left behind
+    t = re.sub(r"\s*[-–—]\s*$", "", t).strip()
+
+    return t
+
+
 def _normalize_bullet_text(t: str) -> str:
     s = (t or "").strip()
     if not s:
         return s
 
     s = s.replace("**", "").strip()
+
+    # Remove owner tags *before* any shortening
+    s = _strip_owner_tokens(s).strip()
+    if not s:
+        return ""
+
     sl = s.lower()
 
     if sl.startswith("review and ensure "):
@@ -295,6 +334,10 @@ def _normalize_bullet_text(t: str) -> str:
         while s.endswith("."):
             s = s[:-1].rstrip()
 
+    # Normalize truncated "INS" variants to full phrase (common from partial outputs)
+    if s in {"INS", "INSUFFICIENT", "INSUFFICIENT EVID", "INSUFFICIENT EVI"}:
+        s = "INSUFFICIENT EVIDENCE"
+
     if len(s) > _FINDING_MAX_LEN:
         s = s[:_FINDING_MAX_LEN].rstrip() + "..."
 
@@ -307,6 +350,7 @@ def _clean_findings_line(s: str) -> Optional[str]:
         return None
     tl = t.lower()
 
+    # Drop evidence inline-format lines
     if _EVIDENCE_LINE_RE.match(t):
         return None
     if tl.startswith("evidence:") or ("(doc:" in tl and "span:" in tl):
@@ -314,11 +358,20 @@ def _clean_findings_line(s: str) -> Optional[str]:
     if tl.startswith("requirement:") or tl.startswith("why it matters:"):
         return None
 
+    # Drop raw headers like "OVERVIEW:" (not actual content)
     if re.match(r"^[a-z0-9 /()_-]+:\s*$", t, flags=re.IGNORECASE):
         return None
 
+    # Drop pure Owner lines
+    if _OWNER_LINE_RE.match(t):
+        return None
+
+    # Clean / normalize
     t = _normalize_bullet_text(t)
-    return t or None
+    if not t:
+        return None
+
+    return t
 
 
 def _normalize_section_outputs(section: Dict[str, Any], *, max_findings: int = _SECTION_MAX_FINDINGS) -> None:
@@ -477,9 +530,11 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
         end = header_to_idx[headers[j + 1]] if j + 1 < len(headers) else len(lines)
         block = "\n".join([x.rstrip() for x in lines[start + 1 : end]]).strip()
 
+        sec_id = _slug(h)
         sec: Dict[str, Any] = {
-            "id": _slug(h),
+            "id": sec_id,
             "title": h,
+            "owner": _owner_for_section(sec_id),  # keep owner explicit for UI contract
             "findings": [],
             "evidence": [],
             "gaps": [],
@@ -491,10 +546,15 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
             sections.append(sec)
             continue
 
+        # Parse block lines into findings, stripping owner tokens
         for ln in block.split("\n"):
             t = (ln or "").strip()
             if not t:
                 continue
+            # ignore stray Owner lines
+            if _OWNER_LINE_RE.match(t):
+                continue
+
             if t.startswith(("-", "*")):
                 sec["findings"].append(t.lstrip("-*").strip())
             else:
@@ -507,6 +567,7 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
             {
                 "id": "overview",
                 "title": "OVERVIEW",
+                "owner": _owner_for_section("overview"),
                 "findings": [text.strip() or INSUFFICIENT],
                 "evidence": [],
                 "gaps": [],
@@ -698,7 +759,7 @@ def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str
 
         evs = s.get("evidence") or []
         if not isinstance(evs, list) or not evs:
-            # Test expects gaps to be populated for truly empty sections.
+            # Tests expect gaps to be populated for truly empty sections.
             if not has_real:
                 gaps = s.get("gaps") or []
                 if not isinstance(gaps, list):
@@ -777,7 +838,13 @@ def _chunk_text_windowed(text: str, *, chunk_size: int = 1400, overlap: int = 20
         end = min(len(t), start + chunk_size)
         chunk_text = t[start:end].strip()
         if chunk_text:
-            out.append({"chunk_id": f"{i}:{start}:{end}", "chunk_text": chunk_text, "meta": {"char_start": start, "char_end": end, "chunk_index": i}})
+            out.append(
+                {
+                    "chunk_id": f"{i}:{start}:{end}",
+                    "chunk_text": chunk_text,
+                    "meta": {"char_start": start, "char_end": end, "chunk_index": i},
+                }
+            )
             i += 1
         if end >= len(t):
             break
@@ -832,7 +899,7 @@ def _read_extracted_text_for_doc(storage: StorageProvider, *, doc_id: str) -> st
         return ""
 
     try:
-        raw_text_bytes = text.encode("utf-8", errors="ignore")
+        raw_text_bytes = text.encode("utf-8", errors="ignore").strip()
         extract_json_key = f"extract/{doc_id}/extract.json"
         payload = {
             "doc_id": doc_id,
@@ -1024,6 +1091,7 @@ def _render_deterministic_signals_block(
             if not label:
                 continue
             parts.append(f"- {label} (src=heuristic)")
+
     # inference candidates (lowest confidence)
     if enable_inference_risks and isinstance(inference_candidates, list) and inference_candidates:
         parts.append("")
@@ -1288,7 +1356,7 @@ def rag_analyze_review(
         except Exception:
             signals = ""
 
-    # Prompt (define BEFORE any truncation)
+    # Prompt
     prompt = _build_review_summary_prompt(
         intent=intent,
         context_profile=profile,
@@ -1310,6 +1378,7 @@ def rag_analyze_review(
                 section_headers=RAG_REVIEW_SUMMARY_SECTIONS,
                 signals=signals,
             )
+            warnings.append("prompt_truncated")
 
     llm_text, llm_err = _llm_text(llm, prompt)
 
@@ -1324,10 +1393,17 @@ def rag_analyze_review(
     sections = _parse_review_summary_sections(summary)
     sections = _attach_evidence_to_sections(sections, section_question_map=section_question_map, citations=[], retrieved=retrieved)
     sections = _backfill_sections_from_evidence(sections, intent=intent)
+
+    # Normalize per-section content (dedupe, drop owner tokens, cap lists)
     for s in sections:
         _normalize_section_outputs(s)
 
-    # Deterministic risks (autoFlags) Ã¢â‚¬â€œ must exist even if timing env toggled
+        # Ensure owner is always present for UI contract
+        sid = str(s.get("id") or "").strip().lower()
+        if not (s.get("owner") or "").strip():
+            s["owner"] = _owner_for_section(sid)
+
+    # Deterministic risks (autoFlags)
     risks: List[Dict[str, Any]] = []
     if intent == "risk_triage":
         try:
@@ -1346,14 +1422,25 @@ def rag_analyze_review(
         except Exception:
             pass
 
+    # Stats: always return UI-friendly keys (even when debug=False)
+    retrieved_total = 0
+    for _q, hits in (retrieved or {}).items():
+        try:
+            retrieved_total += int(len(hits or []))
+        except Exception:
+            pass
+
     stats: Dict[str, Any] = {
         "top_k_requested": int(top_k),
         "top_k_effective": int(effective_top_k),
-        "max_context_chars": int(context_cap),
+        "context_used_chars": int(len(context or "")),
+        "context_max_chars": int(context_cap),
+        "retrieved_total": int(retrieved_total),
         "retrieved_counts": retrieved_counts,
     }
     if ingest_stats is not None:
         stats["ingest"] = ingest_stats
+
     if debug:
         stats["debug_context_len"] = len(context or "")
         stats["debug_llm_error"] = llm_err
@@ -1379,7 +1466,7 @@ def rag_analyze_review(
         "retrieved_counts": retrieved_counts,
         "risks": risks,
         "warnings": warnings,
-        "stats": stats if debug else {"top_k_effective": int(effective_top_k)},
+        "stats": stats,
     }
 
 
