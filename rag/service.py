@@ -1256,11 +1256,10 @@ def rag_analyze_review(
         context=context,
         section_headers=RAG_REVIEW_SUMMARY_SECTIONS,
     )
-
     # Hard cap to prevent Bedrock ValidationException on oversized prompts
     max_input_chars = int((_env("LLM_MAX_INPUT_CHARS", "18000") or "18000").strip() or "18000")
     if max_input_chars > 1000 and len(prompt) > max_input_chars:
-        # Try to trim context portion while keeping header/rules intact
+        # Trim context while keeping rules/headers intact
         over = len(prompt) - max_input_chars
         if over > 0 and context:
             context_trimmed = context[:-over] if over < len(context) else ""
@@ -1372,6 +1371,8 @@ def _owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
+
 
 
 
