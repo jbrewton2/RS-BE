@@ -958,6 +958,105 @@ def rag_analyze_review(
                 warnings.append("prompt_sanitized_bedrock")
             except Exception:
                 pass
+        # Multipass-lite for FAST risk_triage: generate each section with only its evidence to avoid mega-prompt starvation.
+        # Toggle: RAG_MULTIPASS_FAST=1 (default). Set 0 to disable.
+        if intent == "risk_triage" and profile == "fast" and (_env("RAG_MULTIPASS_FAST", "1").strip() == "1"):
+            try:
+                def _pick_text(hit: Any) -> str:
+                    if not isinstance(hit, dict):
+                        return ""
+                    for k in ("snippet", "chunk_text", "text", "content", "passage"):
+                        v = hit.get(k)
+                        if isinstance(v, str) and v.strip():
+                            return v.strip()
+                    return ""
+
+                def _evidence_lines_for_question(q: str, max_lines: int = 8) -> List[str]:
+                    hits = (retrieved or {}).get(q) or []
+                    out: List[str] = []
+                    for h in (hits or []):
+                        if not isinstance(h, dict):
+                            continue
+                        doc = str(h.get("doc_name") or h.get("document_name") or h.get("source") or "").strip()
+                        cid = str(h.get("chunk_id") or h.get("id") or "").strip()
+                        t = _pick_text(h)
+                        if not t:
+                            continue
+                        t = t.replace("\r\n", "\n").replace("\r", "\n")
+                        t = " ".join(t.split())
+                        if len(t) > 260:
+                            t = t[:260].rstrip() + "..."
+                        if doc or cid:
+                            out.append(f"- ({doc} / {cid}) {t}".strip())
+                        else:
+                            out.append(f"- {t}".strip())
+                        if len(out) >= int(max_lines):
+                            break
+                    return out
+
+                section_chunks: List[str] = []
+                # section_question_map exists earlier; if not, rebuild it
+                sqm = section_question_map or _question_section_map(intent)
+
+                for sid, q in (sqm or []):
+                    sec_title = str(sid or "").strip().upper().replace("_", " ")
+                    ev_lines = _evidence_lines_for_question(str(q), max_lines=8)
+
+                    mini = []
+                    mini.append("You are Contract Security Studio.")
+                    mini.append("")
+                    mini.append("You are performing risk-focused triage for a single contract review.")
+                    mini.append("You MUST ground statements ONLY in the CONTRACT EVIDENCE lines provided below.")
+                    mini.append("If evidence is insufficient, write: INSUFFICIENT EVIDENCE.")
+                    mini.append("")
+                    mini.append("HARD RULES")
+                    mini.append("- Plain text only. No markdown.")
+                    mini.append("- Do NOT fabricate facts.")
+                    mini.append("- Prefer short, high-signal bullets.")
+                    mini.append("")
+                    mini.append("OWNER TAGS (only for risks/constraints/actions)")
+                    mini.append("Owner: Program/PM")
+                    mini.append("Owner: Security/ISSO")
+                    mini.append("Owner: Legal/Contracts")
+                    mini.append("Owner: Finance")
+                    mini.append("")
+                    mini.append(f"SECTION: {sec_title}")
+                    mini.append("")
+                    mini.append("CONTRACT EVIDENCE")
+                    if ev_lines:
+                        mini.extend(ev_lines)
+                    else:
+                        mini.append("(none)")
+                    mini.append("")
+                    mini.append("OUTPUT")
+                    mini.append("1 sentence summary.")
+                    mini.append("Then bullets. Add Owner tag at end for risks/constraints/actions only.")
+                    mini_prompt = "\n".join(mini).strip() + "\n"
+
+                    # keep prompt safe for bedrock
+                    if (_env("LLM_PROVIDER", "").strip().lower() == "bedrock"):
+                        try:
+                            _pp = mini_prompt.replace("\r\n", "\n").replace("\r", "\n")
+                            _pp = "".join(ch for ch in _pp if (ch == "\n" or ch == "\t" or ord(ch) >= 32))
+                            _pp = _pp.encode("ascii", errors="ignore").decode("ascii", errors="ignore")
+                            mini_prompt = _pp
+                        except Exception:
+                            pass
+
+                    t, e = _llm_text(llm, mini_prompt)
+                    t = (t or "").strip()
+                    if not t:
+                        t = "INSUFFICIENT EVIDENCE"
+                    section_chunks.append(sec_title)
+                    section_chunks.append(t)
+                    section_chunks.append("")
+
+                llm_text = "\n".join(section_chunks).strip() + "\n"
+                llm_err = None
+                warnings.append("multipass_fast_used")
+            except Exception as _e:
+                # fall back to normal single prompt path
+                warnings.append("multipass_fast_failed")
         llm_text, llm_err = _llm_text(llm, prompt)
 
         # If Bedrock returns empty on long prompts, retry once with a shorter prompt cap.
