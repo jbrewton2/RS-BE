@@ -960,7 +960,7 @@ def rag_analyze_review(
                 pass
         # Multipass-lite for FAST risk_triage: generate each section with only its evidence to avoid mega-prompt starvation.
         # Toggle: RAG_MULTIPASS_FAST=1 (default). Set 0 to disable.
-        if intent == "risk_triage" and profile == "fast" and (_env("RAG_MULTIPASS_FAST", "1").strip() == "1"):
+        if intent == "risk_triage" and profile == "fast" and (_env("RAG_MULTIPASS_FAST", "0").strip() == "1"):
             try:
                 def _pick_text(hit: Any) -> str:
                     if not isinstance(hit, dict):
@@ -1074,9 +1074,10 @@ def rag_analyze_review(
                         warnings.append("llm_retry_truncated")
                 except Exception:
                     pass
-    # Defensive init to prevent UnboundLocalError if an upstream path fails early
-    llm_text = ""
-    llm_err = None
+    # Defensive init: only set defaults if missing (do NOT clobber successful outputs)
+    if llm_text is None:
+        llm_text = ""
+    # llm_err may legitimately be None on success; do not overwrite if already set
     if debug and (llm_err or "").strip():
         warnings.append("llm_error")
     if debug and not (llm_text or "").strip():
@@ -1234,6 +1235,7 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
 
 
 
