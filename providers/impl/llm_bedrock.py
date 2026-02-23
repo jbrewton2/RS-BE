@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -88,7 +88,16 @@ class BedrockLLMProvider(LLMProvider):
                     if isinstance(o0, dict):
                         text_out = str(o0.get("text") or o0.get("generation") or "")
 
-            return {"text": (text_out or "").strip(), "provider": "bedrock", "model_id": self.model_id}
+                        text_out = (text_out or "").strip()
+            if not text_out:
+                # Do not silently return empty on successful HTTP responses.
+                # Make the error visible upstream (service.py will capture it in llm_err).
+                try:
+                    keys = sorted(list(data.keys())) if isinstance(data, dict) else []
+                except Exception:
+                    keys = []
+                raise RuntimeError(f"Bedrock Meta Llama returned empty generation. keys={keys}")
+            return {"text": text_out, "provider": "bedrock", "model_id": self.model_id}
 
         # Anthropic Claude Messages API payload
         body = {
@@ -143,3 +152,4 @@ class BedrockLLMProvider(LLMProvider):
                 raise RuntimeError("Bedrock embeddings response missing 'embedding' list")
             out.append([float(x) for x in emb])
         return out
+
