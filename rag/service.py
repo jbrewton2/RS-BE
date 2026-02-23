@@ -1020,6 +1020,26 @@ def rag_analyze_review(
 
         stats["debug_prompt_prefix"] = (prompt or "")[:1500]
         stats["debug_prompt_len"] = len(prompt or "")
+        # DEBUG: determine if Bedrock returns empty only for long prompts (length/content isolation)
+        try:
+            def _smoke_len(n: int) -> None:
+                try:
+                    _out = llm.generate((prompt or "")[:n], max_tokens=128, temperature=0.0, top_p=1.0)
+                    _t = ""
+                    if isinstance(_out, dict):
+                        _t = str(_out.get("text") or "")
+                    elif isinstance(_out, str):
+                        _t = _out
+                    _t = (_t or "").strip()
+                    stats[f"debug_llm_smoke_prompt_{n}_text_len"] = len(_t)
+                    stats[f"debug_llm_smoke_prompt_{n}_preview"] = _t[:120]
+                except Exception as e:
+                    stats[f"debug_llm_smoke_prompt_{n}_error"] = repr(e)
+
+            _smoke_len(2000)
+            _smoke_len(6000)
+        except Exception:
+            pass
         stats["debug_llm_raw_prefix"] = (llm_text or "")[:1500]
         stats["debug_llm_text_len"] = len(llm_text or "")
         stats["retrieval_debug"] = retrieval_debug
@@ -1072,6 +1092,7 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
 
 
 
