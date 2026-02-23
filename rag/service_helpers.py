@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 
 from rag.risk_taxonomy import detect_triggered_areas_from_signals, build_targeted_questions

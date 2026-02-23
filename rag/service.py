@@ -1,4 +1,4 @@
-﻿# rag/service.py
+# rag/service.py
 from __future__ import annotations
 from rag.service_helpers import _extend_questions_with_targeted, derive_section_risks
 from rag.prompts import STRICT_SUMMARY_PROMPT, RISK_TRIAGE_PROMPT, _build_review_summary_prompt
