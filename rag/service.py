@@ -937,6 +937,15 @@ def rag_analyze_review(
             except Exception:
                 llm_debug = {}
 
+        # Hard-cap the prompt for fast risk_triage to avoid Bedrock empty generations on longer inputs
+        if intent == "risk_triage" and profile == "fast":
+            try:
+                _cap = int((_env("RAG_TRIAGE_PROMPT_CAP_FAST", "6000") or "6000").strip() or "6000")
+            except Exception:
+                _cap = 6000
+            if _cap > 200 and len(prompt or "") > _cap:
+                prompt = (prompt or "")[:_cap]
+                warnings.append("prompt_capped_fast")
         llm_text, llm_err = _llm_text(llm, prompt)
 
         # If Bedrock returns empty on long prompts, retry once with a shorter prompt cap.
