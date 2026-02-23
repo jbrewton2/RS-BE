@@ -945,7 +945,7 @@ def rag_analyze_review(
                 _cap = 6000
             if _cap > 200 and len(prompt or "") > _cap:
                 prompt = (prompt or "")[:_cap]
-                warnings.append("prompt_capped_fast")
+                if debug: warnings.append("prompt_capped_fast")
         # Sanitize prompt for Bedrock reliability (strip control chars / non-ascii artifacts)
         if (_env("LLM_PROVIDER", "").strip().lower() == "bedrock"):
             try:
@@ -955,7 +955,7 @@ def rag_analyze_review(
                 # Strip remaining non-ascii to avoid Bedrock empty generations on bad bytes
                 _p = _p.encode("ascii", errors="ignore").decode("ascii", errors="ignore")
                 prompt = _p
-                warnings.append("prompt_sanitized_bedrock")
+                if debug: warnings.append("prompt_sanitized_bedrock")
             except Exception:
                 pass
         # Multipass-lite for FAST risk_triage: generate each section with only its evidence to avoid mega-prompt starvation.
@@ -1235,6 +1235,8 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
+
 
 
 
