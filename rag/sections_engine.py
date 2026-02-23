@@ -162,6 +162,27 @@ def _evidence_key(ev: Dict[str, Any]) -> str:
         return ""
 
 
+def _parse_chunk_id_span(cid: str) -> Tuple[Optional[int], Optional[int]]:
+    """
+    Parse chunk_id formats like:
+      "3:3600:5000"  -> (3600, 5000)
+      "3600:5000"    -> (3600, 5000)
+    Returns (None, None) if not parseable.
+    """
+    try:
+        s = str(cid or "").strip()
+        if not s:
+            return (None, None)
+        parts = s.split(":")
+        if len(parts) >= 2:
+            # take the last two fields as start/end
+            cs = int(parts[-2])
+            ce = int(parts[-1])
+            return (cs, ce)
+        return (None, None)
+    except Exception:
+        return (None, None)
+
 def _attach_evidence_to_sections(
     sections: List[Dict[str, Any]],
     *,
@@ -204,6 +225,15 @@ def _attach_evidence_to_sections(
             char_end = meta.get("char_end")
             if char_end is None:
                 char_end = meta.get("charEnd")
+
+            # If spans missing, derive from chunk_id like '3:3600:5000'
+            if char_start is None or char_end is None:
+                cid = meta.get("chunk_id") or meta.get("chunkId") or h.get("chunk_id") or h.get("chunkId") or ""
+                cs2, ce2 = _parse_chunk_id_span(str(cid))
+                if char_start is None:
+                    char_start = cs2
+                if char_end is None:
+                    char_end = ce2
 
             # Try to carry a short excerpt forward so UI can show something useful
             txt = (
@@ -367,3 +397,5 @@ def owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
+

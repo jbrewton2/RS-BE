@@ -14,6 +14,7 @@ from rag.inference_engine import generate_inference_candidates_multi_pass as ie_
 from rag.retrieval_engine import retrieve_context_local as re_retrieve_context_local, effective_top_k as re_effective_top_k, effective_context_chars as re_effective_context_chars, effective_snippet_chars as re_effective_snippet_chars
 from rag.narrative_engine import generate_summary_multi_pass as ne_generate_summary_multi_pass
 from rag.ingestion_engine import _ingest_review_into_vectorstore as ie_ingest_review_into_vectorstore
+from rag.ingestion_engine import _read_extracted_text_for_doc
 from rag.sections_engine import _parse_review_summary_sections as se_parse_sections, _attach_evidence_to_sections as se_attach_evidence, _backfill_sections_from_evidence as se_backfill_sections, _normalize_section_outputs as se_normalize_section, owner_for_section as se_owner_for_section
 from rag.sections_engine import _strengthen_overview_from_evidence as se_strengthen_overview_from_evidence
 import re
@@ -1213,6 +1214,7 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
 
 
 
