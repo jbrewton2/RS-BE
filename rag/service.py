@@ -897,16 +897,6 @@ def rag_analyze_review(
             warnings.append("multipass_narrative_failed")
             warnings.append("multipass_narrative_failed")
     else:
-                # DEBUG: prove whether we are actually calling the LLM and what object we are using
-        if debug:
-            try:
-                stats["debug_llm_call_attempted"] = True
-                stats["debug_llm_type"] = type(llm).__name__
-                stats["debug_llm_has_generate"] = bool(callable(getattr(llm, "generate", None)))
-                stats["debug_llm_provider_env"] = _env("LLM_PROVIDER", "")
-                stats["debug_bedrock_model_id"] = _env("BEDROCK_MODEL_ID", "")
-            except Exception:
-                pass
                 # DEBUG: capture LLM object info BEFORE calling (stats dict is built later)
         llm_debug: Dict[str, Any] = {}
         if debug:
@@ -919,19 +909,6 @@ def rag_analyze_review(
                     llm_debug["debug_llm_source_file"] = inspect.getsourcefile(type(llm)) or ""
                 except Exception:
                     llm_debug["debug_llm_source_file"] = ""
-
-                # Sanity: call the SAME llm instance with a tiny prompt
-                try:
-                    _smoke = llm.generate("Say OK in one word.", max_tokens=16, temperature=0.0, top_p=1.0)
-                    _smoke_text = ""
-                    if isinstance(_smoke, dict):
-                        _smoke_text = str(_smoke.get("text") or "")
-                    elif isinstance(_smoke, str):
-                        _smoke_text = _smoke
-                    llm_debug["debug_llm_smoke_text_len"] = len((_smoke_text or "").strip())
-                    llm_debug["debug_llm_smoke_text_preview"] = (_smoke_text or "").strip()[:50]
-                except Exception as e:
-                    llm_debug["debug_llm_smoke_error"] = repr(e)
                 llm_debug["debug_llm_has_generate"] = bool(callable(getattr(llm, "generate", None)))
                 llm_debug["debug_llm_provider_env"] = _env("LLM_PROVIDER", "")
                 llm_debug["debug_bedrock_model_id"] = _env("BEDROCK_MODEL_ID", "")
@@ -1236,6 +1213,8 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
+
 
 
 
