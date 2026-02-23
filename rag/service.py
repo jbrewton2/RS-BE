@@ -946,6 +946,18 @@ def rag_analyze_review(
             if _cap > 200 and len(prompt or "") > _cap:
                 prompt = (prompt or "")[:_cap]
                 warnings.append("prompt_capped_fast")
+        # Sanitize prompt for Bedrock reliability (strip control chars / non-ascii artifacts)
+        if (_env("LLM_PROVIDER", "").strip().lower() == "bedrock"):
+            try:
+                _p = (prompt or "").replace("\r\n", "\n").replace("\r", "\n")
+                # Drop non-printing control chars except newline/tab
+                _p = "".join(ch for ch in _p if (ch == "\n" or ch == "\t" or ord(ch) >= 32))
+                # Strip remaining non-ascii to avoid Bedrock empty generations on bad bytes
+                _p = _p.encode("ascii", errors="ignore").decode("ascii", errors="ignore")
+                prompt = _p
+                warnings.append("prompt_sanitized_bedrock")
+            except Exception:
+                pass
         llm_text, llm_err = _llm_text(llm, prompt)
 
         # If Bedrock returns empty on long prompts, retry once with a shorter prompt cap.
