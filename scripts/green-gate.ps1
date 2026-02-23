@@ -339,6 +339,15 @@ try {
     | Tee-Object -FilePath $respPath | Out-Null
 
   $resp = Read-Json $respPath
+  # HARDENING: fail fast with a clear message when the review has no docs.
+  # This prevents wasting time thinking "evidence attach" is broken when ingest never ran.
+  $ing = $null
+  if ($resp.stats -and $resp.stats.ingest) { $ing = $resp.stats.ingest }
+  if ($ing -and $ing.reason -eq "no_docs") {
+    throw ("GREEN GATE FAIL: review has no docs (stats.ingest.reason=no_docs). " +
+           "Check ReviewId and confirm docs exist in metadata store for this review. " +
+           "ingest=" + ($ing | ConvertTo-Json -Depth 20))
+  }
 
   $warnings = @()
   if ($resp.warnings -is [System.Array]) { $warnings = @($resp.warnings) }
@@ -384,13 +393,17 @@ try {
       throw "GREEN GATE FAIL: retrieval succeeded (retrieved_counts_total=$retrievedCountsTotal) but evidence attachment is empty. This is an attach/normalize bug, not retrieval."
     }
 
-    $rd = $resp.retrieval_debug
+    $rd = $resp.stats.retrieval_debug
     $rdTop = $null
     if ($rd -is [System.Array] -and $rd.Count -gt 0) { $rdTop = $rd[0] }
     $rdJson = ""
     if ($rdTop) { $rdJson = ($rdTop | ConvertTo-Json -Depth 20) }
 
-    throw "GREEN GATE FAIL: evidence did not attach (totalEvidenceItems=$totalEvidence). retrieval_debug[0]= $rdJson"
+    throw ("GREEN GATE FAIL: retrieval returned zero hits (retrieved_counts_total=0), so evidence is empty. " +
+       "Check ingest + vector store population. " +
+       "stats.ingest=" + (($resp.stats.ingest) | ConvertTo-Json -Depth 20) + "; " +
+       "stats.retrieved_total=" + $resp.stats.retrieved_total + "; " +
+       "retrieval_debug[0]=" + $rdJson)
   }
 
   $hasUsableEvidence = $false
@@ -428,6 +441,8 @@ catch {
   Dump-K8sDiagnostics -Ns $Namespace -Dep $Deployment -Selector $PodSelector -OutDir $OutDir
   throw
 }
+
+
 
 
 
