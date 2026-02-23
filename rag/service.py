@@ -890,6 +890,16 @@ def rag_analyze_review(
             warnings.append("multipass_narrative_failed")
             warnings.append("multipass_narrative_failed")
     else:
+                # DEBUG: prove whether we are actually calling the LLM and what object we are using
+        if debug:
+            try:
+                stats["debug_llm_call_attempted"] = True
+                stats["debug_llm_type"] = type(llm).__name__
+                stats["debug_llm_has_generate"] = bool(callable(getattr(llm, "generate", None)))
+                stats["debug_llm_provider_env"] = _env("LLM_PROVIDER", "")
+                stats["debug_bedrock_model_id"] = _env("BEDROCK_MODEL_ID", "")
+            except Exception:
+                pass
         llm_text, llm_err = _llm_text(llm, prompt)
     # Defensive init to prevent UnboundLocalError if an upstream path fails early
     llm_text = ""
@@ -1022,6 +1032,7 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
 
 
 
