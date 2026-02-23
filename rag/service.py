@@ -900,6 +900,18 @@ def rag_analyze_review(
                 stats["debug_bedrock_model_id"] = _env("BEDROCK_MODEL_ID", "")
             except Exception:
                 pass
+                # DEBUG: capture LLM object info BEFORE calling (stats dict is built later)
+        llm_debug: Dict[str, Any] = {}
+        if debug:
+            try:
+                llm_debug["debug_llm_call_attempted"] = True
+                llm_debug["debug_llm_type"] = type(llm).__name__
+                llm_debug["debug_llm_has_generate"] = bool(callable(getattr(llm, "generate", None)))
+                llm_debug["debug_llm_provider_env"] = _env("LLM_PROVIDER", "")
+                llm_debug["debug_bedrock_model_id"] = _env("BEDROCK_MODEL_ID", "")
+            except Exception:
+                llm_debug = {}
+
         llm_text, llm_err = _llm_text(llm, prompt)
     # Defensive init to prevent UnboundLocalError if an upstream path fails early
     llm_text = ""
@@ -991,6 +1003,14 @@ def rag_analyze_review(
         stats["debug_llm_raw_prefix"] = (llm_text or "")[:1500]
         stats["debug_llm_text_len"] = len(llm_text or "")
         stats["retrieval_debug"] = retrieval_debug
+        # DEBUG: surface LLM call metadata + output sizing
+        try:
+            if isinstance(llm_debug, dict) and llm_debug:
+                stats.update(llm_debug)
+        except Exception:
+            pass
+        stats["debug_llm_text_len"] = len(llm_text or "")
+        stats["debug_llm_text_preview"] = (llm_text or "")[:200]
 
     return {
         "review_id": review_id,
@@ -1032,6 +1052,7 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
 
 
 
