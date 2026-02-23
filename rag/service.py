@@ -610,6 +610,33 @@ def _llm_text(llm: Any, prompt: str) -> Tuple[str, Optional[str]]:
 
     return "", last_err
 
+def _load_docs_for_review_from_dynamodb(*, review_id: str) -> list[dict]:
+    rid = (review_id or "").strip()
+    if not rid:
+        return []
+    try:
+        import boto3
+        from boto3.dynamodb.conditions import Key
+
+        table_name = (_env("DYNAMODB_TABLE", "") or "").strip()
+        if not table_name:
+            return []
+
+        pk = f"REVIEW#{rid}"
+        tbl = boto3.resource("dynamodb").Table(table_name)
+        resp = tbl.query(KeyConditionExpression=Key("pk").eq(pk))
+        items = resp.get("Items") or []
+
+        out: list[dict] = []
+        for it in items:
+            sk = str(it.get("sk") or "")
+            if sk.startswith("DOC#"):
+                doc_id = sk.split("#", 1)[1].strip()
+                if doc_id:
+                    out.append({"doc_id": doc_id})
+        return out
+    except Exception:
+        return []
 
 def rag_analyze_review(
     *,
@@ -712,6 +739,12 @@ def rag_analyze_review(
             docs = review.get("docs") or []
         except Exception:
             docs = []
+    # If docs are not embedded on the review object, try Dynamo mapping (pk=REVIEW#<id>, sk=DOC#<doc_id>)
+    if (not isinstance(docs, list)) or (not docs):
+        if (_env("METADATA_STORE", "").strip().lower() == "dynamodb"):
+            _ddb_docs = _load_docs_for_review_from_dynamodb(review_id=review_id)
+            if isinstance(_ddb_docs, list) and _ddb_docs:
+                docs = _ddb_docs
 
     # force_reingest
     ingest_stats: Optional[Dict[str, Any]] = None
@@ -989,6 +1022,8 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
+
 
 
 
