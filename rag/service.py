@@ -1,6 +1,8 @@
 # rag/service.py
 from __future__ import annotations
 from rag.service_helpers import _extend_questions_with_targeted
+from rag.prompts import STRICT_SUMMARY_PROMPT, RISK_TRIAGE_PROMPT, _build_review_summary_prompt
+from rag.questions import _question_section_map
 
 import hashlib
 import json
@@ -63,101 +65,6 @@ RAG_REVIEW_SUMMARY_SECTIONS: List[str] = [
 # Prompt templates (stakeholder-aware; owners remain deterministic in UI)
 # =============================================================================
 
-STRICT_SUMMARY_PROMPT = """\
-You are Contract Security Studio.
-
-You are analyzing a set of documents for a single contract review. Write ONE unified cross-document executive brief.
-You MUST ground statements ONLY in the CONTRACT EVIDENCE blocks provided.
-
-HARD RULES
-- Plain text only. No markdown.
-- Do NOT fabricate facts. If you cannot support a claim from CONTRACT EVIDENCE, write: INSUFFICIENT EVIDENCE.
-- Do NOT cite or reference anything outside CONTRACT EVIDENCE.
-- Keep it concise but complete: 1Ã¢â‚¬â€œ2 sentences + bullets per section.
-- Avoid repeating the same fact in multiple sections.
-- Do NOT include an 'EVIDENCE:' subsection; evidence is attached separately.
-
-STYLE RULES
-- Facts can be stated as plain bullets.
-- When you state a requirement/obligation, include a short quoted/paraphrased phrase from the evidence snippet (not a citation link; just the language).
-
-SECTIONS (exact order)
-{headers}
-
-STAKEHOLDER AWARENESS (DO NOT LABEL OWNERS IN OUTPUT)
-While writing, mentally consider who would act on each risk or open question:
-- Program/PM: schedule, milestones, deliverables, staffing
-- Security/ISSO: controls, logging, access, incident response, CUI handling
-- Legal/Contracts: clauses, flowdowns, terms, acceptance, data rights
-- Finance: pricing, invoicing, rates, cost realism
-
-STAKEHOLDER ROLLUP (short)
-At the end, add:
-STAKEHOLDER ROLLUP
-- Program/PM: <1 short paragraph>
-- Security/ISSO: <1 short paragraph>
-- Legal/Contracts: <1 short paragraph>
-- Finance: <1 short paragraph>
-
-CONTRACT EVIDENCE
-----------------
-{context}
-----------------
-"""
-
-RISK_TRIAGE_PROMPT = """\
-You are Contract Security Studio.
-
-You are performing risk-focused triage for a single contract review.
-You MUST ground statements ONLY in the CONTRACT EVIDENCE blocks provided.
-You may use the DETERMINISTIC SIGNALS block as prioritization hints, but it is NOT contract evidence.
-
-HARD RULES
-- Plain text only. No markdown.
-- Do NOT fabricate facts. If you cannot support a claim from CONTRACT EVIDENCE, write: INSUFFICIENT EVIDENCE.
-- CONTRACT EVIDENCE is citable; DETERMINISTIC SIGNALS are NOT citable as contract text.
-- Do NOT quote deterministic signals as if they came from the contract.
-- Prefer short, high-signal bullets.
-- Do NOT include an 'EVIDENCE:' subsection; evidence is attached separately.
-
-OWNER LABEL RULE (IMPORTANT)
-Only add an Owner tag on bullets that are a RISK, CONSTRAINT, or ACTION.
-Do NOT add Owner tags for pure factual summaries.
-
-Owner tags (choose one):
-Owner: Program/PM
-Owner: Security/ISSO
-Owner: Legal/Contracts
-Owner: Finance
-
-OUTPUT FORMAT
-For each section below:
-- Start with 1 sentence summary.
-- Then bullets. Risk/constraint/action bullets include Owner tag at end.
-
-SECTIONS (exact order)
-{headers}
-
-STAKEHOLDER ROLLUP (short)
-At the end, add:
-STAKEHOLDER ROLLUP
-- Program/PM: <1 short paragraph of top actions/risks>
-- Security/ISSO: <1 short paragraph of top actions/risks>
-- Legal/Contracts: <1 short paragraph of top actions/risks>
-- Finance: <1 short paragraph of top actions/risks>
-
-DETERMINISTIC SIGNALS (NOT CONTRACT EVIDENCE)
-----------------
-{signals}
-----------------
-
-CONTRACT EVIDENCE
-----------------
-{context}
-----------------
-"""
-
-# =============================================================================
 # Small utilities
 # =============================================================================
 def _env(name: str, default: str = "") -> str:
@@ -235,10 +142,10 @@ def _postprocess_review_summary(text: str) -> str:
     hardened = _render_sections_in_order(parsed, RAG_REVIEW_SUMMARY_SECTIONS)
 
     # Common encoding artifacts seen in logs / copied text
-    hardened = hardened.replace("ÃƒÆ’Ã…Â½ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³", "-")
-    hardened = hardened.replace("ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢", "-")
-    hardened = hardened.replace("ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢", "-")
-    hardened = hardened.replace("Ã¢â‚¬Â¢", "-")
+    hardened = hardened.replace("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³", "-")
+    hardened = hardened.replace("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢", "-")
+    hardened = hardened.replace("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢", "-")
+    hardened = hardened.replace("ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢", "-")
 
     return _collapse_blank_lines(hardened)
 
@@ -290,7 +197,7 @@ def _strip_owner_tokens(s: str) -> str:
     t = _OWNER_INLINE_RE.sub("", t).strip()
 
     # Also remove trailing separators left behind
-    t = re.sub(r"\s*[-Ã¢â‚¬â€œÃ¢â‚¬â€]\s*$", "", t).strip()
+    t = re.sub(r"\s*[-ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â]\s*$", "", t).strip()
 
     return t
 
@@ -463,42 +370,6 @@ def _effective_snippet_chars(context_profile: str) -> int:
 # =============================================================================
 # Questions
 # =============================================================================
-def _question_section_map(intent: str) -> List[Tuple[str, str]]:
-    intent = (intent or "strict_summary").strip().lower()
-
-    if intent == "risk_triage":
-        return [
-            ("SECURITY, COMPLIANCE & HOSTING CONSTRAINTS", "Identify cybersecurity / ATO / RMF / IL requirements and risks (encryption, logging, incident reporting, vuln mgmt)."),
-            ("SECURITY, COMPLIANCE & HOSTING CONSTRAINTS", "Identify CUI handling / safeguarding requirements and risks (marking, access, transmission, storage, disposal)."),
-            ("LEGAL & DATA RIGHTS RISKS", "Identify privacy / PII / data protection obligations and risks."),
-            ("LEGAL & DATA RIGHTS RISKS", "Identify legal/data-rights terms and risks (IP/data rights, audit rights, GFI/GFM handling, disclosure penalties)."),
-            ("ELIGIBILITY & PERSONNEL CONSTRAINTS", "Identify subcontractor / flowdown / staffing constraints and risks (citizenship, clearance, facility, export)."),
-            ("DELIVERABLES & TIMELINES", "Identify delivery/acceptance gates and required approvals (CDRLs, QA, test, acceptance criteria)."),
-            ("FINANCIAL RISKS", "Identify financial and invoicing risks (ceilings, overruns, payment terms, reporting cadence)."),
-            ("DELIVERABLES & TIMELINES", "Identify schedule risks (IMS, milestones, reporting cadence, penalties)."),
-            ("CONTRADICTIONS & INCONSISTENCIES", "Identify ambiguous/undefined terms and contradictions that require clarification."),
-            ("OVERVIEW", "List top red-flag phrases/requirements with evidence and suggested internal owner (security/legal/PM/finance)."),
-            ("MISSION & OBJECTIVE", "What is the mission and objective of this effort?"),
-            ("SCOPE OF WORK", "What is the scope of work and required deliverables?"),
-            ("SUBMISSION INSTRUCTIONS & DEADLINES", "What are submission instructions and deadlines, including required formats and delivery method?"),
-            ("GAPS / QUESTIONS FOR THE GOVERNMENT", "What gaps require clarification from the Government?"),
-            ("RECOMMENDED INTERNAL ACTIONS", "What internal actions should we take next (security/legal/PM/engineering/finance)?"),
-        ]
-
-    return [
-        ("MISSION & OBJECTIVE", "What is the mission and objective of this effort?"),
-        ("SCOPE OF WORK", "What is the scope of work and required deliverables?"),
-        ("SECURITY, COMPLIANCE & HOSTING CONSTRAINTS", "What are the security, compliance, and hosting constraints (IL levels, NIST, DFARS, CUI, ATO/RMF, logging)?"),
-        ("ELIGIBILITY & PERSONNEL CONSTRAINTS", "What are the eligibility and personnel constraints (citizenship, clearances, facility, location, export controls)?"),
-        ("LEGAL & DATA RIGHTS RISKS", "What are key legal and data rights risks (IP/data rights, audit rights, flowdowns)?"),
-        ("FINANCIAL RISKS", "What are key financial risks (pricing model, ceilings, invoicing systems, payment terms)?"),
-        ("SUBMISSION INSTRUCTIONS & DEADLINES", "What are submission instructions and deadlines, including required formats and delivery method?"),
-        ("CONTRADICTIONS & INCONSISTENCIES", "What contradictions or inconsistencies exist across documents?"),
-        ("GAPS / QUESTIONS FOR THE GOVERNMENT", "What gaps require clarification from the Government?"),
-        ("RECOMMENDED INTERNAL ACTIONS", "What internal actions should we take next (security/legal/PM/engineering/finance)?"),
-    ]
-
-
 def _slug(s: str) -> str:
     s = (s or "").strip().lower()
     out: List[str] = []
@@ -1109,21 +980,6 @@ def _render_deterministic_signals_block(
     return "BEGIN DETERMINISTIC SIGNALS\nNOT CONTRACT EVIDENCE\n" + block + "\nEND DETERMINISTIC SIGNALS"
 
 
-def _build_review_summary_prompt(
-    *,
-    intent: str,
-    context_profile: str,
-    context: str,
-    section_headers: List[str],
-    signals: str = "",
-) -> str:
-    headers = "\n".join([h.strip() for h in (section_headers or []) if (h or "").strip()])
-    intent_l = (intent or "strict_summary").strip().lower()
-    tmpl = RISK_TRIAGE_PROMPT if intent_l == "risk_triage" else STRICT_SUMMARY_PROMPT
-    return tmpl.format(headers=headers, context=context or "", signals=signals or "")
-
-
-# =============================================================================
 # Deterministic retrieval
 # =============================================================================
 def _retrieve_context_local(
@@ -1189,6 +1045,14 @@ def _retrieve_context_local(
         used += len(hdr)
 
         per_q = min(max(effective_top_k, 8), 20)
+        # risk_triage tends to explode context; cap per-question evidence lines more aggressively
+        # so later sections arenÃ¢â‚¬â„¢t starved when prompt trimming occurs.
+        if str(review_id) and isinstance(questions, list):
+            # intent is not passed here; infer triage by presence of many targeted questions heuristically:
+            # if question count is high, treat as triage-like context pressure.
+            # (This keeps signature stable and avoids threading intent everywhere.)
+            if len(questions) >= 15:
+                per_q = min(max(effective_top_k, 4), 8)
         for h in hits[:per_q]:
             txt = (h.get("chunk_text") or "").strip()
             if not txt:
