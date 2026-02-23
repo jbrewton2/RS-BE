@@ -808,6 +808,9 @@ def rag_analyze_review(
             signals = ""
 
     # Prompt
+    # Ensure llm_text/llm_err are always defined before any truncation logic references them
+    llm_text = ""
+    llm_err = None
     prompt = _build_review_summary_prompt(
         intent=intent,
         context_profile=profile,
@@ -839,9 +842,7 @@ def rag_analyze_review(
                 section_headers=RAG_REVIEW_SUMMARY_SECTIONS,
                 signals=signals,
             )
-            if not (llm_text or "").strip():
-                warnings.append("multipass_narrative_empty")
-                warnings.append("prompt_truncated")
+            warnings.append("prompt_truncated")
     mp_max_lines = int((_env("RAG_MULTIPASS_MAX_EVIDENCE_LINES", "12") or "12").strip() or "12")
     mp_max_sent = int((_env("RAG_MULTIPASS_MAX_SENTENCES", "6") or "6").strip() or "6")
     # Multi-pass narrative (optional) to avoid 8192 context blowups
@@ -1235,6 +1236,7 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
 
 
 
