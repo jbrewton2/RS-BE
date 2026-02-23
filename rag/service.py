@@ -768,6 +768,12 @@ def rag_analyze_review(
     effective_top_k = re_effective_top_k(top_k, profile)
     snippet_cap = re_effective_snippet_chars(profile)
     context_cap = re_effective_context_chars(profile)
+    # Keep fast risk_triage prompts smaller for Bedrock reliability
+    if intent == "risk_triage" and profile == "fast":
+        try:
+            context_cap = min(context_cap, int((_env("RAG_TRIAGE_CONTEXT_CAP_FAST", "6000") or "6000").strip() or "6000"))
+        except Exception:
+            context_cap = min(context_cap, 6000)
     # risk_triage deep mode can overfill context and then get prompt-trimmed (hurts later sections).
     # Cap assembled context so the prompt is less likely to truncate critical sections.
     if intent == "risk_triage" and profile == "deep":
@@ -932,6 +938,22 @@ def rag_analyze_review(
                 llm_debug = {}
 
         llm_text, llm_err = _llm_text(llm, prompt)
+
+        # If Bedrock returns empty on long prompts, retry once with a shorter prompt cap.
+        if not (llm_text or "").strip():
+            try:
+                retry_cap = int((_env("RAG_LLM_RETRY_PROMPT_CAP", "6000") or "6000").strip() or "6000")
+            except Exception:
+                retry_cap = 6000
+
+            if retry_cap > 200 and len(prompt or "") > retry_cap:
+                try:
+                    llm_text2, llm_err2 = _llm_text(llm, (prompt or "")[:retry_cap])
+                    if (llm_text2 or "").strip():
+                        llm_text, llm_err = llm_text2, llm_err2
+                        warnings.append("llm_retry_truncated")
+                except Exception:
+                    pass
     # Defensive init to prevent UnboundLocalError if an upstream path fails early
     llm_text = ""
     llm_err = None
