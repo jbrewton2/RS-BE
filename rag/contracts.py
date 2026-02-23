@@ -73,7 +73,6 @@ class RagEvidenceSnippet(BaseModel):
 class RagSection(BaseModel):
     id: str
     owner: Optional[str] = None  # Security/ISSO | Legal/Contracts | Program/PM | Engineering | Finance | QA
-
     title: str
 
     findings: List[str] = Field(default_factory=list)
@@ -129,11 +128,36 @@ class RagAnalyzeResponse(BaseModel):
     sections: Optional[List[RagSection]] = None
     risks: Optional[List[Dict[str, Any]]] = None
 
+    # -------------------------------------------------------------------------
+    # Executive Risk UI fields (MUST be present; router uses response_model_exclude_none=True)
+    # -------------------------------------------------------------------------
+
+    # Tier counts from materialization / rollup (tier3_flags, tier2_heuristics, tier2_sections, tier1_inference, total)
+    risk_objects: Dict[str, int] = Field(default_factory=dict)
+
+    # One synthesized object:
+    # {
+    #   overall_level: "Low|Moderate|High",
+    #   max_severity: "Informational|Low|Medium|High|Critical",
+    #   tier_counts: {...},
+    #   by_category: {...},
+    #   ai_only_count: int,
+    #   drivers: [ ... ],
+    #   overall_statement: str
+    # }
+    risk_summary: Dict[str, Any] = Field(default_factory=dict)
+
+    # Dynamic category names present in risk_areas (always [])
+    risk_areas_identified: List[str] = Field(default_factory=list)
+
+    # Map: category -> list[risk dicts] (always {})
+    risk_areas: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
+
     # IMPORTANT:
     # stats is intentionally untyped to preserve debug payload keys (debug_context, retrieval_debug, ingest, etc.).
     stats: Dict[str, Any] = Field(default_factory=dict)
 
     warnings: List[str] = Field(default_factory=list)
 
-    # Debug payload (only when debug=true)
+    # Debug payload (only when debug=true) - keep loose for compatibility
     retrieved: Optional[Dict[str, list]] = None
