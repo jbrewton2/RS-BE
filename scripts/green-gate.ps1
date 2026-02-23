@@ -97,7 +97,7 @@ function Ensure-Dir([string]$Path) {
 
 function Read-Json([string]$Path) {
   $raw = Get-Content $Path -Raw
-  return $raw | ConvertFrom-Json -Depth 100
+  return $raw | ConvertFrom-Json
 }
 
 function To-JsonFile($Obj, [string]$Path) {
@@ -428,5 +428,6 @@ catch {
   Dump-K8sDiagnostics -Ns $Namespace -Dep $Deployment -Selector $PodSelector -OutDir $OutDir
   throw
 }
+
 
 
