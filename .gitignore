@@ -113,3 +113,6 @@ rag/service.py.bak.*
 logs_*.txt
 tail_full_*.txt
 
+
+_scratch/
+
