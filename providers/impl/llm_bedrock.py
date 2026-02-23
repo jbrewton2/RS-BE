@@ -66,6 +66,7 @@ class BedrockLLMProvider(LLMProvider):
                 "prompt": llama_prompt,
                 "max_gen_len": max_tokens,
                 "temperature": temperature,
+                "top_p": top_p,
             }
 
             resp = self.client.invoke_model(
@@ -152,4 +153,5 @@ class BedrockLLMProvider(LLMProvider):
                 raise RuntimeError("Bedrock embeddings response missing 'embedding' list")
             out.append([float(x) for x in emb])
         return out
+
 
