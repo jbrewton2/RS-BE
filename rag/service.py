@@ -610,6 +610,33 @@ def _llm_text(llm: Any, prompt: str) -> Tuple[str, Optional[str]]:
 
     return "", last_err
 
+def _load_docs_for_review_from_dynamodb(*, review_id: str) -> list[dict]:
+    rid = (review_id or "").strip()
+    if not rid:
+        return []
+    try:
+        import boto3
+        from boto3.dynamodb.conditions import Key
+
+        table_name = (_env("DYNAMODB_TABLE", "") or "").strip()
+        if not table_name:
+            return []
+
+        pk = f"REVIEW#{rid}"
+        tbl = boto3.resource("dynamodb").Table(table_name)
+        resp = tbl.query(KeyConditionExpression=Key("pk").eq(pk))
+        items = resp.get("Items") or []
+
+        out: list[dict] = []
+        for it in items:
+            sk = str(it.get("sk") or "")
+            if sk.startswith("DOC#"):
+                doc_id = sk.split("#", 1)[1].strip()
+                if doc_id:
+                    out.append({"doc_id": doc_id})
+        return out
+    except Exception:
+        return []
 
 def rag_analyze_review(
     *,
@@ -712,6 +739,12 @@ def rag_analyze_review(
             docs = review.get("docs") or []
         except Exception:
             docs = []
+    # If docs are not embedded on the review object, try Dynamo mapping (pk=REVIEW#<id>, sk=DOC#<doc_id>)
+    if (not isinstance(docs, list)) or (not docs):
+        if (_env("METADATA_STORE", "").strip().lower() == "dynamodb"):
+            _ddb_docs = _load_docs_for_review_from_dynamodb(review_id=review_id)
+            if isinstance(_ddb_docs, list) and _ddb_docs:
+                docs = _ddb_docs
 
     # force_reingest
     ingest_stats: Optional[Dict[str, Any]] = None
@@ -735,6 +768,12 @@ def rag_analyze_review(
     effective_top_k = re_effective_top_k(top_k, profile)
     snippet_cap = re_effective_snippet_chars(profile)
     context_cap = re_effective_context_chars(profile)
+    # Keep fast risk_triage prompts smaller for Bedrock reliability
+    if intent == "risk_triage" and profile == "fast":
+        try:
+            context_cap = min(context_cap, int((_env("RAG_TRIAGE_CONTEXT_CAP_FAST", "6000") or "6000").strip() or "6000"))
+        except Exception:
+            context_cap = min(context_cap, 6000)
     # risk_triage deep mode can overfill context and then get prompt-trimmed (hurts later sections).
     # Cap assembled context so the prompt is less likely to truncate critical sections.
     if intent == "risk_triage" and profile == "deep":
@@ -769,6 +808,9 @@ def rag_analyze_review(
             signals = ""
 
     # Prompt
+    # Ensure llm_text/llm_err are always defined before any truncation logic references them
+    llm_text = ""
+    llm_err = None
     prompt = _build_review_summary_prompt(
         intent=intent,
         context_profile=profile,
@@ -800,9 +842,7 @@ def rag_analyze_review(
                 section_headers=RAG_REVIEW_SUMMARY_SECTIONS,
                 signals=signals,
             )
-            if not (llm_text or "").strip():
-                warnings.append("multipass_narrative_empty")
-                warnings.append("prompt_truncated")
+            warnings.append("prompt_truncated")
     mp_max_lines = int((_env("RAG_MULTIPASS_MAX_EVIDENCE_LINES", "12") or "12").strip() or "12")
     mp_max_sent = int((_env("RAG_MULTIPASS_MAX_SENTENCES", "6") or "6").strip() or "6")
     # Multi-pass narrative (optional) to avoid 8192 context blowups
@@ -857,10 +897,165 @@ def rag_analyze_review(
             warnings.append("multipass_narrative_failed")
             warnings.append("multipass_narrative_failed")
     else:
+                # DEBUG: capture LLM object info BEFORE calling (stats dict is built later)
+        llm_debug: Dict[str, Any] = {}
+        if debug:
+            try:
+                llm_debug["debug_llm_call_attempted"] = True
+                llm_debug["debug_llm_type"] = type(llm).__name__
+                llm_debug["debug_llm_module"] = getattr(type(llm), "__module__", "")
+                try:
+                    import inspect
+                    llm_debug["debug_llm_source_file"] = inspect.getsourcefile(type(llm)) or ""
+                except Exception:
+                    llm_debug["debug_llm_source_file"] = ""
+                llm_debug["debug_llm_has_generate"] = bool(callable(getattr(llm, "generate", None)))
+                llm_debug["debug_llm_provider_env"] = _env("LLM_PROVIDER", "")
+                llm_debug["debug_bedrock_model_id"] = _env("BEDROCK_MODEL_ID", "")
+            except Exception:
+                llm_debug = {}
+
+        # Hard-cap the prompt for fast risk_triage to avoid Bedrock empty generations on longer inputs
+        if intent == "risk_triage" and profile == "fast":
+            try:
+                _cap = int((_env("RAG_TRIAGE_PROMPT_CAP_FAST", "6000") or "6000").strip() or "6000")
+            except Exception:
+                _cap = 6000
+            if _cap > 200 and len(prompt or "") > _cap:
+                prompt = (prompt or "")[:_cap]
+                if debug: warnings.append("prompt_capped_fast")
+        # Sanitize prompt for Bedrock reliability (strip control chars / non-ascii artifacts)
+        if (_env("LLM_PROVIDER", "").strip().lower() == "bedrock"):
+            try:
+                _p = (prompt or "").replace("\r\n", "\n").replace("\r", "\n")
+                # Drop non-printing control chars except newline/tab
+                _p = "".join(ch for ch in _p if (ch == "\n" or ch == "\t" or ord(ch) >= 32))
+                # Strip remaining non-ascii to avoid Bedrock empty generations on bad bytes
+                _p = _p.encode("ascii", errors="ignore").decode("ascii", errors="ignore")
+                prompt = _p
+                if debug: warnings.append("prompt_sanitized_bedrock")
+            except Exception:
+                pass
+        # Multipass-lite for FAST risk_triage: generate each section with only its evidence to avoid mega-prompt starvation.
+        # Toggle: RAG_MULTIPASS_FAST=1 (default). Set 0 to disable.
+        if intent == "risk_triage" and profile == "fast" and (_env("RAG_MULTIPASS_FAST", "0").strip() == "1"):
+            try:
+                def _pick_text(hit: Any) -> str:
+                    if not isinstance(hit, dict):
+                        return ""
+                    for k in ("snippet", "chunk_text", "text", "content", "passage"):
+                        v = hit.get(k)
+                        if isinstance(v, str) and v.strip():
+                            return v.strip()
+                    return ""
+
+                def _evidence_lines_for_question(q: str, max_lines: int = 8) -> List[str]:
+                    hits = (retrieved or {}).get(q) or []
+                    out: List[str] = []
+                    for h in (hits or []):
+                        if not isinstance(h, dict):
+                            continue
+                        doc = str(h.get("doc_name") or h.get("document_name") or h.get("source") or "").strip()
+                        cid = str(h.get("chunk_id") or h.get("id") or "").strip()
+                        t = _pick_text(h)
+                        if not t:
+                            continue
+                        t = t.replace("\r\n", "\n").replace("\r", "\n")
+                        t = " ".join(t.split())
+                        if len(t) > 260:
+                            t = t[:260].rstrip() + "..."
+                        if doc or cid:
+                            out.append(f"- ({doc} / {cid}) {t}".strip())
+                        else:
+                            out.append(f"- {t}".strip())
+                        if len(out) >= int(max_lines):
+                            break
+                    return out
+
+                section_chunks: List[str] = []
+                # section_question_map exists earlier; if not, rebuild it
+                sqm = section_question_map or _question_section_map(intent)
+
+                for sid, q in (sqm or []):
+                    sec_title = str(sid or "").strip().upper().replace("_", " ")
+                    ev_lines = _evidence_lines_for_question(str(q), max_lines=8)
+
+                    mini = []
+                    mini.append("You are Contract Security Studio.")
+                    mini.append("")
+                    mini.append("You are performing risk-focused triage for a single contract review.")
+                    mini.append("You MUST ground statements ONLY in the CONTRACT EVIDENCE lines provided below.")
+                    mini.append("If evidence is insufficient, write: INSUFFICIENT EVIDENCE.")
+                    mini.append("")
+                    mini.append("HARD RULES")
+                    mini.append("- Plain text only. No markdown.")
+                    mini.append("- Do NOT fabricate facts.")
+                    mini.append("- Prefer short, high-signal bullets.")
+                    mini.append("")
+                    mini.append("OWNER TAGS (only for risks/constraints/actions)")
+                    mini.append("Owner: Program/PM")
+                    mini.append("Owner: Security/ISSO")
+                    mini.append("Owner: Legal/Contracts")
+                    mini.append("Owner: Finance")
+                    mini.append("")
+                    mini.append(f"SECTION: {sec_title}")
+                    mini.append("")
+                    mini.append("CONTRACT EVIDENCE")
+                    if ev_lines:
+                        mini.extend(ev_lines)
+                    else:
+                        mini.append("(none)")
+                    mini.append("")
+                    mini.append("OUTPUT")
+                    mini.append("1 sentence summary.")
+                    mini.append("Then bullets. Add Owner tag at end for risks/constraints/actions only.")
+                    mini_prompt = "\n".join(mini).strip() + "\n"
+
+                    # keep prompt safe for bedrock
+                    if (_env("LLM_PROVIDER", "").strip().lower() == "bedrock"):
+                        try:
+                            _pp = mini_prompt.replace("\r\n", "\n").replace("\r", "\n")
+                            _pp = "".join(ch for ch in _pp if (ch == "\n" or ch == "\t" or ord(ch) >= 32))
+                            _pp = _pp.encode("ascii", errors="ignore").decode("ascii", errors="ignore")
+                            mini_prompt = _pp
+                        except Exception:
+                            pass
+
+                    t, e = _llm_text(llm, mini_prompt)
+                    t = (t or "").strip()
+                    if not t:
+                        t = "INSUFFICIENT EVIDENCE"
+                    section_chunks.append(sec_title)
+                    section_chunks.append(t)
+                    section_chunks.append("")
+
+                llm_text = "\n".join(section_chunks).strip() + "\n"
+                llm_err = None
+                warnings.append("multipass_fast_used")
+            except Exception as _e:
+                # fall back to normal single prompt path
+                warnings.append("multipass_fast_failed")
         llm_text, llm_err = _llm_text(llm, prompt)
-    # Defensive init to prevent UnboundLocalError if an upstream path fails early
-    llm_text = ""
-    llm_err = None
+
+        # If Bedrock returns empty on long prompts, retry once with a shorter prompt cap.
+        if not (llm_text or "").strip():
+            try:
+                retry_cap = int((_env("RAG_LLM_RETRY_PROMPT_CAP", "6000") or "6000").strip() or "6000")
+            except Exception:
+                retry_cap = 6000
+
+            if retry_cap > 200 and len(prompt or "") > retry_cap:
+                try:
+                    llm_text2, llm_err2 = _llm_text(llm, (prompt or "")[:retry_cap])
+                    if (llm_text2 or "").strip():
+                        llm_text, llm_err = llm_text2, llm_err2
+                        warnings.append("llm_retry_truncated")
+                except Exception:
+                    pass
+    # Defensive init: only set defaults if missing (do NOT clobber successful outputs)
+    if llm_text is None:
+        llm_text = ""
+    # llm_err may legitimately be None on success; do not overwrite if already set
     if debug and (llm_err or "").strip():
         warnings.append("llm_error")
     if debug and not (llm_text or "").strip():
@@ -945,9 +1140,38 @@ def rag_analyze_review(
         stats["debug_context"] = _dbg_ctx[:6000]
 
         stats["debug_prompt_prefix"] = (prompt or "")[:1500]
+        stats["debug_prompt_len"] = len(prompt or "")
+        # DEBUG: determine if Bedrock returns empty only for long prompts (length/content isolation)
+        try:
+            def _smoke_len(n: int) -> None:
+                try:
+                    _out = llm.generate((prompt or "")[:n], max_tokens=128, temperature=0.0, top_p=1.0)
+                    _t = ""
+                    if isinstance(_out, dict):
+                        _t = str(_out.get("text") or "")
+                    elif isinstance(_out, str):
+                        _t = _out
+                    _t = (_t or "").strip()
+                    stats[f"debug_llm_smoke_prompt_{n}_text_len"] = len(_t)
+                    stats[f"debug_llm_smoke_prompt_{n}_preview"] = _t[:120]
+                except Exception as e:
+                    stats[f"debug_llm_smoke_prompt_{n}_error"] = repr(e)
+
+            _smoke_len(2000)
+            _smoke_len(6000)
+        except Exception:
+            pass
         stats["debug_llm_raw_prefix"] = (llm_text or "")[:1500]
         stats["debug_llm_text_len"] = len(llm_text or "")
         stats["retrieval_debug"] = retrieval_debug
+        # DEBUG: surface LLM call metadata + output sizing
+        try:
+            if isinstance(llm_debug, dict) and llm_debug:
+                stats.update(llm_debug)
+        except Exception:
+            pass
+        stats["debug_llm_text_len"] = len(llm_text or "")
+        stats["debug_llm_text_preview"] = (llm_text or "")[:200]
 
     return {
         "review_id": review_id,
@@ -989,6 +1213,19 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
