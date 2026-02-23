@@ -1,5 +1,6 @@
 # rag/service.py
 from __future__ import annotations
+from rag.service_helpers import _extend_questions_with_targeted
 
 import hashlib
 import json
@@ -72,7 +73,7 @@ HARD RULES
 - Plain text only. No markdown.
 - Do NOT fabricate facts. If you cannot support a claim from CONTRACT EVIDENCE, write: INSUFFICIENT EVIDENCE.
 - Do NOT cite or reference anything outside CONTRACT EVIDENCE.
-- Keep it concise but complete: 1–2 sentences + bullets per section.
+- Keep it concise but complete: 1Ã¢â‚¬â€œ2 sentences + bullets per section.
 - Avoid repeating the same fact in multiple sections.
 - Do NOT include an 'EVIDENCE:' subsection; evidence is attached separately.
 
@@ -234,10 +235,10 @@ def _postprocess_review_summary(text: str) -> str:
     hardened = _render_sections_in_order(parsed, RAG_REVIEW_SUMMARY_SECTIONS)
 
     # Common encoding artifacts seen in logs / copied text
-    hardened = hardened.replace("ÃŽâ€œÃƒâ€¡ÃƒÂ³", "-")
+    hardened = hardened.replace("ÃƒÆ’Ã…Â½ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³", "-")
+    hardened = hardened.replace("ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢", "-")
+    hardened = hardened.replace("ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢", "-")
     hardened = hardened.replace("Ã¢â‚¬Â¢", "-")
-    hardened = hardened.replace("â€¢", "-")
-    hardened = hardened.replace("•", "-")
 
     return _collapse_blank_lines(hardened)
 
@@ -289,7 +290,7 @@ def _strip_owner_tokens(s: str) -> str:
     t = _OWNER_INLINE_RE.sub("", t).strip()
 
     # Also remove trailing separators left behind
-    t = re.sub(r"\s*[-–—]\s*$", "", t).strip()
+    t = re.sub(r"\s*[-Ã¢â‚¬â€œÃ¢â‚¬â€]\s*$", "", t).strip()
 
     return t
 
@@ -1324,6 +1325,13 @@ def rag_analyze_review(
     # Retrieval + context
     section_question_map = _question_section_map(intent)
     questions = [q for (_sec, q) in (section_question_map or [])]
+    questions = _extend_questions_with_targeted(
+        base_questions=questions,
+        intent=intent,
+        auto_flags=(review or {}).get("autoFlags"),
+        heuristic_hits=heuristic_hits,
+        max_targeted=10,
+    )
     effective_top_k = _effective_top_k(top_k, profile)
     snippet_cap = _effective_snippet_chars(profile)
     context_cap = _effective_context_chars(profile)

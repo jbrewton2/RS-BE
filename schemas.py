@@ -55,6 +55,14 @@ def _normalize_action(v):
     return "OTHER"
 
 def _normalize_category(v):
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    if s in ('ai_identified_risk','ai-identified-risk','ai_only','ai-only'):
+        return 'ai_identified_risk'
+    # Added: AI-only category (must remain explicitly labeled + low confidence)
+    # NOTE: This is a category label only; tier/precedence is still enforced in risk merge.
+
     if not v: return None
     v = v.upper()
     if v in RISK_CATEGORY_LIST: return v
@@ -238,4 +246,5 @@ class QuestionnaireFeedbackRequest(BaseModel):
     approved: bool
     feedback_reason: Optional[str] = None
     final_answer: Optional[str] = None
+
 

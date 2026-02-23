@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+
+from rag.risk_taxonomy import detect_triggered_areas_from_signals, build_targeted_questions
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
@@ -356,3 +358,44 @@ def retrieve_context(
 
     return retrieved, context, max_chars, signals
     return retrieved, context, max_chars, signals
+
+def _extend_questions_with_targeted(
+    base_questions: list[str],
+    intent: str,
+    auto_flags: dict | None,
+    heuristic_hits: list[dict] | None,
+    max_targeted: int = 10,
+) -> list[str]:
+    """
+    Adds targeted questions for risk areas triggered by deterministic signals.
+    - Triggers come from Tier 3 flags (review.autoFlags.hits) and Tier 2 heuristic_hits.
+    - Only applies for risk_triage.
+    """
+    intent_l = str(intent or "").strip().lower()
+    if intent_l != "risk_triage":
+        return base_questions or []
+
+    flag_hits = []
+    if isinstance(auto_flags, dict):
+        flag_hits = auto_flags.get("hits") or []
+
+    triggered = detect_triggered_areas_from_signals(flag_hits=flag_hits, heuristic_hits=heuristic_hits or [])
+    targeted = build_targeted_questions(triggered, max_questions=max_targeted)
+
+    # Deterministic ordering: base questions first, then targeted (dedup).
+    out: list[str] = []
+    seen: set[str] = set()
+
+    for q in (base_questions or []):
+        qs = str(q).strip()
+        if not qs or qs in seen:
+            continue
+        out.append(qs); seen.add(qs)
+
+    for q in targeted:
+        qs = str(q).strip()
+        if not qs or qs in seen:
+            continue
+        out.append(qs); seen.add(qs)
+
+    return out
