@@ -858,6 +858,9 @@ def rag_analyze_review(
             warnings.append("multipass_narrative_failed")
     else:
         llm_text, llm_err = _llm_text(llm, prompt)
+    # Defensive init to prevent UnboundLocalError if an upstream path fails early
+    llm_text = ""
+    llm_err = None
     if debug and (llm_err or "").strip():
         warnings.append("llm_error")
     if debug and not (llm_text or "").strip():
@@ -986,6 +989,7 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
 
 
 
