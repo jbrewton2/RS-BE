@@ -248,10 +248,10 @@ if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
   $pushLog  = Join-Path $OutDir "docker_push.log"
 
   # Docker/BuildKit often writes progress to stderr; don't let PowerShell treat that as failure.
-  & docker build -t $img . *>&1 | Out-File -Encoding utf8 $buildLog
+  cmd.exe /c "docker build -t `"$img`" . > `"$buildLog`" 2>&1"
   if ($LASTEXITCODE -ne 0) { throw "Docker build failed (exit=$LASTEXITCODE). See: $buildLog" }
 
-  & docker push $img *>&1 | Out-File -Encoding utf8 $pushLog
+  cmd.exe /c "docker push `"$img`" > `"$pushLog`" 2>&1"
   if ($LASTEXITCODE -ne 0) { throw "Docker push failed (exit=$LASTEXITCODE). See: $pushLog" }
 }
 
@@ -428,4 +428,5 @@ catch {
   Dump-K8sDiagnostics -Ns $Namespace -Dep $Deployment -Selector $PodSelector -OutDir $OutDir
   throw
 }
+
 
