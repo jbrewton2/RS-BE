@@ -147,9 +147,16 @@ def _parse_review_summary_sections(text: str) -> List[Dict[str, Any]]:
 
 def _evidence_key(ev: Dict[str, Any]) -> str:
     try:
-        doc = str(((ev or {}).get("doc_name") or (ev or {}).get("doc") or "")).strip()
-        cs = str(((ev or {}).get("char_start") or "")).strip()
-        ce = str(((ev or {}).get("char_end") or "")).strip()
+        e = (ev or {})
+        # Support both legacy snake_case and canonical camelCase
+        doc = str((e.get("doc") or e.get("doc_name") or "")).strip()
+        doc_id = str((e.get("docId") or e.get("doc_id") or "")).strip()
+        cs = str((e.get("charStart") if e.get("charStart") is not None else e.get("char_start")) or "").strip()
+        ce = str((e.get("charEnd") if e.get("charEnd") is not None else e.get("char_end")) or "").strip()
+
+        # doc_id is optional; include it if present to reduce accidental collisions
+        if doc_id:
+            return f"{doc}|{doc_id}|{cs}|{ce}"
         return f"{doc}|{cs}|{ce}"
     except Exception:
         return ""
@@ -183,14 +190,52 @@ def _attach_evidence_to_sections(
         for h in hits:
             if not isinstance(h, dict):
                 continue
+
             meta = h.get("meta") or {}
+
+            # Normalize metadata field names across engines/providers
+            doc = (meta.get("doc_name") or meta.get("doc") or meta.get("document_name") or "")
+            doc_id = (meta.get("doc_id") or meta.get("docId") or meta.get("document_id") or meta.get("documentId") or "")
+
+            char_start = meta.get("char_start")
+            if char_start is None:
+                char_start = meta.get("charStart")
+
+            char_end = meta.get("char_end")
+            if char_end is None:
+                char_end = meta.get("charEnd")
+
+            # Try to carry a short excerpt forward so UI can show something useful
+            txt = (
+                h.get("text")
+                or h.get("chunk_text")
+                or meta.get("text")
+                or meta.get("chunk_text")
+                or meta.get("excerpt")
+                or ""
+            )
+            if isinstance(txt, str):
+                txt = txt.replace("\r", " ").replace("\n", " ").strip()
+                if len(txt) > 800:
+                    txt = txt[:797].rstrip() + "..."
+            else:
+                txt = ""
+
             ev = {
-                "doc_name": meta.get("doc_name") or meta.get("doc") or "",
-                "doc_id": meta.get("doc_id") or "",
-                "char_start": meta.get("char_start"),
-                "char_end": meta.get("char_end"),
+                # Canonical schema (matches core/dynamo_meta.py expectations)
+                "doc": str(doc or ""),
+                "docId": str(doc_id or ""),
+                "charStart": char_start,
+                "charEnd": char_end,
                 "score": h.get("score"),
+                "text": txt,
+                # Legacy keys (safe if ignored elsewhere)
+                "doc_name": str(doc or ""),
+                "doc_id": str(doc_id or ""),
+                "char_start": char_start,
+                "char_end": char_end,
             }
+
             k = _evidence_key(ev)
             if not k or k in seen:
                 continue
@@ -262,6 +307,7 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
     except Exception:
         return sections
 
+
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     """
     Deterministic backfill behavior used to avoid empty UI sections.
@@ -303,6 +349,7 @@ def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str
 
     return sections
 
+
 def owner_for_section(section_id: str) -> str:
     sid = (section_id or "").strip().lower()
     m = {
@@ -320,5 +367,3 @@ def owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
-
-
