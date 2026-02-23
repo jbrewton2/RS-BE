@@ -95,7 +95,7 @@ def test_rag_returns_risks_even_when_timing_enabled():
         context_profile="fast",
         debug=True,
         heuristic_hits=None,
-        enable_inference_risks=False,
+        enable_inference_risks=True,
         inference_candidates=None,
     )
 
@@ -107,3 +107,4 @@ def test_rag_returns_risks_even_when_timing_enabled():
     risks = result.get("risks") or []
     assert isinstance(risks, list)
     assert len(risks) > 0, "Expected deterministic risks even when RAG_TIMING=1"
+

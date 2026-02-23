@@ -1,5 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+
+from rag.risk_taxonomy import detect_triggered_areas_from_signals, build_targeted_questions
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
@@ -57,7 +59,7 @@ def materialize_risk_register(
       - Tier 3: flags (highest confidence)
       - Tier 2: heuristics
       - Tier 2: section-derived (triage only)
-      - Tier 1: inference (lowest confidence, optional)
+      - Tier 1: inference (lowest confidence, REQUIRED)
 
     Returns:
       (merged_risks, counts_dict)
@@ -90,7 +92,7 @@ def materialize_risk_register(
     try:
         risks_inf = materialize_inference_fn(
             parsed_sections or [],
-            enable_inference_risks=enable_inference_risks,
+            enable_inference_risks=True,
             inference_candidates=inference_candidates,
         )
     except Exception:
@@ -138,6 +140,106 @@ def _safe_str(v: Any, max_len: int = 240) -> str:
         s = s[: max_len - 3] + "..."
     return s
 
+
+def derive_section_risks(
+    parsed_sections: List[Dict[str, Any]],
+    *,
+    max_items: int = 25,
+    enable_ambiguity: bool = True,
+    enable_missing_evidence: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Deterministic Tier-2 section-derived risks.
+
+    This MUST NOT call the LLM or providers. It only inspects parsed sections (and any evidence
+    that has already been attached to them upstream).
+    """
+    risks: List[Dict[str, Any]] = []
+    seen = set()
+
+    ambiguity_terms = [
+        "may",
+        "should",
+        "as appropriate",
+        "as needed",
+        "best effort",
+        "endeavor",
+        "where practicable",
+        "where practical",
+        "as agreed",
+        "at its discretion",
+    ]
+
+    def _sec_title(s: Dict[str, Any]) -> str:
+        return _safe_str(s.get("title") or s.get("header") or s.get("name") or "" , max_len=120)
+
+    def _sec_text(s: Dict[str, Any]) -> str:
+        # tolerate different shapes
+        return _safe_str(
+            s.get("text") or s.get("content") or s.get("body") or s.get("summary") or "",
+            max_len=200000,
+        ).lower()
+
+    def _sec_evidence_count(s: Dict[str, Any]) -> int:
+        # Evidence is usually attached upstream. Try common keys.
+        ev = s.get("evidence") or s.get("citations") or s.get("evidence_blocks") or s.get("evidenceItems")
+        if isinstance(ev, list):
+            return int(len(ev))
+        return 0
+
+    def _add(r: Dict[str, Any]):
+        rid = str(r.get("id") or "").strip()
+        if not rid or rid in seen:
+            return
+        seen.add(rid)
+        risks.append(r)
+
+    for sec in (parsed_sections or []):
+        if not isinstance(sec, dict):
+            continue
+        title = _sec_title(sec)
+        text = _sec_text(sec)
+        evc = _sec_evidence_count(sec)
+
+        # --- Rule: ambiguity language in obligations ---
+        if enable_ambiguity and text:
+            for term in ambiguity_terms:
+                if term in text:
+                    slug = "".join([c.lower() for c in title if c.isalnum()])[:32] or "unknown"
+                    rid = f"sec_ambiguous_{slug}_{term.replace(' ','_')}"
+                    _add(
+                        {
+                            "id": rid,
+                            "label": f"Ambiguous obligation language in section: {title}",
+                            "severity": "Medium",
+                            "source": "sectionDerived",
+                            "category": "project_level",
+                            "why": f"Found ambiguity term '{term}' in section text (deterministic rule).",
+                        }
+                    )
+                    break  # one ambiguity risk per section
+
+        # --- Rule: no evidence attached to this section (retrieval starvation / mapping issue) ---
+        if enable_missing_evidence:
+            # Avoid spamming OVERVIEW if you prefer; keep it for now as a low-sev operator warning.
+            if evc <= 0:
+                slug = "".join([c.lower() for c in title if c.isalnum()])[:32] or "unknown"
+                rid = f"sec_no_evidence_{slug}"
+                _add(
+                    {
+                        "id": rid,
+                        "label": f"No contract evidence attached for section: {title}",
+                        "severity": "Low",
+                        "source": "sectionDerived",
+                        "category": "project_level",
+                        "why": "Section has zero attached evidence items; may indicate retrieval starvation or mapping gap.",
+                    }
+                )
+
+        if max_items > 0 and len(risks) >= max_items:
+            break
+
+    return risks
 
 def retrieve_context(
     *,
@@ -356,3 +458,47 @@ def retrieve_context(
 
     return retrieved, context, max_chars, signals
     return retrieved, context, max_chars, signals
+
+def _extend_questions_with_targeted(
+    base_questions: list[str],
+    intent: str,
+    auto_flags: dict | None,
+    heuristic_hits: list[dict] | None,
+    max_targeted: int = 10,
+) -> list[str]:
+    """
+    Adds targeted questions for risk areas triggered by deterministic signals.
+    - Triggers come from Tier 3 flags (review.autoFlags.hits) and Tier 2 heuristic_hits.
+    - Only applies for risk_triage.
+    """
+    intent_l = str(intent or "").strip().lower()
+    if intent_l != "risk_triage":
+        return base_questions or []
+
+    flag_hits = []
+    if isinstance(auto_flags, dict):
+        flag_hits = auto_flags.get("hits") or []
+
+    triggered = detect_triggered_areas_from_signals(flag_hits=flag_hits, heuristic_hits=heuristic_hits or [])
+    targeted = build_targeted_questions(triggered, max_questions=max_targeted)
+
+    # Deterministic ordering: base questions first, then targeted (dedup).
+    out: list[str] = []
+    seen: set[str] = set()
+
+    for q in (base_questions or []):
+        qs = str(q).strip()
+        if not qs or qs in seen:
+            continue
+        out.append(qs); seen.add(qs)
+
+    for q in targeted:
+        qs = str(q).strip()
+        if not qs or qs in seen:
+            continue
+        out.append(qs); seen.add(qs)
+
+    return out
+
+
+

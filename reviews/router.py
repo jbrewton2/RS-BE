@@ -170,9 +170,6 @@ async def upsert_review(review: Dict[str, Any], storage: StorageDep):
     docs = review.get("docs") or []
     if isinstance(docs, list) and docs:
         meta.upsert_review_docs(review_id, docs)
-        # Refresh doc_count in META to match what we wrote
-        out = meta.upsert_review_meta(review_id, review={"doc_count": len(docs)}, pdf_key=pdf_key)
-
     # Ensure response includes id (UI expects it) and normalize review_id
     if isinstance(out, dict):
         out["review_id"] = review_id
