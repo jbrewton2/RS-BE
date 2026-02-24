@@ -134,12 +134,34 @@ async def list_reviews():
 
 
 @router.get("/{review_id}")
-async def get_review(review_id: str):
+async def get_review(review_id: str, storage: StorageDep):
+    """
+    Get full review detail.
+
+    Primary: Dynamo (META + embedded docs if present)
+    Fallback: StorageProvider stores/reviews.json (legacy/local compatibility)
+    """
     meta = DynamoMeta()
     item = meta.get_review_detail(review_id)
+
+    # Fallback: storage-backed reviews.json
+    if not item:
+        try:
+            raw = storage.get_object("stores/reviews.json")
+            import json
+            arr = json.loads(raw.decode("utf-8")) if isinstance(raw, (bytes, bytearray)) else json.loads(raw)
+            if isinstance(arr, list):
+                for r in arr:
+                    if isinstance(r, dict) and (r.get("id") == review_id or r.get("review_id") == review_id):
+                        item = r
+                        break
+        except Exception:
+            item = None
+
     if not item:
         raise HTTPException(status_code=404, detail="Review not found")
-        return _ensure_id_contract(item)
+
+    return _ensure_id_contract(item)
 @router.post("")
 async def upsert_review(review: Dict[str, Any], storage: StorageDep):
     """
@@ -193,6 +215,7 @@ async def delete_review(review_id: str):
     pk = f"REVIEW#{review_id}"
     meta.table.delete_item(Key={"pk": pk, "sk": "META"})
     return {"ok": True}
+
 
 
 
