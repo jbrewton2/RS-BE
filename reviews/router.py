@@ -215,6 +215,81 @@ def _backfill_aiRisks_evidence(item: Dict[str, Any]) -> None:
                 evs[i] = _backfill_evidence_provenance(evs[i], docs)
         r["evidence"] = evs
 
+
+def _is_traceable_evidence(ev: Dict[str, Any]) -> bool:
+    if not isinstance(ev, dict):
+        return False
+    doc_id = str(ev.get("docId") or ev.get("doc_id") or "").strip()
+    cs = ev.get("charStart") if ev.get("charStart") is not None else ev.get("char_start")
+    ce = ev.get("charEnd") if ev.get("charEnd") is not None else ev.get("char_end")
+    return bool(doc_id) and (cs is not None) and (ce is not None)
+
+def _drop_untraceable_evidence(evs: Any) -> list:
+    if not isinstance(evs, list):
+        return []
+    out = []
+    for e in evs:
+        if _is_traceable_evidence(e):
+            out.append(e)
+    return out
+
+def _backfill_aiRisks_from_sections(item: Dict[str, Any]) -> None:
+    """
+    Deterministic join: RAG_SECTION aiRisks inherit evidence from matching section outputs.
+
+    Evidence must never float:
+      - If aiRisk evidence is missing/untraceable, replace it with traceable section evidence.
+      - After replacement, drop any remaining untraceable evidence items.
+    """
+    if not isinstance(item, dict):
+        return
+
+    # Locate sections list (prefer item['rag']['sections'], fallback to item['sections'])
+    sections = None
+    rag = item.get("rag")
+    if isinstance(rag, dict):
+        sections = rag.get("sections")
+    if not isinstance(sections, list):
+        sections = item.get("sections")
+
+    # Build section_id -> traceable evidence[]
+    sec_evidence = {}
+    if isinstance(sections, list):
+        for s in sections:
+            if not isinstance(s, dict):
+                continue
+            sid = str(s.get("id") or "").strip()
+            if not sid:
+                continue
+            evs = _drop_untraceable_evidence(s.get("evidence") or [])
+            if evs:
+                sec_evidence[sid] = evs
+
+    risks = item.get("aiRisks") or []
+    if not isinstance(risks, list):
+        return
+
+    for r in risks:
+        if not isinstance(r, dict):
+            continue
+
+        rid = str(r.get("id") or "").strip()
+
+        # Default: enforce non-floating evidence
+        cur = r.get("evidence") or []
+        cur = _drop_untraceable_evidence(cur)
+
+        if rid.startswith("rag-section:"):
+            # Format: rag-section:<reviewId>:<sectionId>
+            parts = rid.split(":")
+            if len(parts) >= 3:
+                section_id = parts[-1].strip()
+                evs = sec_evidence.get(section_id)
+                if evs:
+                    cur = evs
+
+        r["evidence"] = cur
+
 def _as_list(x):
     return x if isinstance(x, list) else []
 
@@ -277,7 +352,9 @@ async def get_review(review_id: str, storage: StorageDep):
 
     _backfill_aiRisks_evidence(item)
 
+    _backfill_aiRisks_from_sections(item)
     return _ensure_id_contract(item)
+
 @router.post("")
 async def upsert_review(review: Dict[str, Any], storage: StorageDep):
     """
@@ -331,6 +408,9 @@ async def delete_review(review_id: str):
     pk = f"REVIEW#{review_id}"
     meta.table.delete_item(Key={"pk": pk, "sk": "META"})
     return {"ok": True}
+
+
+
 
 
 
