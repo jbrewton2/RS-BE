@@ -74,7 +74,7 @@ def _strip_owner_tokens(s: str) -> str:
 def _normalize_bullet_text(t: str) -> str:
     s = (t or "").replace("\r", " ").strip()
     # normalize common mojibake-ish ellipsis etc.
-    s = s.replace("…", "...")
+    s = s.replace("â€¦", "...")
     return s
 
 
@@ -82,7 +82,7 @@ def _clean_findings_line(s: str) -> Optional[str]:
     t = (s or "").strip()
     if not t:
         return None
-    t = t.lstrip("-•*").strip()
+    t = t.lstrip("-â€¢*").strip()
     t = _normalize_bullet_text(t)
     return t if t else None
 
@@ -190,34 +190,98 @@ def _attach_evidence_to_sections(
     citations: List[Dict[str, Any]],
     retrieved: Dict[str, List[Dict[str, Any]]],
 ) -> List[Dict[str, Any]]:
-    # Minimal deterministic mapping: question->section id via section_question_map
-    # retrieved is keyed by question text (as used in service.py)
-    sec_by_id = {str(s.get("id") or ""): s for s in (sections or []) if isinstance(s, dict)}
+    """
+    Attach retrieval hits (keyed by question) to the matching section as evidence[].
+
+    IMPORTANT:
+    - section_question_map may use section TITLES like "OVERVIEW", while sections created by
+      _parse_review_summary_sections() use slug ids like "overview".
+    - We therefore build a multi-key index over sections and match using multiple candidates.
+    - Hits may have doc_name/chunk_id at top-level (OpenSearch) OR in meta (other providers).
+    """
+
+    # Build a multi-key index for sections:
+    # - id (as-is)
+    # - slug(title)
+    # - canon(title)
+    # - slug(canon(title))
+    sec_by_key: Dict[str, Dict[str, Any]] = {}
+    for s in (sections or []):
+        if not isinstance(s, dict):
+            continue
+
+        sid = str(s.get("id") or "").strip()
+        title = str(s.get("title") or "").strip()
+
+        if sid:
+            sec_by_key[sid] = s
+
+        if title:
+            sec_by_key[_slug(title)] = s
+            sec_by_key[_canon_header_line(title)] = s
+            sec_by_key[_slug(_canon_header_line(title))] = s
 
     for sec_id, q in (section_question_map or []):
-        sid = str(sec_id or "").strip()
-        if not sid or sid not in sec_by_id:
+        sid_raw = str(sec_id or "").strip()
+        if not sid_raw:
             continue
+
+        # Candidate keys to find the section
+        cand1 = sid_raw
+        cand2 = _slug(sid_raw)
+        cand3 = _canon_header_line(sid_raw)
+        cand4 = _slug(_canon_header_line(sid_raw))
+
+        sec = None
+        for cand in (cand1, cand2, cand3, cand4):
+            if cand and cand in sec_by_key:
+                sec = sec_by_key[cand]
+                break
+        if not isinstance(sec, dict):
+            continue
+
         hits = (retrieved or {}).get(q) or []
         if not isinstance(hits, list) or not hits:
             continue
 
-        ev_list = sec_by_id[sid].get("evidence")
+        ev_list = sec.get("evidence")
         if not isinstance(ev_list, list):
             ev_list = []
-            sec_by_id[sid]["evidence"] = ev_list
+            sec["evidence"] = ev_list
 
         seen = set([_evidence_key(e) for e in ev_list if isinstance(e, dict)])
+
         for h in hits:
             if not isinstance(h, dict):
                 continue
 
             meta = h.get("meta") or {}
 
-            # Normalize metadata field names across engines/providers
-            doc = (meta.get("doc_name") or meta.get("doc") or meta.get("document_name") or "")
-            doc_id = (meta.get("doc_id") or meta.get("docId") or meta.get("document_id") or meta.get("documentId") or "")
+            # Normalize doc/doc_id across engines/providers (prefer meta, fallback to top-level)
+            doc = (
+                meta.get("doc_name")
+                or meta.get("doc")
+                or meta.get("document_name")
+                or h.get("doc_name")
+                or h.get("document_name")
+                or h.get("source")
+                or ""
+            )
+            doc_id = (
+                meta.get("doc_id")
+                or meta.get("docId")
+                or meta.get("document_id")
+                or meta.get("documentId")
+                or h.get("document_id")
+                or h.get("documentId")
+                or h.get("doc_id")
+                or h.get("docId")
+                or ""
+            )
+            if not doc_id:
+                doc_id = doc
 
+            # Span fields (prefer explicit meta, else derive from chunk_id)
             char_start = meta.get("char_start")
             if char_start is None:
                 char_start = meta.get("charStart")
@@ -226,16 +290,22 @@ def _attach_evidence_to_sections(
             if char_end is None:
                 char_end = meta.get("charEnd")
 
-            # If spans missing, derive from chunk_id like '3:3600:5000'
             if char_start is None or char_end is None:
-                cid = meta.get("chunk_id") or meta.get("chunkId") or h.get("chunk_id") or h.get("chunkId") or ""
+                cid = (
+                    meta.get("chunk_id")
+                    or meta.get("chunkId")
+                    or h.get("chunk_id")
+                    or h.get("chunkId")
+                    or h.get("id")
+                    or ""
+                )
                 cs2, ce2 = _parse_chunk_id_span(str(cid))
                 if char_start is None:
                     char_start = cs2
                 if char_end is None:
                     char_end = ce2
 
-            # Try to carry a short excerpt forward so UI can show something useful
+            # Text excerpt (prefer chunk_text)
             txt = (
                 h.get("text")
                 or h.get("chunk_text")
@@ -252,14 +322,14 @@ def _attach_evidence_to_sections(
                 txt = ""
 
             ev = {
-                # Canonical schema (matches core/dynamo_meta.py expectations)
+                # Canonical schema (camelCase)
                 "doc": str(doc or ""),
                 "docId": str(doc_id or ""),
                 "charStart": char_start,
                 "charEnd": char_end,
                 "score": h.get("score"),
                 "text": txt,
-                # Legacy keys (safe if ignored elsewhere)
+                # Legacy keys (snake_case)
                 "doc_name": str(doc or ""),
                 "doc_id": str(doc_id or ""),
                 "char_start": char_start,
@@ -273,8 +343,6 @@ def _attach_evidence_to_sections(
             ev_list.append(ev)
 
     return sections
-
-
 def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Deterministically strengthen the OVERVIEW section from attached evidence.
@@ -397,5 +465,6 @@ def owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
 
 
