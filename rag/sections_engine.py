@@ -74,7 +74,7 @@ def _strip_owner_tokens(s: str) -> str:
 def _normalize_bullet_text(t: str) -> str:
     s = (t or "").replace("\r", " ").strip()
     # normalize common mojibake-ish ellipsis etc.
-    s = s.replace("ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦", "...")
+    s = s.replace("ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦", "...")
     return s
 
 
@@ -82,7 +82,7 @@ def _clean_findings_line(s: str) -> Optional[str]:
     t = (s or "").strip()
     if not t:
         return None
-    t = t.lstrip("-ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢*").strip()
+    t = t.lstrip("-ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢*").strip()
     t = _normalize_bullet_text(t)
     return t if t else None
 
@@ -289,9 +289,14 @@ def _attach_evidence_to_sections(
             char_end = meta.get("char_end")
             if char_end is None:
                 char_end = meta.get("charEnd")
-
-            cid = ""
-
+            cid = (
+                meta.get("chunk_id")
+                or meta.get("chunkId")
+                or h.get("chunk_id")
+                or h.get("chunkId")
+                or h.get("id")
+                or ""
+            )
             if char_start is None or char_end is None:
                 cid = (
                     meta.get("chunk_id")
@@ -477,6 +482,7 @@ def owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
 
 
 
