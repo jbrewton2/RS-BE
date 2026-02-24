@@ -3,19 +3,15 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 
-def effective_top_k(req_top_k: int, context_profile: str) -> int:
-    # Mirror current service.py behavior; keep conservative and deterministic
-    p = (context_profile or "fast").strip().lower()
-    k = int(req_top_k or 0)
-    if k <= 0:
-        k = 1
-    if p == "fast":
-        return min(max(k, 1), 4)
+def effective_top_k(context_profile: str) -> int:
+    p = (context_profile or "").strip().lower()
+    # Green Gate tuned: keep retrieval bounded so prompts do not truncate.
+    # fast:2, balanced:3, deep:4
     if p == "deep":
-        return min(max(k, 8), 20)
-    # standard/balanced
-    return min(max(k, 4), 12)
-
+        return 4
+    if p == "balanced":
+        return 3
+    return 2
 
 def effective_context_chars(context_profile: str) -> int:
     p = (context_profile or "fast").strip().lower()
@@ -27,13 +23,14 @@ def effective_context_chars(context_profile: str) -> int:
 
 
 def effective_snippet_chars(context_profile: str) -> int:
-    p = (context_profile or "fast").strip().lower()
-    if p == "fast":
-        return 900
+    p = (context_profile or "").strip().lower()
+    # Green Gate tuned snippet caps (chars) to prevent prompt truncation:
+    # fast:180, balanced:220, deep:280
     if p == "deep":
-        return 2200
-    return 1400
-
+        return 280
+    if p == "balanced":
+        return 220
+    return 180
 
 def retrieve_context_local(
     *,
@@ -136,3 +133,4 @@ def retrieve_context_local(
 
     context = "".join(ctx_parts).strip()
     return retrieved, context, retrieved_counts, retrieval_debug
+
