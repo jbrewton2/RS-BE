@@ -331,7 +331,21 @@ class DynamoMeta:
                                 else None
                             ),
                             # strip heavy evidence blobs from persisted risks (UI can rebuild from rag if needed)
-                            "evidence": [],
+                            "evidence": (
+                                [
+                                    {
+                                        "docId": (e.get("docId") or e.get("doc_id")),
+                                        "evidenceId": (e.get("evidenceId") or e.get("evidence_id")),
+                                        "charStart": (e.get("charStart") if e.get("charStart") is not None else e.get("char_start")),
+                                        "charEnd": (e.get("charEnd") if e.get("charEnd") is not None else e.get("char_end")),
+                                        "score": e.get("score"),
+                                        "text": (str(e.get("text") or e.get("text_snippet") or e.get("excerpt") or "")[:500] if (e.get("text") is not None or e.get("text_snippet") is not None or e.get("excerpt") is not None) else None),
+                                    }
+                                    for e in (r.get("evidence") or [])[:6]
+                                    if isinstance(e, dict)
+                                ]
+                                if isinstance(r.get("evidence"), list) else []
+                            ),
                         }
                     )
                 add("aiRisks", _dynamo_safe(compact_risks))
@@ -506,3 +520,4 @@ class DynamoMeta:
                 "created_at": now,
             }
         )
+
