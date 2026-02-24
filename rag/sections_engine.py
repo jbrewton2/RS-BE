@@ -74,7 +74,7 @@ def _strip_owner_tokens(s: str) -> str:
 def _normalize_bullet_text(t: str) -> str:
     s = (t or "").replace("\r", " ").strip()
     # normalize common mojibake-ish ellipsis etc.
-    s = s.replace("â€¦", "...")
+    s = s.replace("ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦", "...")
     return s
 
 
@@ -82,7 +82,7 @@ def _clean_findings_line(s: str) -> Optional[str]:
     t = (s or "").strip()
     if not t:
         return None
-    t = t.lstrip("-â€¢*").strip()
+    t = t.lstrip("-ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢*").strip()
     t = _normalize_bullet_text(t)
     return t if t else None
 
@@ -290,6 +290,8 @@ def _attach_evidence_to_sections(
             if char_end is None:
                 char_end = meta.get("charEnd")
 
+            cid = ""
+
             if char_start is None or char_end is None:
                 cid = (
                     meta.get("chunk_id")
@@ -304,6 +306,14 @@ def _attach_evidence_to_sections(
                     char_start = cs2
                 if char_end is None:
                     char_end = ce2
+            # Stable evidence identifier aligned to OpenSearch chunk IDs:
+            # evidenceId = "{docId}::{chunk_id}"
+            evidence_id = ""
+            try:
+                if doc_id and cid:
+                    evidence_id = f"{str(doc_id).strip()}::{str(cid).strip()}"
+            except Exception:
+                evidence_id = ""
 
             # Text excerpt (prefer chunk_text)
             txt = (
@@ -325,6 +335,8 @@ def _attach_evidence_to_sections(
                 # Canonical schema (camelCase)
                 "doc": str(doc or ""),
                 "docId": str(doc_id or ""),
+                "evidenceId": str(evidence_id or ""),
+                "evidence_id": str(evidence_id or ""),
                 "charStart": char_start,
                 "charEnd": char_end,
                 "score": h.get("score"),
@@ -465,6 +477,12 @@ def owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
+
+
+
+
+
 
 
 

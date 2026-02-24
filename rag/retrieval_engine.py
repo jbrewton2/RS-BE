@@ -1,6 +1,40 @@
-from __future__ import annotations
-
+# --- FILE: rag/retrieval_engine.py ---
 from typing import Any, Dict, List, Tuple
+
+
+def _attach_evidence_id_to_hit(h: Dict[str, Any]) -> None:
+    """Attach stable evidenceId = '{docId}::{chunk_id}' when possible.
+
+    This is non-breaking: it only adds keys if docId + chunk_id can be determined.
+    """
+    try:
+        if not isinstance(h, dict):
+            return
+        meta = h.get("meta") or {}
+        doc_id = (
+            meta.get("doc_id")
+            or meta.get("docId")
+            or meta.get("document_id")
+            or meta.get("documentId")
+            or h.get("doc_id")
+            or h.get("docId")
+            or h.get("document_id")
+            or h.get("documentId")
+            or ""
+        )
+        doc_id = str(doc_id or "").strip()
+        cid = str(h.get("chunk_id") or h.get("chunkId") or meta.get("chunk_id") or meta.get("chunkId") or "").strip()
+        if doc_id and cid:
+            eid = f"{doc_id}::{cid}"
+            # Canonical + legacy keys (carry forward)
+            h.setdefault("evidenceId", eid)
+            h.setdefault("evidence_id", eid)
+            # Also provide docId/chunk_id canonical fields when missing
+            h.setdefault("docId", doc_id)
+            h.setdefault("doc_id", doc_id)
+            h.setdefault("chunk_id", cid)
+    except Exception:
+        return
 
 
 def effective_top_k(req_top_k: int, context_profile: str) -> int:
@@ -21,6 +55,7 @@ def effective_top_k(req_top_k: int, context_profile: str) -> int:
 
     return min(k, cap)
 
+
 def effective_context_chars(context_profile: str) -> int:
     p = (context_profile or "fast").strip().lower()
     if p == "fast":
@@ -38,6 +73,7 @@ def effective_snippet_chars(context_profile: str) -> int:
     if p == "deep":
         return 320
     return 240
+
 
 def retrieve_context_local(
     *,
@@ -73,6 +109,9 @@ def retrieve_context_local(
     for q, emb in zip(questions, embs):
         try:
             hits = vector.query(emb, top_k=effective_top_k, filters={"review_id": str(review_id)})
+            # Attach stable evidence IDs to each hit (non-breaking)
+            for _h in (hits or []):
+                _attach_evidence_id_to_hit(_h)
         except Exception as e:
             hits = []
             if debug:
@@ -90,6 +129,7 @@ def retrieve_context_local(
                         {
                             "doc_name": (h.get("doc_name") or ""),
                             "chunk_id": (h.get("chunk_id") or ""),
+                            "evidenceId": (h.get("evidenceId") or h.get("evidence_id") or ""),
                             "score": h.get("score"),
                         }
                         for h in (hits or [])[:3]
@@ -140,5 +180,3 @@ def retrieve_context_local(
 
     context = "".join(ctx_parts).strip()
     return retrieved, context, retrieved_counts, retrieval_debug
-
-

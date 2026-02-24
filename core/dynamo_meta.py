@@ -376,6 +376,7 @@ class DynamoMeta:
                                     {
                                         # Accept both canonical camelCase and legacy snake_case
                                         "docId": ev.get("docId") or ev.get("doc_id"),
+                                        "evidenceId": ev.get("evidenceId") or ev.get("evidence_id"),
                                         "doc": ev.get("doc") or ev.get("doc_name") or ev.get("doc"),
                                         "charStart": ev.get("charStart")
                                         if ev.get("charStart") is not None
