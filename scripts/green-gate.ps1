@@ -239,7 +239,6 @@ aws ecr get-login-password --region $AwsRegion |
 
 if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
   $repoName = $EcrRepo
-$jmes = ("imageIds[?imageTag=='{0}']" -f $tag)
   $tagCheck = aws ecr list-images --region $AwsRegion --repository-name $repoName `
     --filter tagStatus=TAGGED `
     --query $jmes --output json
@@ -530,7 +529,6 @@ aws ecr get-login-password --region $AwsRegion |
 
 if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
   $repoName = $EcrRepo
-$jmes = ("imageIds[?imageTag=='{0}']" -f $tag)
   $tagCheck = aws ecr list-images --region $AwsRegion --repository-name $repoName `
     --filter tagStatus=TAGGED `
     --query $jmes --output json
@@ -756,6 +754,7 @@ catch {
   Dump-K8sDiagnostics -Ns $Namespace -Dep $Deployment -Selector $PodSelector -OutDir $OutDir
   throw
 }
+
 
 
 
