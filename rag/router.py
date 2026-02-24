@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from auth.jwt import get_current_user
 from core.providers import providers_from_request
 from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse
 from rag.service import rag_analyze_review, _owner_for_section  # noqa: F401
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # main.py includes routers with prefix="/api"
 # so this must be "/rag" (not "/api/rag") to yield "/api/rag/*"
-router = APIRouter(prefix="/rag", tags=["rag"])
+router = APIRouter(prefix="/rag", tags=["rag"], dependencies=[Depends(get_current_user)])
 
 # Guardrail: prevent the /api/api regression
 assert not router.prefix.startswith("/api"), "Router prefix must not start with /api (main.py adds /api)."
@@ -130,3 +131,4 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
     except Exception as e:
         logger.exception("RAG analyze failed")
         raise HTTPException(status_code=500, detail=f"RAG analyze failed: {type(e).__name__}") from e
+
