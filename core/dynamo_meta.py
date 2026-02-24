@@ -314,37 +314,72 @@ class DynamoMeta:
                         continue
                     compact_risks.append(
                         {
+                            # --- Common / canonical ---
                             "id": r.get("id"),
-                            "label": r.get("label"),
                             "category": r.get("category"),
                             "severity": r.get("severity"),
-                            "scope": r.get("scope"),
+
+                            # prefer new-style UI fields, fall back to legacy
+                            "title": r.get("title") or r.get("label"),
+                            "description": (
+                                (str(r.get("description")) if r.get("description") is not None else None)
+                                or (str(r.get("rationale")) if r.get("rationale") is not None else None)
+                            ),
+                            "department": r.get("department") or r.get("scope"),
+                            "source_type": r.get("source_type") or r.get("source"),
+                            "status": r.get("status"),
+
+                            # --- Legacy compatibility (keep existing consumers stable) ---
+                            "label": r.get("label") or r.get("title"),
+                            "scope": r.get("scope") or r.get("department"),
                             "document_name": r.get("document_name"),
                             "rationale": (
-                                str(r.get("rationale") or "")[:2000]
-                                if r.get("rationale") is not None
-                                else None
+                                (str(r.get("rationale")) if r.get("rationale") is not None else None)
+                                or (str(r.get("description")) if r.get("description") is not None else None)
                             ),
                             "related_flags": (
                                 r.get("related_flags")[:50]
                                 if isinstance(r.get("related_flags"), list)
                                 else None
                             ),
-                            # strip heavy evidence blobs from persisted risks (UI can rebuild from rag if needed)
+
+                            # --- Evidence (bounded) ---
                             "evidence": (
                                 [
                                     {
                                         "docId": (e.get("docId") or e.get("doc_id")),
                                         "evidenceId": (e.get("evidenceId") or e.get("evidence_id")),
-                                        "charStart": (e.get("charStart") if e.get("charStart") is not None else e.get("char_start")),
-                                        "charEnd": (e.get("charEnd") if e.get("charEnd") is not None else e.get("char_end")),
+                                        "charStart": (
+                                            e.get("charStart")
+                                            if e.get("charStart") is not None
+                                            else e.get("char_start")
+                                        ),
+                                        "charEnd": (
+                                            e.get("charEnd")
+                                            if e.get("charEnd") is not None
+                                            else e.get("char_end")
+                                        ),
                                         "score": e.get("score"),
-                                        "text": (str(e.get("text") or e.get("text_snippet") or e.get("excerpt") or "")[:500] if (e.get("text") is not None or e.get("text_snippet") is not None or e.get("excerpt") is not None) else None),
+                                        "text": (
+                                            str(
+                                                e.get("text")
+                                                or e.get("text_snippet")
+                                                or e.get("excerpt")
+                                                or ""
+                                            )[:500]
+                                            if (
+                                                e.get("text") is not None
+                                                or e.get("text_snippet") is not None
+                                                or e.get("excerpt") is not None
+                                            )
+                                            else None
+                                        ),
                                     }
                                     for e in (r.get("evidence") or [])[:6]
                                     if isinstance(e, dict)
                                 ]
-                                if isinstance(r.get("evidence"), list) else []
+                                if isinstance(r.get("evidence"), list)
+                                else []
                             ),
                         }
                     )
@@ -520,4 +555,6 @@ class DynamoMeta:
                 "created_at": now,
             }
         )
+
+
 
