@@ -239,15 +239,16 @@ aws ecr get-login-password --region $AwsRegion |
 
 if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
   $repoName = $EcrRepo
-  $tagCheck = aws ecr list-images --region $AwsRegion --repository-name $repoName `
-    --filter tagStatus=TAGGED `
-    --query $jmes --output json
-
-  if ($tagCheck -eq "[]") {
-    throw "ImageTagOverride '$tag' not found in ECR repo '$repoName' (region=$AwsRegion)."
+  $tagCheck = $null
+  try {
+    $tagCheck = aws ecr describe-images --region $AwsRegion --repository-name $repoName --image-ids imageTag=$tag --output json
+  } catch {
+    $tagCheck = $null
   }
-
-  Write-Host "ECR tag exists: ${repoName}:${tag}"
+  if (-not $tagCheck) {
+    throw ("ImageTagOverride tag not found in ECR repo. repo=" + $repoName + " tag=" + $tag + " region=" + $AwsRegion)
+  }
+  Write-Host ("ECR tag exists: " + $repoName + ":" + $tag)
 } else {
   $buildLog = Join-Path $OutDir "docker_build.log"
   $pushLog  = Join-Path $OutDir "docker_push.log"
@@ -529,15 +530,16 @@ aws ecr get-login-password --region $AwsRegion |
 
 if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
   $repoName = $EcrRepo
-  $tagCheck = aws ecr list-images --region $AwsRegion --repository-name $repoName `
-    --filter tagStatus=TAGGED `
-    --query $jmes --output json
-
-  if ($tagCheck -eq "[]") {
-    throw "ImageTagOverride '$tag' not found in ECR repo '$repoName' (region=$AwsRegion)."
+  $tagCheck = $null
+  try {
+    $tagCheck = aws ecr describe-images --region $AwsRegion --repository-name $repoName --image-ids imageTag=$tag --output json
+  } catch {
+    $tagCheck = $null
   }
-
-  Write-Host "ECR tag exists: ${repoName}:${tag}"
+  if (-not $tagCheck) {
+    throw ("ImageTagOverride tag not found in ECR repo. repo=" + $repoName + " tag=" + $tag + " region=" + $AwsRegion)
+  }
+  Write-Host ("ECR tag exists: " + $repoName + ":" + $tag)
 } else {
   $buildLog = Join-Path $OutDir "docker_build.log"
   $pushLog  = Join-Path $OutDir "docker_push.log"
