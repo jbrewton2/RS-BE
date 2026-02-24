@@ -1,9 +1,9 @@
-# values-css-mock.yaml (pinned) - SOURCE OF TRUTH FOR THIS ENV
+﻿# values-css-mock.yaml (pinned) - SOURCE OF TRUTH FOR THIS ENV
 replicaCount: 2
 
 image:
   repository: 354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend
-  tag: "aws-648384e"
+  tag: "aws-d3e9a08"
   pullPolicy: Always
 
 # Ingress expects a Service. Keep enabled.
@@ -13,3 +13,5 @@ service:
 # AWS Load Balancer Controller owns TargetGroupBinding (Ingress-driven). Helm must NOT manage it here.
 targetGroupBinding:
   enabled: false
+
+
