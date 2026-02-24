@@ -179,6 +179,11 @@ Write-Host "HEAD   = $shaFull"
 Write-Host "SHA7   = $sha7"
 Write-Host "PODS   = selector '$PodSelector'"
 
+# Fail fast on common ReviewId mistakes (blank or placeholder).
+if ([string]::IsNullOrWhiteSpace($ReviewId)) {
+  throw "ReviewId is required and cannot be blank."
+}
+if ($ReviewId.Trim() -match '^\<.*review.*\>
 # -----------------------------
 # Local gates: Truth Gate
 # -----------------------------
@@ -332,11 +337,21 @@ try {
   Write-Host "payload: $payloadPath"
   Write-Host "resp:    $respPath"
 
-  curl.exe -sS --fail-with-body -X POST "$BaseUrl/api/rag/analyze" `
-    -H "Authorization: Bearer $Token" `
-    -H "Content-Type: application/json" `
-    --data-binary "@$payloadPath" `
-    | Tee-Object -FilePath $respPath | Out-Null
+  # IMPORTANT: do NOT pipe curl into Tee-Object.
+  # Pipelines can mask curl exit codes in Windows PowerShell. Use cmd.exe redirection and check exit code.
+  $url = "$BaseUrl/api/rag/analyze"
+  $cmd = 'curl.exe -sS --fail-with-body -X POST "' + $url + '" ' +
+         '-H "Authorization: Bearer ' + $Token + '" ' +
+         '-H "Content-Type: application/json" ' +
+         '--data-binary "@' + $payloadPath + '"'
+
+  cmd.exe /c ($cmd + ' > "' + $respPath + '" 2>&1')
+  if ($LASTEXITCODE -ne 0) {
+    $preview = ""
+    try { $preview = (Get-Content $respPath -TotalCount 60 | Out-String) } catch { $preview = "<unable to read response file>" }
+    throw ("GREEN GATE FAIL: curl returned non-zero exit code: " + $LASTEXITCODE +
+           ". Response preview (first lines):`n" + $preview)
+  }
 
   $resp = Read-Json $respPath
   # HARDENING: fail fast with a clear message when the review has no docs.
@@ -449,6 +464,297 @@ catch {
   Dump-K8sDiagnostics -Ns $Namespace -Dep $Deployment -Selector $PodSelector -OutDir $OutDir
   throw
 }
+
+
+
+
+
+
+) {
+  throw "ReviewId looks like a placeholder ($ReviewId). Provide a real review GUID."
+}
+
+# -----------------------------
+# Local gates: Truth Gate
+# -----------------------------
+Write-Header "GREEN GATE: Local Truth Gate"
+
+$truthGate = ".\scripts\truth-gate.ps1"
+if (-not (Test-Path $truthGate)) { throw "Truth Gate script not found: $truthGate" }
+
+& $truthGate
+Write-Host "Local Truth Gate: PASS"
+
+Write-Header "GREEN GATE: Extra RAG regression tests"
+
+python -m pytest -q .\tests\test_rag_deterministic_signals_in_context.py
+python -m pytest -q .\tests\test_rag_section_derived_risks.py
+python -m pytest -q .\tests\test_rag_risk_materialization.py
+
+Write-Host "Extra RAG regression tests: PASS"
+
+if ($LocalOnly) {
+  Write-Header "GREEN GATE: LocalOnly set -> stopping after local gates"
+  Write-Host "Artifacts dir: $OutDir"
+  exit 0
+}
+
+# -----------------------------
+# Build + push image (unless overridden)
+# -----------------------------
+Write-Header "GREEN GATE: Build + push image"
+
+$env:AWS_PROFILE = $AwsProfile
+$env:AWS_REGION  = $AwsRegion
+
+$acct = (aws sts get-caller-identity --query Account --output text).Trim()
+if (-not $acct) { throw "Failed to resolve AWS account id via sts get-caller-identity (profile=$AwsProfile region=$AwsRegion)" }
+
+$registry = "$acct.dkr.ecr.$AwsRegion.amazonaws.com"
+
+if ([string]::IsNullOrWhiteSpace($ImageTagOverride)) {
+  $tag = "aws-$sha7"
+} else {
+  $tag = $ImageTagOverride.Trim()
+}
+$img = "$registry/$EcrRepo`:$tag"
+
+Write-Host "AWS_PROFILE = $AwsProfile"
+Write-Host "AWS_REGION  = $AwsRegion"
+Write-Host "ACCOUNT     = $acct"
+Write-Host "IMAGE       = $img"
+
+aws ecr get-login-password --region $AwsRegion |
+  docker login --username AWS --password-stdin $registry | Out-Null
+
+if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
+  $repoName = $EcrRepo
+  $tagCheck = aws ecr list-images --region $AwsRegion --repository-name $repoName `
+    --filter tagStatus=TAGGED `
+    --query "imageIds[?imageTag=='$tag']" --output json
+
+  if ($tagCheck -eq "[]") {
+    throw "ImageTagOverride '$tag' not found in ECR repo '$repoName' (region=$AwsRegion)."
+  }
+
+  Write-Host "ECR tag exists: ${repoName}:${tag}"
+} else {
+  $buildLog = Join-Path $OutDir "docker_build.log"
+  $pushLog  = Join-Path $OutDir "docker_push.log"
+
+  # Docker/BuildKit often writes progress to stderr; don't let PowerShell treat that as failure.
+  cmd.exe /c "docker build -t `"$img`" . > `"$buildLog`" 2>&1"
+  if ($LASTEXITCODE -ne 0) { throw "Docker build failed (exit=$LASTEXITCODE). See: $buildLog" }
+
+  cmd.exe /c "docker push `"$img`" > `"$pushLog`" 2>&1"
+  if ($LASTEXITCODE -ne 0) { throw "Docker push failed (exit=$LASTEXITCODE). See: $pushLog" }
+}
+
+# -----------------------------
+# Helm deploy (scripted) + restore pinned values
+# -----------------------------
+Write-Header "GREEN GATE: Helm deploy to css-mock"
+
+$deployScript = ".\scripts\deploy-css-mock.ps1"
+if (-not (Test-Path $deployScript)) { throw "Deploy script not found: $deployScript" }
+
+$valuesPath = ".\deploy\helm\values-css-mock.yaml"
+if (-not (Test-Path $valuesPath)) { throw "Expected helm values file missing: $valuesPath" }
+
+try {
+  & $deployScript -ImageTag $tag
+}
+finally {
+  git restore $valuesPath | Out-Null
+}
+
+# -----------------------------
+# Enforce single-image pods
+# -----------------------------
+Write-Header "GREEN GATE: Enforce single-image pods"
+
+kubectl -n $Namespace rollout status "deploy/$Deployment"
+
+$podMap = kubectl -n $Namespace get pods -l $PodSelector -o jsonpath="{range .items[*]}{.metadata.name}{'|'}{.spec.containers[0].image}{'\n'}{end}"
+$podMapLines = ($podMap -split "`n" | Where-Object { $_.Trim().Length -gt 0 })
+
+$bad = @()
+foreach ($line in $podMapLines) {
+  if ($line -notmatch [regex]::Escape(":$tag")) { $bad += $line }
+}
+if ($bad.Count -gt 0) {
+  Write-Host "Found pods not on expected tag :$tag -> deleting"
+  foreach ($b in $bad) {
+    $name = ($b -split "\|")[0].Trim()
+    Write-Host "deleting $name"
+    kubectl -n $Namespace delete pod $name | Out-Null
+  }
+  kubectl -n $Namespace rollout status "deploy/$Deployment"
+}
+
+$podMap2 = kubectl -n $Namespace get pods -l $PodSelector -o jsonpath="{range .items[*]}{.metadata.name}{'|'}{.spec.containers[0].image}{'\n'}{end}"
+Write-Host $podMap2
+
+$stillBad = @()
+foreach ($line in (($podMap2 -split "`n") | Where-Object { $_.Trim().Length -gt 0 })) {
+  if ($line -notmatch [regex]::Escape(":$tag")) { $stillBad += $line }
+}
+if ($stillBad.Count -gt 0) {
+  throw "Mixed images remain after enforcement. Expected tag :$tag but found:`n$($stillBad -join "`n")"
+}
+
+# -----------------------------
+# Live API validation (/api/rag/analyze)
+# -----------------------------
+Write-Header "GREEN GATE: Live /api/rag/analyze validation"
+
+try {
+  $payload = @{
+    review_id       = $ReviewId
+    mode            = "review_summary"
+    analysis_intent = $AnalysisIntent
+    context_profile = $ContextProfile
+    top_k           = [int]$TopK
+    force_reingest  = [bool]$ForceReingest.IsPresent
+    debug           = $true
+  }
+
+  $payloadPath = Join-Path $OutDir "rag_payload.json"
+  $respPath    = Join-Path $OutDir "rag_last.json"
+  To-JsonFile $payload $payloadPath
+
+  Write-Host "POST $BaseUrl/api/rag/analyze"
+  Write-Host "payload: $payloadPath"
+  Write-Host "resp:    $respPath"
+
+  # IMPORTANT: do NOT pipe curl into Tee-Object.
+  # Pipelines can mask curl exit codes in Windows PowerShell. Use cmd.exe redirection and check exit code.
+  $url = "$BaseUrl/api/rag/analyze"
+  $cmd = 'curl.exe -sS --fail-with-body -X POST "' + $url + '" ' +
+         '-H "Authorization: Bearer ' + $Token + '" ' +
+         '-H "Content-Type: application/json" ' +
+         '--data-binary "@' + $payloadPath + '"'
+
+  cmd.exe /c ($cmd + ' > "' + $respPath + '" 2>&1')
+  if ($LASTEXITCODE -ne 0) {
+    $preview = ""
+    try { $preview = (Get-Content $respPath -TotalCount 60 | Out-String) } catch { $preview = "<unable to read response file>" }
+    throw ("GREEN GATE FAIL: curl returned non-zero exit code: " + $LASTEXITCODE +
+           ". Response preview (first lines):`n" + $preview)
+  }
+
+  $resp = Read-Json $respPath
+  # HARDENING: fail fast with a clear message when the review has no docs.
+  # This prevents wasting time thinking "evidence attach" is broken when ingest never ran.
+  $ing = $null
+  if ($resp.stats -and $resp.stats.ingest) { $ing = $resp.stats.ingest }
+  if ($ing -and $ing.reason -eq "no_docs") {
+    throw ("GREEN GATE FAIL: review has no docs (stats.ingest.reason=no_docs). " +
+           "Check ReviewId and confirm docs exist in metadata store for this review. " +
+           "ingest=" + ($ing | ConvertTo-Json -Depth 20))
+  }
+
+  $warnings = @()
+  if ($resp.warnings -is [System.Array]) { $warnings = @($resp.warnings) }
+  elseif ($resp.warnings) { $warnings = @("$($resp.warnings)") }
+
+  Write-Host ("warnings = " + ($warnings -join ", "))
+
+  if ($warnings -contains "ingest_failed") {
+    $ing = $resp.stats.ingest
+    $ingStr = ""
+    if ($ing) { $ingStr = ($ing | ConvertTo-Json -Depth 50) }
+    throw "GREEN GATE FAIL: warnings includes ingest_failed. ingest stats: $ingStr"
+  }
+
+  if (-not $AllowPromptTruncated) {
+    if ($warnings -contains "prompt_truncated") {
+      $dp = $resp.stats.debug_prompt_len
+$cu = $resp.stats.context_used_chars
+$cm = $resp.stats.context_max_chars
+$tk = $resp.stats.top_k_effective
+$rt = $resp.stats.retrieved_total
+throw ("GREEN GATE FAIL: warnings includes prompt_truncated. " +
+       "debug_prompt_len=" + $dp + "; context_used_chars=" + $cu + "/" + $cm +
+       "; top_k_effective=" + $tk + "; retrieved_total=" + $rt +
+       ". (Pass -AllowPromptTruncated to allow temporarily.)")
+    }
+  }
+
+  $sections = @()
+  if ($resp.sections -is [System.Array]) { $sections = @($resp.sections) }
+
+  $totalEvidence = 0
+  foreach ($s in $sections) {
+    $ev = $s.evidence
+    if ($ev -is [System.Array]) { $totalEvidence += $ev.Count }
+  }
+
+  $retrievedCountsTotal = 0
+  if ($resp.retrieved_counts) {
+    foreach ($p in $resp.retrieved_counts.PSObject.Properties) {
+      $retrievedCountsTotal += [int]$p.Value
+    }
+  }
+
+  Write-Host "sections = $($sections.Count)"
+  Write-Host "retrieved_counts_total = $retrievedCountsTotal"
+  Write-Host "totalEvidenceItems = $totalEvidence (min required = $MinEvidenceItems)"
+
+  if ($totalEvidence -lt $MinEvidenceItems) {
+    if ($retrievedCountsTotal -gt 0) {
+      throw "GREEN GATE FAIL: retrieval succeeded (retrieved_counts_total=$retrievedCountsTotal) but evidence attachment is empty. This is an attach/normalize bug, not retrieval."
+    }
+
+    $rd = $resp.stats.retrieval_debug
+    $rdTop = $null
+    if ($rd -is [System.Array] -and $rd.Count -gt 0) { $rdTop = $rd[0] }
+    $rdJson = ""
+    if ($rdTop) { $rdJson = ($rdTop | ConvertTo-Json -Depth 20) }
+
+    throw ("GREEN GATE FAIL: retrieval returned zero hits (retrieved_counts_total=0), so evidence is empty. " +
+       "Check ingest + vector store population. " +
+       "stats.ingest=" + (($resp.stats.ingest) | ConvertTo-Json -Depth 20) + "; " +
+       "stats.retrieved_total=" + $resp.stats.retrieved_total + "; " +
+       "retrieval_debug[0]=" + $rdJson)
+  }
+
+  $hasUsableEvidence = $false
+  foreach ($s in $sections) {
+    $ev = $s.evidence
+    if (-not ($ev -is [System.Array])) { continue }
+
+    foreach ($e in $ev) {
+      $docOk  = ($null -ne $e.docId -and $e.docId.ToString().Trim().Length -gt 0) -or
+                ($null -ne $e.doc   -and $e.doc.ToString().Trim().Length -gt 0)
+      $spanOk = ($null -ne $e.charStart) -and ($null -ne $e.charEnd)
+
+      if ($docOk -and $spanOk) { $hasUsableEvidence = $true; break }
+    }
+
+    if ($hasUsableEvidence) { break }
+  }
+
+  if (-not $hasUsableEvidence) {
+    throw "GREEN GATE FAIL: evidence exists but is not usable for open-doc (requires doc/docId + charStart/charEnd on at least one item)."
+  }
+
+  Write-Header "GREEN GATE: PASS"
+  Write-Host "Repo       : $RepoPath"
+  Write-Host "Branch     : $branch"
+  Write-Host "SHA7       : $sha7"
+  Write-Host "ImageTag   : $tag"
+  Write-Host "Image      : $img"
+  Write-Host "Namespace  : $Namespace"
+  Write-Host "Deployment : $Deployment"
+  Write-Host "Pods       : $PodSelector"
+  Write-Host "Artifacts  : $OutDir"
+}
+catch {
+  Dump-K8sDiagnostics -Ns $Namespace -Dep $Deployment -Selector $PodSelector -OutDir $OutDir
+  throw
+}
+
 
 
 
