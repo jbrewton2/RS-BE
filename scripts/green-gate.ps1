@@ -364,7 +364,15 @@ try {
 
   if (-not $AllowPromptTruncated) {
     if ($warnings -contains "prompt_truncated") {
-      throw "GREEN GATE FAIL: warnings includes prompt_truncated. (Pass -AllowPromptTruncated to allow temporarily.)"
+      $dp = $resp.stats.debug_prompt_len
+$cu = $resp.stats.context_used_chars
+$cm = $resp.stats.context_max_chars
+$tk = $resp.stats.top_k_effective
+$rt = $resp.stats.retrieved_total
+throw ("GREEN GATE FAIL: warnings includes prompt_truncated. " +
+       "debug_prompt_len=" + $dp + "; context_used_chars=" + $cu + "/" + $cm +
+       "; top_k_effective=" + $tk + "; retrieved_total=" + $rt +
+       ". (Pass -AllowPromptTruncated to allow temporarily.)")
     }
   }
 
@@ -441,6 +449,7 @@ catch {
   Dump-K8sDiagnostics -Ns $Namespace -Dep $Deployment -Selector $PodSelector -OutDir $OutDir
   throw
 }
+
 
 
 
