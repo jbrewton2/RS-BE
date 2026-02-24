@@ -58,6 +58,8 @@ class RagCitation(BaseModel):
     question: str
     doc: str
     docId: str
+    evidenceId: Optional[str] = None
+    evidence_id: Optional[str] = None
     charStart: int
     charEnd: int
     score: float
@@ -68,6 +70,8 @@ class RagEvidenceSnippet(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     docId: str
+    evidenceId: Optional[str] = None
+    evidence_id: Optional[str] = None
     doc: Optional[str] = None
     text: str
     charStart: Optional[int] = None
@@ -152,7 +156,7 @@ class RagAnalyzeResponse(BaseModel):
 
     IMPORTANT:
     - model_config.extra="allow" so adding new keys in backend won't break response validation.
-    - Many fields are Optional to prevent “field missing -> validation failure -> dropped payload”.
+    - Many fields are Optional to prevent â€œfield missing -> validation failure -> dropped payloadâ€.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -175,6 +179,9 @@ class RagAnalyzeResponse(BaseModel):
     # Canonical risk list (may be empty)
     risks: List[Dict[str, Any]] = Field(default_factory=list)
 
+
+    # UI Risk Register (ReviewMain.tsx prefers currentReview.aiRisks)
+    aiRisks: List[Dict[str, Any]] = Field(default_factory=list)
     # Tier counts + rollup
     risk_objects: Dict[str, int] = Field(default_factory=dict)
     risk_summary: Dict[str, Any] = Field(default_factory=dict)
