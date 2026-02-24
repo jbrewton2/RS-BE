@@ -227,6 +227,7 @@ if ([string]::IsNullOrWhiteSpace($ImageTagOverride)) {
 } else {
   $tag = $ImageTagOverride.Trim()
 }
+
 $img = "$registry/$EcrRepo`:$tag"
 
 Write-Host "AWS_PROFILE = $AwsProfile"
@@ -234,18 +235,19 @@ Write-Host "AWS_REGION  = $AwsRegion"
 Write-Host "ACCOUNT     = $acct"
 Write-Host "IMAGE       = $img"
 
-aws ecr get-login-password --region $AwsRegion |
-  docker login --username AWS --password-stdin $registry | Out-Null
+# Login to ECR (no output noise)
+aws ecr get-login-password --region $AwsRegion | docker login --username AWS --password-stdin $registry | Out-Null
 
+# If ImageTagOverride is set, validate the tag exists using describe-images (no JMESPath quoting)
 if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
   $repoName = $EcrRepo
-  $tagCheck = $null
+  $ok = $true
   try {
-    $tagCheck = aws ecr describe-images --region $AwsRegion --repository-name $repoName --image-ids imageTag=$tag --output json
+    aws ecr describe-images --region $AwsRegion --repository-name $repoName --image-ids imageTag=$tag --output json | Out-Null
   } catch {
-    $tagCheck = $null
+    $ok = $false
   }
-  if (-not $tagCheck) {
+  if (-not $ok) {
     throw ("ImageTagOverride tag not found in ECR repo. repo=" + $repoName + " tag=" + $tag + " region=" + $AwsRegion)
   }
   Write-Host ("ECR tag exists: " + $repoName + ":" + $tag)
@@ -253,17 +255,14 @@ if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
   $buildLog = Join-Path $OutDir "docker_build.log"
   $pushLog  = Join-Path $OutDir "docker_push.log"
 
-  # Docker/BuildKit often writes progress to stderr; don't let PowerShell treat that as failure.
-  cmd.exe /c "docker build -t `"$img`" . > `"$buildLog`" 2>&1"
+  # Build/push using cmd.exe redirection to avoid PowerShell stderr behavior
+  cmd.exe /c ("docker build -t ""$img"" . > ""$buildLog"" 2>&1")
   if ($LASTEXITCODE -ne 0) { throw "Docker build failed (exit=$LASTEXITCODE). See: $buildLog" }
 
-  cmd.exe /c "docker push `"$img`" > `"$pushLog`" 2>&1"
+  cmd.exe /c ("docker push ""$img"" > ""$pushLog"" 2>&1")
   if ($LASTEXITCODE -ne 0) { throw "Docker push failed (exit=$LASTEXITCODE). See: $pushLog" }
 }
 
-# -----------------------------
-# Helm deploy (scripted) + restore pinned values
-# -----------------------------
 Write-Header "GREEN GATE: Helm deploy to css-mock"
 
 $deployScript = ".\scripts\deploy-css-mock.ps1"
@@ -518,6 +517,7 @@ if ([string]::IsNullOrWhiteSpace($ImageTagOverride)) {
 } else {
   $tag = $ImageTagOverride.Trim()
 }
+
 $img = "$registry/$EcrRepo`:$tag"
 
 Write-Host "AWS_PROFILE = $AwsProfile"
@@ -525,18 +525,19 @@ Write-Host "AWS_REGION  = $AwsRegion"
 Write-Host "ACCOUNT     = $acct"
 Write-Host "IMAGE       = $img"
 
-aws ecr get-login-password --region $AwsRegion |
-  docker login --username AWS --password-stdin $registry | Out-Null
+# Login to ECR (no output noise)
+aws ecr get-login-password --region $AwsRegion | docker login --username AWS --password-stdin $registry | Out-Null
 
+# If ImageTagOverride is set, validate the tag exists using describe-images (no JMESPath quoting)
 if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
   $repoName = $EcrRepo
-  $tagCheck = $null
+  $ok = $true
   try {
-    $tagCheck = aws ecr describe-images --region $AwsRegion --repository-name $repoName --image-ids imageTag=$tag --output json
+    aws ecr describe-images --region $AwsRegion --repository-name $repoName --image-ids imageTag=$tag --output json | Out-Null
   } catch {
-    $tagCheck = $null
+    $ok = $false
   }
-  if (-not $tagCheck) {
+  if (-not $ok) {
     throw ("ImageTagOverride tag not found in ECR repo. repo=" + $repoName + " tag=" + $tag + " region=" + $AwsRegion)
   }
   Write-Host ("ECR tag exists: " + $repoName + ":" + $tag)
@@ -544,17 +545,14 @@ if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
   $buildLog = Join-Path $OutDir "docker_build.log"
   $pushLog  = Join-Path $OutDir "docker_push.log"
 
-  # Docker/BuildKit often writes progress to stderr; don't let PowerShell treat that as failure.
-  cmd.exe /c "docker build -t `"$img`" . > `"$buildLog`" 2>&1"
+  # Build/push using cmd.exe redirection to avoid PowerShell stderr behavior
+  cmd.exe /c ("docker build -t ""$img"" . > ""$buildLog"" 2>&1")
   if ($LASTEXITCODE -ne 0) { throw "Docker build failed (exit=$LASTEXITCODE). See: $buildLog" }
 
-  cmd.exe /c "docker push `"$img`" > `"$pushLog`" 2>&1"
+  cmd.exe /c ("docker push ""$img"" > ""$pushLog"" 2>&1")
   if ($LASTEXITCODE -ne 0) { throw "Docker push failed (exit=$LASTEXITCODE). See: $pushLog" }
 }
 
-# -----------------------------
-# Helm deploy (scripted) + restore pinned values
-# -----------------------------
 Write-Header "GREEN GATE: Helm deploy to css-mock"
 
 $deployScript = ".\scripts\deploy-css-mock.ps1"
@@ -756,6 +754,7 @@ catch {
   Dump-K8sDiagnostics -Ns $Namespace -Dep $Deployment -Selector $PodSelector -OutDir $OutDir
   throw
 }
+
 
 
 
