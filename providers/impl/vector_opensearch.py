@@ -65,7 +65,7 @@ class OpenSearchVectorStore(VectorStore):
 
     def __init__(self) -> None:
         self.endpoint = _env("OPENSEARCH_ENDPOINT")
-        self.index = _env("OPENSEARCH_INDEX", "css_doc_chunks_1024")
+        self.index = "css_doc_chunks_1024"
         self.dim = _env_int("OPENSEARCH_VECTOR_DIM", 1024)
 
         region = _env("AWS_REGION") or _env("AWS_DEFAULT_REGION")

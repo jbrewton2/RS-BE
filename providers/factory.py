@@ -15,31 +15,20 @@ from providers.llm import LLMProvider
 from providers.impl.storage_local_files import LocalFilesStorageProvider
 from providers.impl.storage_s3 import S3StorageProvider
 
-from providers.impl.vector_disabled import DisabledVectorStore
-from providers.impl.jobs_local_inline import LocalInlineJobRunner
+from providers.impl.vector_opensearch import OpenSearchVectorStore  # No more pgvector or disabled vector
 
-# Optional impls (vector)
+# Optional LLM provider implementations
 try:
-    from providers.impl.vector_opensearch import OpenSearchVectorStore  # type: ignore
-except Exception:  # pragma: no cover
-    OpenSearchVectorStore = None  # type: ignore
-
-# Optional impls (pgvector)
-try:
-    from providers.impl.vector_pgvector import PgVectorStore  # type: ignore
-except Exception:  # pragma: no cover
-    PgVectorStore = None  # type: ignore
-
-# Optional impls (llm)
-try:  # pragma: no cover
     from providers.impl.llm_ollama import OllamaLLMProvider  # type: ignore
-except Exception:  # pragma: no cover
+except Exception:
     OllamaLLMProvider = None  # type: ignore
 
-try:  # pragma: no cover
+try:
     from providers.impl.llm_bedrock import BedrockLLMProvider  # type: ignore
-except Exception:  # pragma: no cover
+except Exception:
     BedrockLLMProvider = None  # type: ignore
+
+from providers.impl.jobs_local_inline import LocalInlineJobRunner
 
 
 @dataclass(frozen=True)
@@ -91,32 +80,47 @@ def _build_vector(settings: Settings) -> VectorStore:
     """
     Vector store factory.
 
-    Providers:
-    - VECTOR_STORE=opensearch -> OpenSearchVectorStore (SigV4 / IRSA)
-    - VECTOR_STORE=pgvector   -> PgVectorStore (local dev)
-    - otherwise               -> DisabledVectorStore
+    Production (GovCloud css-mock):
+      VECTOR_STORE=opensearch -> OpenSearchVectorStore (SigV4/IRSA)
+
+    Pytest / unit tests:
+      MUST NOT instantiate OpenSearch.
+      If pytest hits this factory (e.g. importing main.py), return a safe Noop vector store.
     """
-    provider = ""
-    try:
-        provider = (getattr(getattr(settings, "vector", None), "provider", "") or "").strip().lower()
-    except Exception:
-        provider = ""
+    def _is_pytest() -> bool:
+        try:
+            import sys
+            if "pytest" in sys.modules:
+                return True
+        except Exception:
+            pass
+        return (os.getenv("PYTEST_CURRENT_TEST") is not None) or (os.getenv("CSS_TESTING") == "1")
 
-    env_provider = (os.environ.get("VECTOR_STORE") or os.environ.get("VECTOR_PROVIDER") or "").strip().lower()
-    if env_provider:
-        provider = env_provider
+    class _NoopVectorStore:
+        def query(self, *args, **kwargs):
+            return []
+        def upsert_chunks(self, *args, **kwargs):
+            return None
+        def delete_review(self, *args, **kwargs):
+            return None
 
-    if provider == "opensearch":
-        if OpenSearchVectorStore is None:
-            raise RuntimeError("VECTOR_STORE=opensearch but OpenSearchVectorStore could not be imported.")
+    # Under pytest, never touch OpenSearch unless explicitly enabled.
+    if _is_pytest() and os.getenv("CSS_TEST_OPENSEARCH") != "1":
+        return _NoopVectorStore()
+
+    # Prefer env override; fall back to settings if present
+    mode = (os.environ.get("VECTOR_STORE") or os.environ.get("VECTOR_PROVIDER") or "").strip().lower()
+    if not mode:
+        vec_cfg = _get_attr(settings, "vector", None)
+        mode = str(_get_attr(vec_cfg, "provider", "") or "").strip().lower()
+
+    if mode == "opensearch":
         return OpenSearchVectorStore()
 
-    if provider == "pgvector":
-        if PgVectorStore is None:
-            raise RuntimeError("VECTOR_STORE=pgvector but PgVectorStore could not be imported.")
-        return PgVectorStore()
-
-    return DisabledVectorStore()
+    raise RuntimeError(
+        f"VECTOR_STORE must be 'opensearch' in production. Got: {mode!r}. "
+        "In tests, inject FakeVector or rely on NoopVectorStore."
+    )
 
 
 def _build_jobs(settings: Settings) -> JobRunner:
@@ -136,14 +140,9 @@ def _build_llm(settings: Settings) -> Optional[LLMProvider]:
         provider = env_provider
 
     if provider == "bedrock" and BedrockLLMProvider is not None:
-        return BedrockLLMProvider.from_env()
-
-    if provider == "ollama" and OllamaLLMProvider is not None:
-        return OllamaLLMProvider()
-
+        return BedrockLLMProvider.from_env()    # Bedrock-only policy (GovCloud runtime truth)
+    # If you want local Ollama later, add it back explicitly with tests.
     return None
-
-
 @lru_cache(maxsize=1)
 def get_providers() -> Providers:
     s = get_settings()
@@ -154,3 +153,9 @@ def get_providers() -> Providers:
         jobs=_build_jobs(s),
         llm=_build_llm(s),
     )
+
+
+
+
+
+
