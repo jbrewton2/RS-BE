@@ -17,12 +17,6 @@ from providers.impl.storage_s3 import S3StorageProvider
 
 from providers.impl.vector_opensearch import OpenSearchVectorStore  # No more pgvector or disabled vector
 
-# Optional LLM provider implementations
-try:
-    from providers.impl.llm_ollama import OllamaLLMProvider  # type: ignore
-except Exception:
-    OllamaLLMProvider = None  # type: ignore
-
 try:
     from providers.impl.llm_bedrock import BedrockLLMProvider  # type: ignore
 except Exception:
@@ -129,20 +123,39 @@ def _build_jobs(settings: Settings) -> JobRunner:
 
 def _build_llm(settings: Settings) -> Optional[LLMProvider]:
     """
-    LLM provider factory (authoritative).
-    Honors settings first, then env overrides for local/dev parity.
-    """
-    provider = (getattr(settings.llm, "provider", "") or "").strip().lower()
+    Bedrock-only policy (GovCloud runtime truth).
 
-    # Env overrides (keep compatibility with older naming)
-    env_provider = (os.environ.get("LLM_PROVIDER") or os.environ.get("OLLAMA_PROVIDER") or "").strip().lower()
+    Pytest safety:
+      - Unit tests MUST NOT require AWS_* env vars or IRSA.
+      - If pytest hits provider init (e.g., importing main.py), return None unless explicitly enabled.
+    """
+    import os
+
+    def _is_pytest() -> bool:
+        try:
+            import sys
+            if "pytest" in sys.modules:
+                return True
+        except Exception:
+            pass
+        return (os.getenv("PYTEST_CURRENT_TEST") is not None) or (os.getenv("CSS_TESTING") == "1")
+
+    # Under pytest, never touch Bedrock unless explicitly enabled.
+    if _is_pytest() and os.getenv("CSS_TEST_BEDROCK") != "1":
+        return None
+
+    provider = (getattr(settings.llm, "provider", "") or "").strip().lower()
+    env_provider = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
     if env_provider:
         provider = env_provider
 
     if provider == "bedrock" and BedrockLLMProvider is not None:
-        return BedrockLLMProvider.from_env()    # Bedrock-only policy (GovCloud runtime truth)
-    # If you want local Ollama later, add it back explicitly with tests.
+        return BedrockLLMProvider.from_env()
+
+    # Bedrock-only: no other providers allowed
     return None
+
+
 @lru_cache(maxsize=1)
 def get_providers() -> Providers:
     s = get_settings()
@@ -153,6 +166,8 @@ def get_providers() -> Providers:
         jobs=_build_jobs(s),
         llm=_build_llm(s),
     )
+
+
 
 
 
