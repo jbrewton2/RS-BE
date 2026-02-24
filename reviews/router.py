@@ -101,6 +101,120 @@ def _ensure_id_contract(item: Dict[str, Any]) -> Dict[str, Any]:
     return item
 
 
+
+def _backfill_evidence_provenance(ev: Dict[str, Any], docs: list[dict]) -> Dict[str, Any]:
+    """
+    Safe-only evidence provenance backfill.
+
+    Rules (deterministic, no fuzzy searching):
+      1) Parse evidenceId formats:
+         - "{docId}::{page}:{charStart}:{charEnd}"
+         - "{docId}::{chunkId}" where chunkId looks like "{page}:{charStart}:{charEnd}"
+      2) If doc filename is present and spans exist but docId missing, map via docs[].
+      3) Never attempt text search to guess spans.
+    """
+    if not isinstance(ev, dict):
+        return ev
+
+    def _to_int(x):
+        try:
+            if x is None:
+                return None
+            if isinstance(x, bool):
+                return None
+            s = str(x).strip()
+            if not s:
+                return None
+            return int(s)
+        except Exception:
+            return None
+
+    # Existing fields (normalize key variants)
+    doc_id = (ev.get("docId") or ev.get("doc_id") or "").strip()
+    doc_name = (ev.get("doc") or ev.get("document_name") or ev.get("documentName") or "").strip()
+    cs = _to_int(ev.get("charStart") if ev.get("charStart") is not None else ev.get("char_start"))
+    ce = _to_int(ev.get("charEnd") if ev.get("charEnd") is not None else ev.get("char_end"))
+    evidence_id = (ev.get("evidenceId") or ev.get("evidence_id") or "").strip()
+
+    # Build doc-name -> doc_id map from docs[]
+    name_to_id = {}
+    if isinstance(docs, list):
+        for d in docs:
+            if not isinstance(d, dict):
+                continue
+            did = (d.get("doc_id") or d.get("id") or "").strip()
+            fname = (d.get("filename") or d.get("name") or "").strip()
+            if did and fname:
+                name_to_id[fname] = did
+
+    # 1) Parse evidenceId: "{docId}::{page}:{cs}:{ce}"
+    if evidence_id and ("::" in evidence_id):
+        left, right = evidence_id.split("::", 1)
+        left = left.strip()
+        right = right.strip()
+
+        # If left looks like a UUID-ish doc id, treat as docId
+        if left and not doc_id:
+            doc_id = left
+
+        # Try parse right as page:cs:ce OR cs:ce (we accept both)
+        parts = [p.strip() for p in right.split(":") if p.strip()]
+        if len(parts) >= 3:
+            # common: page, cs, ce
+            maybe_cs = _to_int(parts[-2])
+            maybe_ce = _to_int(parts[-1])
+            if cs is None and maybe_cs is not None:
+                cs = maybe_cs
+            if ce is None and maybe_ce is not None:
+                ce = maybe_ce
+        elif len(parts) == 2:
+            maybe_cs = _to_int(parts[0])
+            maybe_ce = _to_int(parts[1])
+            if cs is None and maybe_cs is not None:
+                cs = maybe_cs
+            if ce is None and maybe_ce is not None:
+                ce = maybe_ce
+
+    # 2) If spans exist but docId missing, map doc filename -> doc_id using docs[]
+    if (not doc_id) and doc_name and (cs is not None) and (ce is not None):
+        did = name_to_id.get(doc_name)
+        if did:
+            doc_id = did
+
+    # Write back normalized fields (only if we have them)
+    if doc_id:
+        ev["docId"] = doc_id
+    if cs is not None:
+        ev["charStart"] = cs
+    if ce is not None:
+        ev["charEnd"] = ce
+    if evidence_id:
+        ev["evidenceId"] = evidence_id
+
+    return ev
+
+
+def _backfill_aiRisks_evidence(item: Dict[str, Any]) -> None:
+    """
+    Apply provenance backfill to aiRisks[*].evidence[*] using item['docs'] mapping when present.
+    """
+    if not isinstance(item, dict):
+        return
+    docs = item.get("docs") or []
+    risks = item.get("aiRisks") or []
+    if not isinstance(risks, list):
+        return
+    for r in risks:
+        if not isinstance(r, dict):
+            continue
+        evs = r.get("evidence") or []
+        if not isinstance(evs, list):
+            continue
+        for i in range(len(evs)):
+            if isinstance(evs[i], dict):
+                evs[i] = _backfill_evidence_provenance(evs[i], docs)
+        r["evidence"] = evs
+
 def _as_list(x):
     return x if isinstance(x, list) else []
 
@@ -161,6 +275,8 @@ async def get_review(review_id: str, storage: StorageDep):
     if not item:
         raise HTTPException(status_code=404, detail="Review not found")
 
+    _backfill_aiRisks_evidence(item)
+
     return _ensure_id_contract(item)
 @router.post("")
 async def upsert_review(review: Dict[str, Any], storage: StorageDep):
@@ -215,6 +331,8 @@ async def delete_review(review_id: str):
     pk = f"REVIEW#{review_id}"
     meta.table.delete_item(Key={"pk": pk, "sk": "META"})
     return {"ok": True}
+
+
 
 
 
