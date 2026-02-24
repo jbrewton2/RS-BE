@@ -169,13 +169,13 @@ def _load_db_settings() -> DBSettings:
 
 
 def _load_vector_settings() -> VectorSettings:
-    provider = (_env("VECTOR_STORE", "") or _env("VECTOR_PROVIDER", "") or "disabled").strip().lower()
+    # Runtime truth: OpenSearch is the only supported vector provider.
+    provider = (_env("VECTOR_STORE", "") or _env("VECTOR_PROVIDER", "") or "opensearch").strip().lower()
     return VectorSettings(provider=provider)
-
-
 def _load_llm_settings() -> LLMSettings:
-    provider = (_env("LLM_PROVIDER", "") or _env("OLLAMA_PROVIDER", "") or "ollama").strip().lower()
-
+    # Bedrock-only runtime truth. No Ollama fallbacks allowed.
+    provider = "bedrock"
+    # Keep these fields for compatibility, but do not auto-fill with local providers.
     api_url = (_env("LLM_API_URL", "") or "").strip()
     model = (_env("LLM_MODEL", "") or "").strip()
 
@@ -183,20 +183,6 @@ def _load_llm_settings() -> LLMSettings:
     connect_timeout_seconds = _env_float("LLM_CONNECT_TIMEOUT_SECONDS", 10.0)
     max_attempts = _env_int("LLM_MAX_ATTEMPTS", 2)
     backoff_seconds = _env_csv_floats("LLM_BACKOFF_SECONDS", [0.3])
-
-    if not api_url:
-        api_url = (_env("OLLAMA_API_URL", "") or "http://localhost:11434/api/generate").strip()
-    if not model:
-        model = (_env("OLLAMA_MODEL", "") or "llama3.1").strip()
-
-    if "LLM_TIMEOUT_SECONDS" not in os.environ and "OLLAMA_TIMEOUT_SECONDS" in os.environ:
-        timeout_seconds = _env_float("OLLAMA_TIMEOUT_SECONDS", timeout_seconds)
-    if "LLM_MAX_ATTEMPTS" not in os.environ and "OLLAMA_MAX_ATTEMPTS" in os.environ:
-        max_attempts = _env_int("OLLAMA_MAX_ATTEMPTS", max_attempts)
-    if "LLM_BACKOFF_SECONDS" not in os.environ and "OLLAMA_BACKOFF_SECONDS" in os.environ:
-        backoff_seconds = _env_csv_floats("OLLAMA_BACKOFF_SECONDS", backoff_seconds)
-    if "LLM_CONNECT_TIMEOUT_SECONDS" not in os.environ and "OLLAMA_CONNECT_TIMEOUT_SECONDS" in os.environ:
-        connect_timeout_seconds = _env_float("OLLAMA_CONNECT_TIMEOUT_SECONDS", connect_timeout_seconds)
 
     timeout_seconds = max(5.0, float(timeout_seconds))
     connect_timeout_seconds = max(1.0, float(connect_timeout_seconds))
@@ -212,8 +198,6 @@ def _load_llm_settings() -> LLMSettings:
         max_attempts=max_attempts,
         backoff_seconds=backoff_seconds,
     )
-
-
 def _normalize_storage_provider(raw: str) -> str:
     v = (raw or "").strip().lower()
     if v in ("local", "s3"):
@@ -380,3 +364,6 @@ def get_settings() -> Settings:
         db=_load_db_settings(),
         vector=_load_vector_settings(),
     )
+
+
+

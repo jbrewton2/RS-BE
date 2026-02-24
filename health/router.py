@@ -28,59 +28,6 @@ def api_health():
 # LLM Health
 # ----------------------------
 
-@router.get("/health/llm")
-async def health_llm():
-    """
-    Verifies:
-      - LLM endpoint is reachable
-      - configured model exists in tags
-
-    NOTE: Behavior preserved from prior Ollama-only implementation:
-      - base URL derived from api_url by splitting at "/api/"
-      - tags endpoint is "{base}/api/tags"
-    """
-    s = get_settings()
-
-    # Preserve semantics: prefer configured api_url and model from canonical settings.
-    # (Previously these were env-driven defaults.)
-    api_url = (s.llm.api_url or "").strip()
-    model = (s.llm.model or "").strip()
-
-    # Derive base URL from api_url
-    # e.g. http://ollama:11434/api/generate -> http://ollama:11434
-    base = ""
-    if api_url and "/api/" in api_url:
-        base = api_url.split("/api/")[0].rstrip("/")
-    elif api_url:
-        base = api_url.rstrip("/")
-
-    tags_url = f"{base}/api/tags" if base else ""
-
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(tags_url)
-            r.raise_for_status()
-            data = r.json()
-    except Exception as e:
-        return {
-            "ok": False,
-            "llmReachable": False,
-            "modelReady": False,
-            "model": model,
-            "error": str(e),
-        }
-
-    models = [m.get("name") for m in data.get("models", []) if isinstance(m, dict)]
-    model_ready = model in models if model else False
-
-    return {
-        "ok": True,
-        "llmReachable": True,
-        "modelReady": model_ready,
-        "model": model,
-        "knownModels": models[:25],  # keep response bounded
-    }
-
 
 # ----------------------------
 # DB Health (Postgres)
@@ -124,28 +71,40 @@ def db_health():
 
 @router.get("/api/db/vector-health")
 def db_vector_health():
-    try:
-        conn = _pg_connect()
-        try:
-            cur = conn.cursor()
-            # Ensure pgvector is installed (idempotent)
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            try:
-                conn.commit()
-            except Exception:
-                pass
+    """
+    OpenSearch-only vector health check (config validation).
+    No external calls (deterministic, zero-cost).
+    """
+    import os
+    provider = (os.environ.get("VECTOR_STORE") or os.environ.get("VECTOR_PROVIDER") or "opensearch").strip().lower()
+    host = (os.environ.get("OPENSEARCH_HOST") or "").strip()
+    index_name = (os.environ.get("OPENSEARCH_INDEX") or "").strip()
+    region = (os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "").strip()
 
-            # Prove the type exists
-            cur.execute("SELECT '[1,2,3]'::vector;")
-            row = cur.fetchone()
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+    ok = True
+    missing = []
+    if provider != "opensearch":
+        ok = False
+        missing.append("VECTOR_STORE=opensearch")
+    if not host:
+        ok = False
+        missing.append("OPENSEARCH_HOST")
+    if not index_name:
+        ok = False
+        missing.append("OPENSEARCH_INDEX")
+    if not region:
+        ok = False
+        missing.append("AWS_REGION or AWS_DEFAULT_REGION")
 
-        return {"ok": True, "pgvector": True, "sample_vector": str(row[0]) if row else None}
-    except Exception as e:
-        return {"ok": False, "pgvector": False, "error": str(e)}
+    return {
+        "ok": ok,
+        "provider": provider,
+        "opensearch_host": host,
+        "opensearch_index": index_name,
+        "region": region,
+        "missing": missing,
+    }
+
+
 
 

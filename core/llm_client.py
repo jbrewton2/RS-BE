@@ -137,7 +137,7 @@ async def _load_knowledge_context(knowledge_doc_ids: Optional[List[str]]) -> str
 
 
 # ---------------------------------------------------------------------------
-# Provider-agnostic HTTP invocation for current LLM providers (Ollama today)
+# Provider-agnostic HTTP invocation for current LLM providers (Bedrock)
 # ---------------------------------------------------------------------------
 async def _llm_http_post(payload: Dict[str, Any], request_type: str) -> Tuple[str, int, int]:
     s = get_settings()

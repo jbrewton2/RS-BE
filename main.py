@@ -37,9 +37,7 @@ from questionnaire.router import (
     question_bank_router,
 )
 from knowledge.router import router as knowledge_router
-from llm_config.router import router as llm_config_router
 from pricing.router import router as pricing_router
-from llm_status.router import router as llm_status_router
 from questionnaire.sessions_router import (
     router as questionnaire_sessions_router,
 )
@@ -224,7 +222,6 @@ async def lifespan(app: FastAPI):
         ("stores/knowledge_store.json", os.path.join(seed_dir, "knowledge_store.json"), "[]"),
         ("stores/flags.json", os.path.join(seed_dir, "flags.json"), "[]"),
         ("stores/flags_usage.json", os.path.join(seed_dir, "flags_usage.json"), "{}"),
-        ("stores/llm_config.json", os.path.join(seed_dir, "llm_config.json"), "{}"),
         ("stores/llm_pricing.json", os.path.join(seed_dir, "llm_pricing.json"), "{}"),
         ("stores/llm_stats.json", os.path.join(seed_dir, "llm_stats.json"), "[]"),
     ]
@@ -672,9 +669,7 @@ app.include_router(reviews_router, prefix="/api")
 app.include_router(questionnaire_router, prefix="/api")
 app.include_router(question_bank_router, prefix="/api")
 app.include_router(knowledge_router, prefix="/api")
-app.include_router(llm_config_router, prefix="/api")
 app.include_router(pricing_router, prefix="/api")
-app.include_router(llm_status_router, prefix="/api")
 app.include_router(rag_router, prefix="/api")
 
 
@@ -685,3 +680,4 @@ async def root():
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+

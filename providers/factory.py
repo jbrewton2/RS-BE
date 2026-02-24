@@ -140,20 +140,13 @@ def _build_llm(settings: Settings) -> Optional[LLMProvider]:
             pass
         return (os.getenv("PYTEST_CURRENT_TEST") is not None) or (os.getenv("CSS_TESTING") == "1")
 
-    # Under pytest, never touch Bedrock unless explicitly enabled.
     if _is_pytest() and os.getenv("CSS_TEST_BEDROCK") != "1":
         return None
 
-    provider = (getattr(settings.llm, "provider", "") or "").strip().lower()
-    env_provider = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
-    if env_provider:
-        provider = env_provider
+    if BedrockLLMProvider is None:
+        return None
 
-    if provider == "bedrock" and BedrockLLMProvider is not None:
-        return BedrockLLMProvider.from_env()
-
-    # Bedrock-only: no other providers allowed
-    return None
+    return BedrockLLMProvider.from_env()
 
 
 @lru_cache(maxsize=1)
@@ -166,6 +159,7 @@ def get_providers() -> Providers:
         jobs=_build_jobs(s),
         llm=_build_llm(s),
     )
+
 
 
 
