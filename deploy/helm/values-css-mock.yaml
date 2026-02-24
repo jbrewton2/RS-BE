@@ -1,4 +1,4 @@
-﻿# values-css-mock.yaml (pinned) - SOURCE OF TRUTH FOR THIS ENV
+# values-css-mock.yaml (pinned) - SOURCE OF TRUTH FOR THIS ENV
 replicaCount: 2
 
 image:
@@ -14,4 +14,26 @@ service:
 targetGroupBinding:
   enabled: false
 
-
+configMap:
+  name: css-backend-config
+  data:
+    AUTH_PROVIDER: "oidc"
+    AWS_REGION: "us-gov-east-1"
+    BEDROCK_EMBED_MODEL_ID: "amazon.titan-embed-text-v2:0"
+    BEDROCK_MODEL_ID: "meta.llama3-70b-instruct-v1:0"
+    BEDROCK_REGION: "us-gov-west-1"
+    DYNAMODB_TABLE: "css-mock-metadata"
+    LLM_PROVIDER: "bedrock"
+    METADATA_STORE: "dynamodb"
+    OIDC_AUDIENCE_ALLOWLIST: "nqbekjhbk3gugpsfuc1tfhihf"
+    OIDC_ISSUER: "https://cognito-idp.us-gov-east-1.amazonaws.com/us-gov-east-1_mUyl7eRgy"
+    OIDC_ISSUER_ALLOWLIST: "https://cognito-idp.us-gov-east-1.amazonaws.com/us-gov-east-1_mUyl7eRgy"
+    OIDC_JWKS_URL: "https://cognito-idp.us-gov-east-1.amazonaws.com/us-gov-east-1_mUyl7eRgy/.well-known/jwks.json"
+    OPENSEARCH_ENDPOINT: "https://vpc-css-mock-search-gylzl4tnnkbapi7pmgdklsftuu.us-gov-east-1.es.amazonaws.com"
+    OPENSEARCH_INDEX: "css_doc_chunks_1024"
+    OPENSEARCH_VECTOR_DIM: "1024"
+    RAG_ALLOW_FORCE_REINGEST: "1"
+    S3_BUCKET: "css-mock-docs-354962495083-xuwajy"
+    S3_PREFIX: "stores"
+    STORAGE_MODE: "s3"
+    VECTOR_STORE: "opensearch"
