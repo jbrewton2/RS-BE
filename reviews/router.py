@@ -101,6 +101,138 @@ def _ensure_id_contract(item: Dict[str, Any]) -> Dict[str, Any]:
     return item
 
 
+def _as_list(x):
+    return x if isinstance(x, list) else []
+
+
+def _as_dict(x):
+    return x if isinstance(x, dict) else {}
+
+
+def _normalize_review_airisks(review: dict) -> None:
+    """
+    Normalize review['aiRisks'] to include BOTH:
+      - UI fields: id,title,description,category,department,severity,source_type,status,evidence[]
+      - Legacy fields kept: label,rationale,scope,related_flags,document_name
+
+    Also attaches evidence to section-like risks using review['rag']['sections'] evidence.
+    """
+    if not isinstance(review, dict):
+        return 
+    ai = review.get("aiRisks")
+    if not isinstance(ai, list) or not ai:
+        return 
+    rag = _as_dict(review.get("rag"))
+    sections = _as_list(rag.get("sections"))
+
+    sec_by_id = {}
+    for s in sections:
+        if not isinstance(s, dict):
+            continue
+        sid = str(s.get("id") or "").strip().lower()
+        if sid:
+            sec_by_id[sid] = s
+
+    out = []
+    for i, r in enumerate(ai):
+        if not isinstance(r, dict):
+            continue
+
+        rid = str(r.get("id") or f"risk-{i}").strip()
+
+        # ---- legacy ----
+        legacy_label = str(r.get("label") or "").strip() or None
+        legacy_rationale = r.get("rationale")
+        legacy_rationale = str(legacy_rationale).strip() if legacy_rationale is not None else None
+        legacy_scope = str(r.get("scope") or "").strip() or None
+        legacy_related_flags = r.get("related_flags")
+        if not isinstance(legacy_related_flags, list):
+            legacy_related_flags = []
+        legacy_document_name = r.get("document_name")
+
+        # ---- ui (if already present) ----
+        ui_title = str(r.get("title") or "").strip() or None
+        ui_desc = r.get("description")
+        ui_desc = str(ui_desc).strip() if ui_desc is not None else None
+        ui_dept = str(r.get("department") or "").strip() or None
+        ui_source_type = str(r.get("source_type") or "").strip() or None
+        ui_status = str(r.get("status") or "").strip() or None
+
+        severity = str(r.get("severity") or "Medium").strip() or "Medium"
+        category = str(r.get("category") or "").strip() or None
+
+        title = ui_title or legacy_label or "Untitled"
+        description = ui_desc or legacy_rationale or None
+        if description and len(description) > 2000:
+            description = description[:1997].rstrip() + "..."
+
+        department = ui_dept or legacy_scope or None
+
+        source_type = ui_source_type
+        if not source_type:
+            source_type = "sectionDerived" if rid.startswith("rag-section:") else "legacy"
+
+        status = ui_status or "Open"
+
+        evidence = r.get("evidence")
+        if not isinstance(evidence, list):
+            evidence = []
+
+        # attach evidence for rag-section:* if empty
+        if not evidence and rid.startswith("rag-section:"):
+            parts = rid.split(":")
+            sec_id_guess = parts[-1].strip().lower() if len(parts) >= 3 else ""
+            sec = sec_by_id.get(sec_id_guess)
+            if isinstance(sec, dict):
+                if not department:
+                    department = str(sec.get("owner") or "").strip() or department
+
+                evs = sec.get("evidence")
+                if isinstance(evs, list):
+                    ev_out = []
+                    for ev in evs[:6]:
+                        if not isinstance(ev, dict):
+                            continue
+                        ev_out.append(
+                            {
+                                "docId": ev.get("docId") or ev.get("doc_id"),
+                                "evidenceId": ev.get("evidenceId") or ev.get("evidence_id"),
+                                "charStart": ev.get("charStart") if ev.get("charStart") is not None else ev.get("char_start"),
+                                "charEnd": ev.get("charEnd") if ev.get("charEnd") is not None else ev.get("char_end"),
+                                "score": ev.get("score"),
+                                "text": (
+                                    str(ev.get("text") or ev.get("text_snippet") or ev.get("excerpt") or "")[:500]
+                                    if (ev.get("text") is not None or ev.get("text_snippet") is not None or ev.get("excerpt") is not None)
+                                    else None
+                                ),
+                            }
+                        )
+                    evidence = ev_out
+
+        merged = {
+            # UI fields
+            "id": rid,
+            "title": title,
+            "description": description,
+            "category": category,
+            "department": department,
+            "severity": severity,
+            "source_type": source_type,
+            "status": status,
+            "evidence": evidence,
+
+            # Legacy fields
+            "label": legacy_label or title,
+            "rationale": legacy_rationale or description,
+            "scope": legacy_scope or department,
+            "related_flags": legacy_related_flags,
+            "document_name": legacy_document_name,
+        }
+
+        out.append(merged)
+
+    review["aiRisks"] = out
+
 @router.get("")
 async def list_reviews():
     meta = DynamoMeta()
@@ -131,9 +263,8 @@ async def get_review(review_id: str):
     item = meta.get_review_detail(review_id)
     if not item:
         raise HTTPException(status_code=404, detail="Review not found")
+    _normalize_review_airisks(item)
     return _ensure_id_contract(item)
-
-
 @router.post("")
 async def upsert_review(review: Dict[str, Any], storage: StorageDep):
     """
@@ -187,3 +318,6 @@ async def delete_review(review_id: str):
     pk = f"REVIEW#{review_id}"
     meta.table.delete_item(Key={"pk": pk, "sk": "META"})
     return {"ok": True}
+
+
+
