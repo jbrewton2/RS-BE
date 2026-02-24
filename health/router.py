@@ -45,10 +45,10 @@ def _pg_connect():
     # Prefer psycopg (v3), fall back to psycopg2
     try:
         import psycopg  # type: ignore
-        return psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw)
+        return psycopg.connect(host=endpoint, port=port, dbname=db, user=user, password=pw)
     except Exception:
         import psycopg2  # type: ignore
-        return psycopg2.connect(host=host, port=port, dbname=db, user=user, password=pw)
+        return psycopg2.connect(host=endpoint, port=port, dbname=db, user=user, password=pw)
 
 
 @router.get("/api/db/health")
@@ -77,7 +77,7 @@ def db_vector_health():
     """
     import os
     provider = (os.environ.get("VECTOR_STORE") or os.environ.get("VECTOR_PROVIDER") or "opensearch").strip().lower()
-    host = (os.environ.get("OPENSEARCH_HOST") or "").strip()
+    endpoint = (os.environ.get("OPENSEARCH_ENDPOINT") or "").strip()
     index_name = (os.environ.get("OPENSEARCH_INDEX") or "").strip()
     region = (os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "").strip()
 
@@ -86,9 +86,9 @@ def db_vector_health():
     if provider != "opensearch":
         ok = False
         missing.append("VECTOR_STORE=opensearch")
-    if not host:
+    if not endpoint:
         ok = False
-        missing.append("OPENSEARCH_HOST")
+        missing.append("OPENSEARCH_ENDPOINT")
     if not index_name:
         ok = False
         missing.append("OPENSEARCH_INDEX")
@@ -99,11 +99,12 @@ def db_vector_health():
     return {
         "ok": ok,
         "provider": provider,
-        "opensearch_host": host,
+        "opensearch_endpoint": endpoint,
         "opensearch_index": index_name,
         "region": region,
         "missing": missing,
     }
+
 
 
 
