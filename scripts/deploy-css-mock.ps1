@@ -1,22 +1,6 @@
 <#
 .SYNOPSIS
   CSS Backend deployment SOURCE OF TRUTH for css-mock (GovCloud EKS).
-
-
-function Set-YamlImageTagInPlace {
-  param(
-    [Parameter(Mandatory=$true)][string]$ValuesPath,
-    [Parameter(Mandatory=$true)][string]$ImageTag
-  )
-
-  if (!(Test-Path $ValuesPath)) { throw "Values file not found: $ValuesPath" }
-
-  $raw = Get-Content -Raw $ValuesPath
-
-  if ($raw -notmatch '(?m)^\s*image:\s*$') {
-    throw "values file missing 'image:' block: $ValuesPath"
-  }
-
   if ($raw -match '(?m)^\s*tag:\s*".*"\s*$') {
     $raw = [regex]::Replace($raw, '(?m)^\s*tag:\s*".*"\s*$', ('  tag: "' + $ImageTag + '"'))
   } else {
@@ -73,6 +57,1233 @@ function Set-YamlImageTagInPlace {
   $env:AWS_REGION="us-gov-east-1"
   .\scripts\deploy-css-mock.ps1 -ImageTag aws-648384e
 #>
+
+function Set-YamlImageTagInPlace {
+  param(
+    [Parameter(Mandatory=$true)][string]$ValuesPath,
+    [Parameter(Mandatory=$true)][string]$ImageTag
+  )
+
+  if (!(Test-Path $ValuesPath)) { throw "Values file not found: $ValuesPath" }
+
+  $raw = Get-Content -Raw $ValuesPath
+
+  if ($raw -notmatch '(?m)^\s*image:\s*
+param(
+  [string]$Namespace = "css-mock",
+  [string]$Release   = "css-backend",
+  [string]$ChartPath = ".\deploy\helm\css-backend",
+  [string]$OverridePath = ".\deploy\helm\values-css-mock.yaml",
+  [string]$ImageTag,
+  [int]$ReplicaCount = 2,
+  [int]$TimeoutMinutes = 10,
+  [switch]$SkipVerify,
+  [switch]$SkipEcrCheck
+)
+
+$ErrorActionPreference="Stop"
+
+# --- AWS credential behavior (local vs GitHub Actions) ---
+# In GitHub Actions, credentials come from OIDC env vars. DO NOT force AWS_PROFILE.
+# Locally, default to css-gov if no env creds are present.
+try {
+    $isGh = ($env:GITHUB_ACTIONS -eq "true")
+    $hasEnvCreds = -not [string]::IsNullOrWhiteSpace($env:AWS_ACCESS_KEY_ID)
+    if (-not $isGh -and -not $hasEnvCreds) {
+        if ([string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) {
+            $env:AWS_PROFILE = "css-gov"
+        }
+    }
+} catch { }
+# -------------------------------------------------------
+
+function Require-Cmd([string]$name) {
+  if (!(Get-Command $name -ErrorAction SilentlyContinue)) {
+    throw "Missing required command '$name'. Install it and retry."
+  }
+}
+
+function Get-GitTag() {
+  $sha = (git rev-parse --short=7 HEAD 2>$null).Trim()
+  if (!$sha) { throw "Could not determine git sha. Are you in a git repo?" }
+  return "aws-$sha"
+}
+
+function Write-PinnedOverride([string]$path, [string]$tag, [int]$replicas) {
+  $dir = Split-Path -Parent $path
+  if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+
+  $yaml = @"
+# values-css-mock.yaml (pinned) - SOURCE OF TRUTH FOR THIS ENV
+replicaCount: $replicas
+
+image:
+  repository: 354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend
+  tag: "$tag"
+  pullPolicy: Always
+
+# Ingress expects a Service. Keep enabled.
+service:
+  enabled: true
+
+# AWS Load Balancer Controller owns TargetGroupBinding (Ingress-driven). Helm must NOT manage it here.
+targetGroupBinding:
+  enabled: false
+"@
+
+  $outPath = if ($dir) { Join-Path $dir (Split-Path -Leaf $path) } else { $path }
+  [System.IO.File]::WriteAllText((Resolve-Path (Split-Path -Parent $outPath)).Path + "\" + (Split-Path -Leaf $outPath), $yaml, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Invoke-AwsCli([string[]]$AwsArgs) {
+  # Run AWS CLI through cmd.exe so stderr does NOT become a PowerShell error record (EAP=Stop safe).
+  $awsExe = (Get-Command "aws.exe" -ErrorAction SilentlyContinue)
+  $exePath = if ($awsExe) { $awsExe.Source } else { "aws" }
+
+  if (!$AwsArgs -or $AwsArgs.Count -eq 0) {
+    throw "Invoke-AwsCli called with no arguments. This is a script bug."
+  }
+
+  $escapedArgs = $AwsArgs | ForEach-Object { '"' + ($_ -replace '"','\"') + '"' }
+  $cmdLine = '"' + ($exePath -replace '"','\"') + '" ' + ($escapedArgs -join ' ')
+
+  $out = cmd.exe /c "$cmdLine 2>&1"
+  $code = $LASTEXITCODE
+
+  if ($code -ne 0) {
+    throw ("AWS CLI failed (exit {0}): {1}`n{2}" -f $code, $cmdLine, ($out | Out-String))
+  }
+
+  return ($out | Out-String)
+}
+
+function Verify-EcrTagExists([string]$RepoName, [string]$Tag, [string]$Region) {
+  if ($SkipEcrCheck) {
+    Write-Host "ECR check: SKIPPED (SkipEcrCheck set)" -ForegroundColor Yellow
+    return
+  }
+
+  if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $profile = $env:AWS_PROFILE } else { $profile = "<default>" }
+  Write-Host "ECR check: ensuring tag exists: $RepoName`:$Tag (region=$Region, profile=$profile)" -ForegroundColor Cyan
+
+  # IMPORTANT: pass a real string[] of args (no $args ambiguity)
+  $cmd = @(
+    "ecr", "describe-images",
+    "--region", $Region,
+    "--repository-name", $RepoName,
+    "--image-ids", "imageTag=$Tag"
+  )
+
+  $null = Invoke-AwsCli -AwsArgs $cmd
+}
+
+function Render-Helm([string]$chart, [string]$ns, [string]$override) {
+  $render = & helm template $Release $chart -n $ns -f $override 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "helm template failed:`n$render" }
+  return ($render | Out-String)
+}
+
+function Guardrails([string]$renderedYaml) {
+  if ($renderedYaml -match 'MINIO_' -or $renderedYaml -match 'MINIO_ENDPOINT') {
+    throw "Guardrail violation: rendered manifests include MinIO env(s). This env must be S3 only."
+  }
+  if ($renderedYaml -match '(?m)^\s*kind:\s*TargetGroupBinding\s*$') {
+    throw "Guardrail violation: chart is rendering TargetGroupBinding. For css-mock this must be owned by ALB controller. Keep targetGroupBinding.enabled=false."
+  }
+  if ($renderedYaml -notmatch '(?m)^\s*STORAGE_MODE:\s*"s3"\s*$') {
+    throw "Guardrail violation: STORAGE_MODE is not rendered as ""s3"". Fix chart values/configmap."
+  }
+}
+
+function Verify-External([string]$baseUrl) {
+  Write-Host "External checks:" -ForegroundColor Cyan
+  $api  = try { (Invoke-WebRequest "$baseUrl/api/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  $root = try { (Invoke-WebRequest "$baseUrl/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  Write-Host "  /api/health = $api"
+  Write-Host "  /health     = $root"
+  if ($api -ne 200 -or $root -ne 200) { throw "External health checks failed. api=$api root=$root" }
+}
+
+function Verify-Cluster([string]$ns, [string]$release) {
+  Write-Host "Cluster checks:" -ForegroundColor Cyan
+  & kubectl -n $ns get deploy $release -o wide
+  & kubectl -n $ns get pods -l app=$release -o wide
+  & kubectl -n $ns get svc $release -o wide
+  & kubectl -n $ns get endpoints $release -o wide
+
+  Write-Host "Ingress route:" -ForegroundColor Cyan
+  & kubectl -n $ns describe ingress css-mock | Select-String -Pattern "/api|$release:8000" -Context 0,1
+
+  Write-Host "TGB (ALB controller owned; name may change over time):" -ForegroundColor Cyan
+  & kubectl -n $ns get targetgroupbinding -o wide | Select-String -Pattern "cssbacke|css-backend"
+}
+
+# --- Main ---
+Require-Cmd helm
+Require-Cmd kubectl
+Require-Cmd git
+
+if (!(Test-Path $ChartPath)) { throw "ChartPath not found: $ChartPath" }
+
+if (!$ImageTag) { $ImageTag = Get-GitTag }
+Write-Host "Using ImageTag: $ImageTag"
+
+# Region preference order: AWS_REGION env var -> default us-gov-east-1
+$region = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION } else { "us-gov-east-1" }
+    $ProfileArgs = @(); if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $ProfileArgs = @("--profile",$env:AWS_PROFILE) }
+
+# ECR preflight (repo name is fixed for this env)
+Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $region
+if (!(Test-Path $OverridePath)) {
+  Write-Host "Pinned override missing; creating: $OverridePath" -ForegroundColor Yellow
+  Write-PinnedOverride -path $OverridePath -tag $ImageTag -replicas $ReplicaCount
+} else {
+  Write-Host "Pinned override in use: $OverridePath" -ForegroundColor Cyan
+  Set-YamlImageTagInPlace -ValuesPath $OverridePath -ImageTag $ImageTag
+}
+
+Get-Content $OverridePath | ForEach-Object { "  $_" }
+
+Write-Host "Lint chart..." -ForegroundColor Cyan
+& helm lint $ChartPath
+
+Write-Host "Render + guardrails..." -ForegroundColor Cyan
+$rendered = Render-Helm -chart $ChartPath -ns $Namespace -override $OverridePath
+Guardrails -renderedYaml $rendered
+
+Write-Host "Deploy via Helm..." -ForegroundColor Cyan
+$timeout = "{0}m" -f $TimeoutMinutes
+& helm upgrade $Release $ChartPath -n $Namespace -f $OverridePath --atomic --timeout $timeout
+if ($LASTEXITCODE -ne 0) { throw "helm upgrade failed ($LASTEXITCODE)" }
+
+if (!$SkipVerify) {
+  Verify-External -baseUrl "https://css-mock.shipcom.ai"
+  Verify-Cluster -ns $Namespace -release $Release
+}
+
+Write-Host "DEPLOY OK" -ForegroundColor Green
+
+
+
+
+
+) {
+    throw "values file missing 'image:' block: $ValuesPath"
+  }
+
+  if ($raw -match '(?m)^\s*tag:\s*".*"\s*
+param(
+  [string]$Namespace = "css-mock",
+  [string]$Release   = "css-backend",
+  [string]$ChartPath = ".\deploy\helm\css-backend",
+  [string]$OverridePath = ".\deploy\helm\values-css-mock.yaml",
+  [string]$ImageTag,
+  [int]$ReplicaCount = 2,
+  [int]$TimeoutMinutes = 10,
+  [switch]$SkipVerify,
+  [switch]$SkipEcrCheck
+)
+
+$ErrorActionPreference="Stop"
+
+# --- AWS credential behavior (local vs GitHub Actions) ---
+# In GitHub Actions, credentials come from OIDC env vars. DO NOT force AWS_PROFILE.
+# Locally, default to css-gov if no env creds are present.
+try {
+    $isGh = ($env:GITHUB_ACTIONS -eq "true")
+    $hasEnvCreds = -not [string]::IsNullOrWhiteSpace($env:AWS_ACCESS_KEY_ID)
+    if (-not $isGh -and -not $hasEnvCreds) {
+        if ([string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) {
+            $env:AWS_PROFILE = "css-gov"
+        }
+    }
+} catch { }
+# -------------------------------------------------------
+
+function Require-Cmd([string]$name) {
+  if (!(Get-Command $name -ErrorAction SilentlyContinue)) {
+    throw "Missing required command '$name'. Install it and retry."
+  }
+}
+
+function Get-GitTag() {
+  $sha = (git rev-parse --short=7 HEAD 2>$null).Trim()
+  if (!$sha) { throw "Could not determine git sha. Are you in a git repo?" }
+  return "aws-$sha"
+}
+
+function Write-PinnedOverride([string]$path, [string]$tag, [int]$replicas) {
+  $dir = Split-Path -Parent $path
+  if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+
+  $yaml = @"
+# values-css-mock.yaml (pinned) - SOURCE OF TRUTH FOR THIS ENV
+replicaCount: $replicas
+
+image:
+  repository: 354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend
+  tag: "$tag"
+  pullPolicy: Always
+
+# Ingress expects a Service. Keep enabled.
+service:
+  enabled: true
+
+# AWS Load Balancer Controller owns TargetGroupBinding (Ingress-driven). Helm must NOT manage it here.
+targetGroupBinding:
+  enabled: false
+"@
+
+  $outPath = if ($dir) { Join-Path $dir (Split-Path -Leaf $path) } else { $path }
+  [System.IO.File]::WriteAllText((Resolve-Path (Split-Path -Parent $outPath)).Path + "\" + (Split-Path -Leaf $outPath), $yaml, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Invoke-AwsCli([string[]]$AwsArgs) {
+  # Run AWS CLI through cmd.exe so stderr does NOT become a PowerShell error record (EAP=Stop safe).
+  $awsExe = (Get-Command "aws.exe" -ErrorAction SilentlyContinue)
+  $exePath = if ($awsExe) { $awsExe.Source } else { "aws" }
+
+  if (!$AwsArgs -or $AwsArgs.Count -eq 0) {
+    throw "Invoke-AwsCli called with no arguments. This is a script bug."
+  }
+
+  $escapedArgs = $AwsArgs | ForEach-Object { '"' + ($_ -replace '"','\"') + '"' }
+  $cmdLine = '"' + ($exePath -replace '"','\"') + '" ' + ($escapedArgs -join ' ')
+
+  $out = cmd.exe /c "$cmdLine 2>&1"
+  $code = $LASTEXITCODE
+
+  if ($code -ne 0) {
+    throw ("AWS CLI failed (exit {0}): {1}`n{2}" -f $code, $cmdLine, ($out | Out-String))
+  }
+
+  return ($out | Out-String)
+}
+
+function Verify-EcrTagExists([string]$RepoName, [string]$Tag, [string]$Region) {
+  if ($SkipEcrCheck) {
+    Write-Host "ECR check: SKIPPED (SkipEcrCheck set)" -ForegroundColor Yellow
+    return
+  }
+
+  if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $profile = $env:AWS_PROFILE } else { $profile = "<default>" }
+  Write-Host "ECR check: ensuring tag exists: $RepoName`:$Tag (region=$Region, profile=$profile)" -ForegroundColor Cyan
+
+  # IMPORTANT: pass a real string[] of args (no $args ambiguity)
+  $cmd = @(
+    "ecr", "describe-images",
+    "--region", $Region,
+    "--repository-name", $RepoName,
+    "--image-ids", "imageTag=$Tag"
+  )
+
+  $null = Invoke-AwsCli -AwsArgs $cmd
+}
+
+function Render-Helm([string]$chart, [string]$ns, [string]$override) {
+  $render = & helm template $Release $chart -n $ns -f $override 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "helm template failed:`n$render" }
+  return ($render | Out-String)
+}
+
+function Guardrails([string]$renderedYaml) {
+  if ($renderedYaml -match 'MINIO_' -or $renderedYaml -match 'MINIO_ENDPOINT') {
+    throw "Guardrail violation: rendered manifests include MinIO env(s). This env must be S3 only."
+  }
+  if ($renderedYaml -match '(?m)^\s*kind:\s*TargetGroupBinding\s*$') {
+    throw "Guardrail violation: chart is rendering TargetGroupBinding. For css-mock this must be owned by ALB controller. Keep targetGroupBinding.enabled=false."
+  }
+  if ($renderedYaml -notmatch '(?m)^\s*STORAGE_MODE:\s*"s3"\s*$') {
+    throw "Guardrail violation: STORAGE_MODE is not rendered as ""s3"". Fix chart values/configmap."
+  }
+}
+
+function Verify-External([string]$baseUrl) {
+  Write-Host "External checks:" -ForegroundColor Cyan
+  $api  = try { (Invoke-WebRequest "$baseUrl/api/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  $root = try { (Invoke-WebRequest "$baseUrl/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  Write-Host "  /api/health = $api"
+  Write-Host "  /health     = $root"
+  if ($api -ne 200 -or $root -ne 200) { throw "External health checks failed. api=$api root=$root" }
+}
+
+function Verify-Cluster([string]$ns, [string]$release) {
+  Write-Host "Cluster checks:" -ForegroundColor Cyan
+  & kubectl -n $ns get deploy $release -o wide
+  & kubectl -n $ns get pods -l app=$release -o wide
+  & kubectl -n $ns get svc $release -o wide
+  & kubectl -n $ns get endpoints $release -o wide
+
+  Write-Host "Ingress route:" -ForegroundColor Cyan
+  & kubectl -n $ns describe ingress css-mock | Select-String -Pattern "/api|$release:8000" -Context 0,1
+
+  Write-Host "TGB (ALB controller owned; name may change over time):" -ForegroundColor Cyan
+  & kubectl -n $ns get targetgroupbinding -o wide | Select-String -Pattern "cssbacke|css-backend"
+}
+
+# --- Main ---
+Require-Cmd helm
+Require-Cmd kubectl
+Require-Cmd git
+
+if (!(Test-Path $ChartPath)) { throw "ChartPath not found: $ChartPath" }
+
+if (!$ImageTag) { $ImageTag = Get-GitTag }
+Write-Host "Using ImageTag: $ImageTag"
+
+# Region preference order: AWS_REGION env var -> default us-gov-east-1
+$region = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION } else { "us-gov-east-1" }
+    $ProfileArgs = @(); if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $ProfileArgs = @("--profile",$env:AWS_PROFILE) }
+
+# ECR preflight (repo name is fixed for this env)
+Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $region
+if (!(Test-Path $OverridePath)) {
+  Write-Host "Pinned override missing; creating: $OverridePath" -ForegroundColor Yellow
+  Write-PinnedOverride -path $OverridePath -tag $ImageTag -replicas $ReplicaCount
+} else {
+  Write-Host "Pinned override in use: $OverridePath" -ForegroundColor Cyan
+  Set-YamlImageTagInPlace -ValuesPath $OverridePath -ImageTag $ImageTag
+}
+
+Get-Content $OverridePath | ForEach-Object { "  $_" }
+
+Write-Host "Lint chart..." -ForegroundColor Cyan
+& helm lint $ChartPath
+
+Write-Host "Render + guardrails..." -ForegroundColor Cyan
+$rendered = Render-Helm -chart $ChartPath -ns $Namespace -override $OverridePath
+Guardrails -renderedYaml $rendered
+
+Write-Host "Deploy via Helm..." -ForegroundColor Cyan
+$timeout = "{0}m" -f $TimeoutMinutes
+& helm upgrade $Release $ChartPath -n $Namespace -f $OverridePath --atomic --timeout $timeout
+if ($LASTEXITCODE -ne 0) { throw "helm upgrade failed ($LASTEXITCODE)" }
+
+if (!$SkipVerify) {
+  Verify-External -baseUrl "https://css-mock.shipcom.ai"
+  Verify-Cluster -ns $Namespace -release $Release
+}
+
+Write-Host "DEPLOY OK" -ForegroundColor Green
+
+
+
+
+
+) {
+    $raw = [regex]::Replace($raw, '(?m)^\s*tag:\s*".*"\s*
+param(
+  [string]$Namespace = "css-mock",
+  [string]$Release   = "css-backend",
+  [string]$ChartPath = ".\deploy\helm\css-backend",
+  [string]$OverridePath = ".\deploy\helm\values-css-mock.yaml",
+  [string]$ImageTag,
+  [int]$ReplicaCount = 2,
+  [int]$TimeoutMinutes = 10,
+  [switch]$SkipVerify,
+  [switch]$SkipEcrCheck
+)
+
+$ErrorActionPreference="Stop"
+
+# --- AWS credential behavior (local vs GitHub Actions) ---
+# In GitHub Actions, credentials come from OIDC env vars. DO NOT force AWS_PROFILE.
+# Locally, default to css-gov if no env creds are present.
+try {
+    $isGh = ($env:GITHUB_ACTIONS -eq "true")
+    $hasEnvCreds = -not [string]::IsNullOrWhiteSpace($env:AWS_ACCESS_KEY_ID)
+    if (-not $isGh -and -not $hasEnvCreds) {
+        if ([string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) {
+            $env:AWS_PROFILE = "css-gov"
+        }
+    }
+} catch { }
+# -------------------------------------------------------
+
+function Require-Cmd([string]$name) {
+  if (!(Get-Command $name -ErrorAction SilentlyContinue)) {
+    throw "Missing required command '$name'. Install it and retry."
+  }
+}
+
+function Get-GitTag() {
+  $sha = (git rev-parse --short=7 HEAD 2>$null).Trim()
+  if (!$sha) { throw "Could not determine git sha. Are you in a git repo?" }
+  return "aws-$sha"
+}
+
+function Write-PinnedOverride([string]$path, [string]$tag, [int]$replicas) {
+  $dir = Split-Path -Parent $path
+  if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+
+  $yaml = @"
+# values-css-mock.yaml (pinned) - SOURCE OF TRUTH FOR THIS ENV
+replicaCount: $replicas
+
+image:
+  repository: 354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend
+  tag: "$tag"
+  pullPolicy: Always
+
+# Ingress expects a Service. Keep enabled.
+service:
+  enabled: true
+
+# AWS Load Balancer Controller owns TargetGroupBinding (Ingress-driven). Helm must NOT manage it here.
+targetGroupBinding:
+  enabled: false
+"@
+
+  $outPath = if ($dir) { Join-Path $dir (Split-Path -Leaf $path) } else { $path }
+  [System.IO.File]::WriteAllText((Resolve-Path (Split-Path -Parent $outPath)).Path + "\" + (Split-Path -Leaf $outPath), $yaml, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Invoke-AwsCli([string[]]$AwsArgs) {
+  # Run AWS CLI through cmd.exe so stderr does NOT become a PowerShell error record (EAP=Stop safe).
+  $awsExe = (Get-Command "aws.exe" -ErrorAction SilentlyContinue)
+  $exePath = if ($awsExe) { $awsExe.Source } else { "aws" }
+
+  if (!$AwsArgs -or $AwsArgs.Count -eq 0) {
+    throw "Invoke-AwsCli called with no arguments. This is a script bug."
+  }
+
+  $escapedArgs = $AwsArgs | ForEach-Object { '"' + ($_ -replace '"','\"') + '"' }
+  $cmdLine = '"' + ($exePath -replace '"','\"') + '" ' + ($escapedArgs -join ' ')
+
+  $out = cmd.exe /c "$cmdLine 2>&1"
+  $code = $LASTEXITCODE
+
+  if ($code -ne 0) {
+    throw ("AWS CLI failed (exit {0}): {1}`n{2}" -f $code, $cmdLine, ($out | Out-String))
+  }
+
+  return ($out | Out-String)
+}
+
+function Verify-EcrTagExists([string]$RepoName, [string]$Tag, [string]$Region) {
+  if ($SkipEcrCheck) {
+    Write-Host "ECR check: SKIPPED (SkipEcrCheck set)" -ForegroundColor Yellow
+    return
+  }
+
+  if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $profile = $env:AWS_PROFILE } else { $profile = "<default>" }
+  Write-Host "ECR check: ensuring tag exists: $RepoName`:$Tag (region=$Region, profile=$profile)" -ForegroundColor Cyan
+
+  # IMPORTANT: pass a real string[] of args (no $args ambiguity)
+  $cmd = @(
+    "ecr", "describe-images",
+    "--region", $Region,
+    "--repository-name", $RepoName,
+    "--image-ids", "imageTag=$Tag"
+  )
+
+  $null = Invoke-AwsCli -AwsArgs $cmd
+}
+
+function Render-Helm([string]$chart, [string]$ns, [string]$override) {
+  $render = & helm template $Release $chart -n $ns -f $override 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "helm template failed:`n$render" }
+  return ($render | Out-String)
+}
+
+function Guardrails([string]$renderedYaml) {
+  if ($renderedYaml -match 'MINIO_' -or $renderedYaml -match 'MINIO_ENDPOINT') {
+    throw "Guardrail violation: rendered manifests include MinIO env(s). This env must be S3 only."
+  }
+  if ($renderedYaml -match '(?m)^\s*kind:\s*TargetGroupBinding\s*$') {
+    throw "Guardrail violation: chart is rendering TargetGroupBinding. For css-mock this must be owned by ALB controller. Keep targetGroupBinding.enabled=false."
+  }
+  if ($renderedYaml -notmatch '(?m)^\s*STORAGE_MODE:\s*"s3"\s*$') {
+    throw "Guardrail violation: STORAGE_MODE is not rendered as ""s3"". Fix chart values/configmap."
+  }
+}
+
+function Verify-External([string]$baseUrl) {
+  Write-Host "External checks:" -ForegroundColor Cyan
+  $api  = try { (Invoke-WebRequest "$baseUrl/api/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  $root = try { (Invoke-WebRequest "$baseUrl/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  Write-Host "  /api/health = $api"
+  Write-Host "  /health     = $root"
+  if ($api -ne 200 -or $root -ne 200) { throw "External health checks failed. api=$api root=$root" }
+}
+
+function Verify-Cluster([string]$ns, [string]$release) {
+  Write-Host "Cluster checks:" -ForegroundColor Cyan
+  & kubectl -n $ns get deploy $release -o wide
+  & kubectl -n $ns get pods -l app=$release -o wide
+  & kubectl -n $ns get svc $release -o wide
+  & kubectl -n $ns get endpoints $release -o wide
+
+  Write-Host "Ingress route:" -ForegroundColor Cyan
+  & kubectl -n $ns describe ingress css-mock | Select-String -Pattern "/api|$release:8000" -Context 0,1
+
+  Write-Host "TGB (ALB controller owned; name may change over time):" -ForegroundColor Cyan
+  & kubectl -n $ns get targetgroupbinding -o wide | Select-String -Pattern "cssbacke|css-backend"
+}
+
+# --- Main ---
+Require-Cmd helm
+Require-Cmd kubectl
+Require-Cmd git
+
+if (!(Test-Path $ChartPath)) { throw "ChartPath not found: $ChartPath" }
+
+if (!$ImageTag) { $ImageTag = Get-GitTag }
+Write-Host "Using ImageTag: $ImageTag"
+
+# Region preference order: AWS_REGION env var -> default us-gov-east-1
+$region = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION } else { "us-gov-east-1" }
+    $ProfileArgs = @(); if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $ProfileArgs = @("--profile",$env:AWS_PROFILE) }
+
+# ECR preflight (repo name is fixed for this env)
+Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $region
+if (!(Test-Path $OverridePath)) {
+  Write-Host "Pinned override missing; creating: $OverridePath" -ForegroundColor Yellow
+  Write-PinnedOverride -path $OverridePath -tag $ImageTag -replicas $ReplicaCount
+} else {
+  Write-Host "Pinned override in use: $OverridePath" -ForegroundColor Cyan
+  Set-YamlImageTagInPlace -ValuesPath $OverridePath -ImageTag $ImageTag
+}
+
+Get-Content $OverridePath | ForEach-Object { "  $_" }
+
+Write-Host "Lint chart..." -ForegroundColor Cyan
+& helm lint $ChartPath
+
+Write-Host "Render + guardrails..." -ForegroundColor Cyan
+$rendered = Render-Helm -chart $ChartPath -ns $Namespace -override $OverridePath
+Guardrails -renderedYaml $rendered
+
+Write-Host "Deploy via Helm..." -ForegroundColor Cyan
+$timeout = "{0}m" -f $TimeoutMinutes
+& helm upgrade $Release $ChartPath -n $Namespace -f $OverridePath --atomic --timeout $timeout
+if ($LASTEXITCODE -ne 0) { throw "helm upgrade failed ($LASTEXITCODE)" }
+
+if (!$SkipVerify) {
+  Verify-External -baseUrl "https://css-mock.shipcom.ai"
+  Verify-Cluster -ns $Namespace -release $Release
+}
+
+Write-Host "DEPLOY OK" -ForegroundColor Green
+
+
+
+
+
+, ('  tag: "' + $ImageTag + '"'))
+  } else {
+    if ($raw -match '(?m)^\s*repository:\s*.+
+param(
+  [string]$Namespace = "css-mock",
+  [string]$Release   = "css-backend",
+  [string]$ChartPath = ".\deploy\helm\css-backend",
+  [string]$OverridePath = ".\deploy\helm\values-css-mock.yaml",
+  [string]$ImageTag,
+  [int]$ReplicaCount = 2,
+  [int]$TimeoutMinutes = 10,
+  [switch]$SkipVerify,
+  [switch]$SkipEcrCheck
+)
+
+$ErrorActionPreference="Stop"
+
+# --- AWS credential behavior (local vs GitHub Actions) ---
+# In GitHub Actions, credentials come from OIDC env vars. DO NOT force AWS_PROFILE.
+# Locally, default to css-gov if no env creds are present.
+try {
+    $isGh = ($env:GITHUB_ACTIONS -eq "true")
+    $hasEnvCreds = -not [string]::IsNullOrWhiteSpace($env:AWS_ACCESS_KEY_ID)
+    if (-not $isGh -and -not $hasEnvCreds) {
+        if ([string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) {
+            $env:AWS_PROFILE = "css-gov"
+        }
+    }
+} catch { }
+# -------------------------------------------------------
+
+function Require-Cmd([string]$name) {
+  if (!(Get-Command $name -ErrorAction SilentlyContinue)) {
+    throw "Missing required command '$name'. Install it and retry."
+  }
+}
+
+function Get-GitTag() {
+  $sha = (git rev-parse --short=7 HEAD 2>$null).Trim()
+  if (!$sha) { throw "Could not determine git sha. Are you in a git repo?" }
+  return "aws-$sha"
+}
+
+function Write-PinnedOverride([string]$path, [string]$tag, [int]$replicas) {
+  $dir = Split-Path -Parent $path
+  if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+
+  $yaml = @"
+# values-css-mock.yaml (pinned) - SOURCE OF TRUTH FOR THIS ENV
+replicaCount: $replicas
+
+image:
+  repository: 354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend
+  tag: "$tag"
+  pullPolicy: Always
+
+# Ingress expects a Service. Keep enabled.
+service:
+  enabled: true
+
+# AWS Load Balancer Controller owns TargetGroupBinding (Ingress-driven). Helm must NOT manage it here.
+targetGroupBinding:
+  enabled: false
+"@
+
+  $outPath = if ($dir) { Join-Path $dir (Split-Path -Leaf $path) } else { $path }
+  [System.IO.File]::WriteAllText((Resolve-Path (Split-Path -Parent $outPath)).Path + "\" + (Split-Path -Leaf $outPath), $yaml, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Invoke-AwsCli([string[]]$AwsArgs) {
+  # Run AWS CLI through cmd.exe so stderr does NOT become a PowerShell error record (EAP=Stop safe).
+  $awsExe = (Get-Command "aws.exe" -ErrorAction SilentlyContinue)
+  $exePath = if ($awsExe) { $awsExe.Source } else { "aws" }
+
+  if (!$AwsArgs -or $AwsArgs.Count -eq 0) {
+    throw "Invoke-AwsCli called with no arguments. This is a script bug."
+  }
+
+  $escapedArgs = $AwsArgs | ForEach-Object { '"' + ($_ -replace '"','\"') + '"' }
+  $cmdLine = '"' + ($exePath -replace '"','\"') + '" ' + ($escapedArgs -join ' ')
+
+  $out = cmd.exe /c "$cmdLine 2>&1"
+  $code = $LASTEXITCODE
+
+  if ($code -ne 0) {
+    throw ("AWS CLI failed (exit {0}): {1}`n{2}" -f $code, $cmdLine, ($out | Out-String))
+  }
+
+  return ($out | Out-String)
+}
+
+function Verify-EcrTagExists([string]$RepoName, [string]$Tag, [string]$Region) {
+  if ($SkipEcrCheck) {
+    Write-Host "ECR check: SKIPPED (SkipEcrCheck set)" -ForegroundColor Yellow
+    return
+  }
+
+  if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $profile = $env:AWS_PROFILE } else { $profile = "<default>" }
+  Write-Host "ECR check: ensuring tag exists: $RepoName`:$Tag (region=$Region, profile=$profile)" -ForegroundColor Cyan
+
+  # IMPORTANT: pass a real string[] of args (no $args ambiguity)
+  $cmd = @(
+    "ecr", "describe-images",
+    "--region", $Region,
+    "--repository-name", $RepoName,
+    "--image-ids", "imageTag=$Tag"
+  )
+
+  $null = Invoke-AwsCli -AwsArgs $cmd
+}
+
+function Render-Helm([string]$chart, [string]$ns, [string]$override) {
+  $render = & helm template $Release $chart -n $ns -f $override 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "helm template failed:`n$render" }
+  return ($render | Out-String)
+}
+
+function Guardrails([string]$renderedYaml) {
+  if ($renderedYaml -match 'MINIO_' -or $renderedYaml -match 'MINIO_ENDPOINT') {
+    throw "Guardrail violation: rendered manifests include MinIO env(s). This env must be S3 only."
+  }
+  if ($renderedYaml -match '(?m)^\s*kind:\s*TargetGroupBinding\s*$') {
+    throw "Guardrail violation: chart is rendering TargetGroupBinding. For css-mock this must be owned by ALB controller. Keep targetGroupBinding.enabled=false."
+  }
+  if ($renderedYaml -notmatch '(?m)^\s*STORAGE_MODE:\s*"s3"\s*$') {
+    throw "Guardrail violation: STORAGE_MODE is not rendered as ""s3"". Fix chart values/configmap."
+  }
+}
+
+function Verify-External([string]$baseUrl) {
+  Write-Host "External checks:" -ForegroundColor Cyan
+  $api  = try { (Invoke-WebRequest "$baseUrl/api/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  $root = try { (Invoke-WebRequest "$baseUrl/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  Write-Host "  /api/health = $api"
+  Write-Host "  /health     = $root"
+  if ($api -ne 200 -or $root -ne 200) { throw "External health checks failed. api=$api root=$root" }
+}
+
+function Verify-Cluster([string]$ns, [string]$release) {
+  Write-Host "Cluster checks:" -ForegroundColor Cyan
+  & kubectl -n $ns get deploy $release -o wide
+  & kubectl -n $ns get pods -l app=$release -o wide
+  & kubectl -n $ns get svc $release -o wide
+  & kubectl -n $ns get endpoints $release -o wide
+
+  Write-Host "Ingress route:" -ForegroundColor Cyan
+  & kubectl -n $ns describe ingress css-mock | Select-String -Pattern "/api|$release:8000" -Context 0,1
+
+  Write-Host "TGB (ALB controller owned; name may change over time):" -ForegroundColor Cyan
+  & kubectl -n $ns get targetgroupbinding -o wide | Select-String -Pattern "cssbacke|css-backend"
+}
+
+# --- Main ---
+Require-Cmd helm
+Require-Cmd kubectl
+Require-Cmd git
+
+if (!(Test-Path $ChartPath)) { throw "ChartPath not found: $ChartPath" }
+
+if (!$ImageTag) { $ImageTag = Get-GitTag }
+Write-Host "Using ImageTag: $ImageTag"
+
+# Region preference order: AWS_REGION env var -> default us-gov-east-1
+$region = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION } else { "us-gov-east-1" }
+    $ProfileArgs = @(); if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $ProfileArgs = @("--profile",$env:AWS_PROFILE) }
+
+# ECR preflight (repo name is fixed for this env)
+Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $region
+if (!(Test-Path $OverridePath)) {
+  Write-Host "Pinned override missing; creating: $OverridePath" -ForegroundColor Yellow
+  Write-PinnedOverride -path $OverridePath -tag $ImageTag -replicas $ReplicaCount
+} else {
+  Write-Host "Pinned override in use: $OverridePath" -ForegroundColor Cyan
+  Set-YamlImageTagInPlace -ValuesPath $OverridePath -ImageTag $ImageTag
+}
+
+Get-Content $OverridePath | ForEach-Object { "  $_" }
+
+Write-Host "Lint chart..." -ForegroundColor Cyan
+& helm lint $ChartPath
+
+Write-Host "Render + guardrails..." -ForegroundColor Cyan
+$rendered = Render-Helm -chart $ChartPath -ns $Namespace -override $OverridePath
+Guardrails -renderedYaml $rendered
+
+Write-Host "Deploy via Helm..." -ForegroundColor Cyan
+$timeout = "{0}m" -f $TimeoutMinutes
+& helm upgrade $Release $ChartPath -n $Namespace -f $OverridePath --atomic --timeout $timeout
+if ($LASTEXITCODE -ne 0) { throw "helm upgrade failed ($LASTEXITCODE)" }
+
+if (!$SkipVerify) {
+  Verify-External -baseUrl "https://css-mock.shipcom.ai"
+  Verify-Cluster -ns $Namespace -release $Release
+}
+
+Write-Host "DEPLOY OK" -ForegroundColor Green
+
+
+
+
+
+) {
+      $raw = [regex]::Replace($raw, '(?m)^\s*repository:\s*.+
+param(
+  [string]$Namespace = "css-mock",
+  [string]$Release   = "css-backend",
+  [string]$ChartPath = ".\deploy\helm\css-backend",
+  [string]$OverridePath = ".\deploy\helm\values-css-mock.yaml",
+  [string]$ImageTag,
+  [int]$ReplicaCount = 2,
+  [int]$TimeoutMinutes = 10,
+  [switch]$SkipVerify,
+  [switch]$SkipEcrCheck
+)
+
+$ErrorActionPreference="Stop"
+
+# --- AWS credential behavior (local vs GitHub Actions) ---
+# In GitHub Actions, credentials come from OIDC env vars. DO NOT force AWS_PROFILE.
+# Locally, default to css-gov if no env creds are present.
+try {
+    $isGh = ($env:GITHUB_ACTIONS -eq "true")
+    $hasEnvCreds = -not [string]::IsNullOrWhiteSpace($env:AWS_ACCESS_KEY_ID)
+    if (-not $isGh -and -not $hasEnvCreds) {
+        if ([string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) {
+            $env:AWS_PROFILE = "css-gov"
+        }
+    }
+} catch { }
+# -------------------------------------------------------
+
+function Require-Cmd([string]$name) {
+  if (!(Get-Command $name -ErrorAction SilentlyContinue)) {
+    throw "Missing required command '$name'. Install it and retry."
+  }
+}
+
+function Get-GitTag() {
+  $sha = (git rev-parse --short=7 HEAD 2>$null).Trim()
+  if (!$sha) { throw "Could not determine git sha. Are you in a git repo?" }
+  return "aws-$sha"
+}
+
+function Write-PinnedOverride([string]$path, [string]$tag, [int]$replicas) {
+  $dir = Split-Path -Parent $path
+  if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+
+  $yaml = @"
+# values-css-mock.yaml (pinned) - SOURCE OF TRUTH FOR THIS ENV
+replicaCount: $replicas
+
+image:
+  repository: 354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend
+  tag: "$tag"
+  pullPolicy: Always
+
+# Ingress expects a Service. Keep enabled.
+service:
+  enabled: true
+
+# AWS Load Balancer Controller owns TargetGroupBinding (Ingress-driven). Helm must NOT manage it here.
+targetGroupBinding:
+  enabled: false
+"@
+
+  $outPath = if ($dir) { Join-Path $dir (Split-Path -Leaf $path) } else { $path }
+  [System.IO.File]::WriteAllText((Resolve-Path (Split-Path -Parent $outPath)).Path + "\" + (Split-Path -Leaf $outPath), $yaml, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Invoke-AwsCli([string[]]$AwsArgs) {
+  # Run AWS CLI through cmd.exe so stderr does NOT become a PowerShell error record (EAP=Stop safe).
+  $awsExe = (Get-Command "aws.exe" -ErrorAction SilentlyContinue)
+  $exePath = if ($awsExe) { $awsExe.Source } else { "aws" }
+
+  if (!$AwsArgs -or $AwsArgs.Count -eq 0) {
+    throw "Invoke-AwsCli called with no arguments. This is a script bug."
+  }
+
+  $escapedArgs = $AwsArgs | ForEach-Object { '"' + ($_ -replace '"','\"') + '"' }
+  $cmdLine = '"' + ($exePath -replace '"','\"') + '" ' + ($escapedArgs -join ' ')
+
+  $out = cmd.exe /c "$cmdLine 2>&1"
+  $code = $LASTEXITCODE
+
+  if ($code -ne 0) {
+    throw ("AWS CLI failed (exit {0}): {1}`n{2}" -f $code, $cmdLine, ($out | Out-String))
+  }
+
+  return ($out | Out-String)
+}
+
+function Verify-EcrTagExists([string]$RepoName, [string]$Tag, [string]$Region) {
+  if ($SkipEcrCheck) {
+    Write-Host "ECR check: SKIPPED (SkipEcrCheck set)" -ForegroundColor Yellow
+    return
+  }
+
+  if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $profile = $env:AWS_PROFILE } else { $profile = "<default>" }
+  Write-Host "ECR check: ensuring tag exists: $RepoName`:$Tag (region=$Region, profile=$profile)" -ForegroundColor Cyan
+
+  # IMPORTANT: pass a real string[] of args (no $args ambiguity)
+  $cmd = @(
+    "ecr", "describe-images",
+    "--region", $Region,
+    "--repository-name", $RepoName,
+    "--image-ids", "imageTag=$Tag"
+  )
+
+  $null = Invoke-AwsCli -AwsArgs $cmd
+}
+
+function Render-Helm([string]$chart, [string]$ns, [string]$override) {
+  $render = & helm template $Release $chart -n $ns -f $override 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "helm template failed:`n$render" }
+  return ($render | Out-String)
+}
+
+function Guardrails([string]$renderedYaml) {
+  if ($renderedYaml -match 'MINIO_' -or $renderedYaml -match 'MINIO_ENDPOINT') {
+    throw "Guardrail violation: rendered manifests include MinIO env(s). This env must be S3 only."
+  }
+  if ($renderedYaml -match '(?m)^\s*kind:\s*TargetGroupBinding\s*$') {
+    throw "Guardrail violation: chart is rendering TargetGroupBinding. For css-mock this must be owned by ALB controller. Keep targetGroupBinding.enabled=false."
+  }
+  if ($renderedYaml -notmatch '(?m)^\s*STORAGE_MODE:\s*"s3"\s*$') {
+    throw "Guardrail violation: STORAGE_MODE is not rendered as ""s3"". Fix chart values/configmap."
+  }
+}
+
+function Verify-External([string]$baseUrl) {
+  Write-Host "External checks:" -ForegroundColor Cyan
+  $api  = try { (Invoke-WebRequest "$baseUrl/api/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  $root = try { (Invoke-WebRequest "$baseUrl/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  Write-Host "  /api/health = $api"
+  Write-Host "  /health     = $root"
+  if ($api -ne 200 -or $root -ne 200) { throw "External health checks failed. api=$api root=$root" }
+}
+
+function Verify-Cluster([string]$ns, [string]$release) {
+  Write-Host "Cluster checks:" -ForegroundColor Cyan
+  & kubectl -n $ns get deploy $release -o wide
+  & kubectl -n $ns get pods -l app=$release -o wide
+  & kubectl -n $ns get svc $release -o wide
+  & kubectl -n $ns get endpoints $release -o wide
+
+  Write-Host "Ingress route:" -ForegroundColor Cyan
+  & kubectl -n $ns describe ingress css-mock | Select-String -Pattern "/api|$release:8000" -Context 0,1
+
+  Write-Host "TGB (ALB controller owned; name may change over time):" -ForegroundColor Cyan
+  & kubectl -n $ns get targetgroupbinding -o wide | Select-String -Pattern "cssbacke|css-backend"
+}
+
+# --- Main ---
+Require-Cmd helm
+Require-Cmd kubectl
+Require-Cmd git
+
+if (!(Test-Path $ChartPath)) { throw "ChartPath not found: $ChartPath" }
+
+if (!$ImageTag) { $ImageTag = Get-GitTag }
+Write-Host "Using ImageTag: $ImageTag"
+
+# Region preference order: AWS_REGION env var -> default us-gov-east-1
+$region = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION } else { "us-gov-east-1" }
+    $ProfileArgs = @(); if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $ProfileArgs = @("--profile",$env:AWS_PROFILE) }
+
+# ECR preflight (repo name is fixed for this env)
+Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $region
+if (!(Test-Path $OverridePath)) {
+  Write-Host "Pinned override missing; creating: $OverridePath" -ForegroundColor Yellow
+  Write-PinnedOverride -path $OverridePath -tag $ImageTag -replicas $ReplicaCount
+} else {
+  Write-Host "Pinned override in use: $OverridePath" -ForegroundColor Cyan
+  Set-YamlImageTagInPlace -ValuesPath $OverridePath -ImageTag $ImageTag
+}
+
+Get-Content $OverridePath | ForEach-Object { "  $_" }
+
+Write-Host "Lint chart..." -ForegroundColor Cyan
+& helm lint $ChartPath
+
+Write-Host "Render + guardrails..." -ForegroundColor Cyan
+$rendered = Render-Helm -chart $ChartPath -ns $Namespace -override $OverridePath
+Guardrails -renderedYaml $rendered
+
+Write-Host "Deploy via Helm..." -ForegroundColor Cyan
+$timeout = "{0}m" -f $TimeoutMinutes
+& helm upgrade $Release $ChartPath -n $Namespace -f $OverridePath --atomic --timeout $timeout
+if ($LASTEXITCODE -ne 0) { throw "helm upgrade failed ($LASTEXITCODE)" }
+
+if (!$SkipVerify) {
+  Verify-External -baseUrl "https://css-mock.shipcom.ai"
+  Verify-Cluster -ns $Namespace -release $Release
+}
+
+Write-Host "DEPLOY OK" -ForegroundColor Green
+
+
+
+
+
+, ('#>
+' + "`n" + '  tag: "' + $ImageTag + '"'))
+    } else {
+      $raw = [regex]::Replace($raw, '(?m)^\s*image:\s*
+param(
+  [string]$Namespace = "css-mock",
+  [string]$Release   = "css-backend",
+  [string]$ChartPath = ".\deploy\helm\css-backend",
+  [string]$OverridePath = ".\deploy\helm\values-css-mock.yaml",
+  [string]$ImageTag,
+  [int]$ReplicaCount = 2,
+  [int]$TimeoutMinutes = 10,
+  [switch]$SkipVerify,
+  [switch]$SkipEcrCheck
+)
+
+$ErrorActionPreference="Stop"
+
+# --- AWS credential behavior (local vs GitHub Actions) ---
+# In GitHub Actions, credentials come from OIDC env vars. DO NOT force AWS_PROFILE.
+# Locally, default to css-gov if no env creds are present.
+try {
+    $isGh = ($env:GITHUB_ACTIONS -eq "true")
+    $hasEnvCreds = -not [string]::IsNullOrWhiteSpace($env:AWS_ACCESS_KEY_ID)
+    if (-not $isGh -and -not $hasEnvCreds) {
+        if ([string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) {
+            $env:AWS_PROFILE = "css-gov"
+        }
+    }
+} catch { }
+# -------------------------------------------------------
+
+function Require-Cmd([string]$name) {
+  if (!(Get-Command $name -ErrorAction SilentlyContinue)) {
+    throw "Missing required command '$name'. Install it and retry."
+  }
+}
+
+function Get-GitTag() {
+  $sha = (git rev-parse --short=7 HEAD 2>$null).Trim()
+  if (!$sha) { throw "Could not determine git sha. Are you in a git repo?" }
+  return "aws-$sha"
+}
+
+function Write-PinnedOverride([string]$path, [string]$tag, [int]$replicas) {
+  $dir = Split-Path -Parent $path
+  if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+
+  $yaml = @"
+# values-css-mock.yaml (pinned) - SOURCE OF TRUTH FOR THIS ENV
+replicaCount: $replicas
+
+image:
+  repository: 354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend
+  tag: "$tag"
+  pullPolicy: Always
+
+# Ingress expects a Service. Keep enabled.
+service:
+  enabled: true
+
+# AWS Load Balancer Controller owns TargetGroupBinding (Ingress-driven). Helm must NOT manage it here.
+targetGroupBinding:
+  enabled: false
+"@
+
+  $outPath = if ($dir) { Join-Path $dir (Split-Path -Leaf $path) } else { $path }
+  [System.IO.File]::WriteAllText((Resolve-Path (Split-Path -Parent $outPath)).Path + "\" + (Split-Path -Leaf $outPath), $yaml, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Invoke-AwsCli([string[]]$AwsArgs) {
+  # Run AWS CLI through cmd.exe so stderr does NOT become a PowerShell error record (EAP=Stop safe).
+  $awsExe = (Get-Command "aws.exe" -ErrorAction SilentlyContinue)
+  $exePath = if ($awsExe) { $awsExe.Source } else { "aws" }
+
+  if (!$AwsArgs -or $AwsArgs.Count -eq 0) {
+    throw "Invoke-AwsCli called with no arguments. This is a script bug."
+  }
+
+  $escapedArgs = $AwsArgs | ForEach-Object { '"' + ($_ -replace '"','\"') + '"' }
+  $cmdLine = '"' + ($exePath -replace '"','\"') + '" ' + ($escapedArgs -join ' ')
+
+  $out = cmd.exe /c "$cmdLine 2>&1"
+  $code = $LASTEXITCODE
+
+  if ($code -ne 0) {
+    throw ("AWS CLI failed (exit {0}): {1}`n{2}" -f $code, $cmdLine, ($out | Out-String))
+  }
+
+  return ($out | Out-String)
+}
+
+function Verify-EcrTagExists([string]$RepoName, [string]$Tag, [string]$Region) {
+  if ($SkipEcrCheck) {
+    Write-Host "ECR check: SKIPPED (SkipEcrCheck set)" -ForegroundColor Yellow
+    return
+  }
+
+  if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $profile = $env:AWS_PROFILE } else { $profile = "<default>" }
+  Write-Host "ECR check: ensuring tag exists: $RepoName`:$Tag (region=$Region, profile=$profile)" -ForegroundColor Cyan
+
+  # IMPORTANT: pass a real string[] of args (no $args ambiguity)
+  $cmd = @(
+    "ecr", "describe-images",
+    "--region", $Region,
+    "--repository-name", $RepoName,
+    "--image-ids", "imageTag=$Tag"
+  )
+
+  $null = Invoke-AwsCli -AwsArgs $cmd
+}
+
+function Render-Helm([string]$chart, [string]$ns, [string]$override) {
+  $render = & helm template $Release $chart -n $ns -f $override 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "helm template failed:`n$render" }
+  return ($render | Out-String)
+}
+
+function Guardrails([string]$renderedYaml) {
+  if ($renderedYaml -match 'MINIO_' -or $renderedYaml -match 'MINIO_ENDPOINT') {
+    throw "Guardrail violation: rendered manifests include MinIO env(s). This env must be S3 only."
+  }
+  if ($renderedYaml -match '(?m)^\s*kind:\s*TargetGroupBinding\s*$') {
+    throw "Guardrail violation: chart is rendering TargetGroupBinding. For css-mock this must be owned by ALB controller. Keep targetGroupBinding.enabled=false."
+  }
+  if ($renderedYaml -notmatch '(?m)^\s*STORAGE_MODE:\s*"s3"\s*$') {
+    throw "Guardrail violation: STORAGE_MODE is not rendered as ""s3"". Fix chart values/configmap."
+  }
+}
+
+function Verify-External([string]$baseUrl) {
+  Write-Host "External checks:" -ForegroundColor Cyan
+  $api  = try { (Invoke-WebRequest "$baseUrl/api/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  $root = try { (Invoke-WebRequest "$baseUrl/health" -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  Write-Host "  /api/health = $api"
+  Write-Host "  /health     = $root"
+  if ($api -ne 200 -or $root -ne 200) { throw "External health checks failed. api=$api root=$root" }
+}
+
+function Verify-Cluster([string]$ns, [string]$release) {
+  Write-Host "Cluster checks:" -ForegroundColor Cyan
+  & kubectl -n $ns get deploy $release -o wide
+  & kubectl -n $ns get pods -l app=$release -o wide
+  & kubectl -n $ns get svc $release -o wide
+  & kubectl -n $ns get endpoints $release -o wide
+
+  Write-Host "Ingress route:" -ForegroundColor Cyan
+  & kubectl -n $ns describe ingress css-mock | Select-String -Pattern "/api|$release:8000" -Context 0,1
+
+  Write-Host "TGB (ALB controller owned; name may change over time):" -ForegroundColor Cyan
+  & kubectl -n $ns get targetgroupbinding -o wide | Select-String -Pattern "cssbacke|css-backend"
+}
+
+# --- Main ---
+Require-Cmd helm
+Require-Cmd kubectl
+Require-Cmd git
+
+if (!(Test-Path $ChartPath)) { throw "ChartPath not found: $ChartPath" }
+
+if (!$ImageTag) { $ImageTag = Get-GitTag }
+Write-Host "Using ImageTag: $ImageTag"
+
+# Region preference order: AWS_REGION env var -> default us-gov-east-1
+$region = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION } else { "us-gov-east-1" }
+    $ProfileArgs = @(); if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $ProfileArgs = @("--profile",$env:AWS_PROFILE) }
+
+# ECR preflight (repo name is fixed for this env)
+Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $region
+if (!(Test-Path $OverridePath)) {
+  Write-Host "Pinned override missing; creating: $OverridePath" -ForegroundColor Yellow
+  Write-PinnedOverride -path $OverridePath -tag $ImageTag -replicas $ReplicaCount
+} else {
+  Write-Host "Pinned override in use: $OverridePath" -ForegroundColor Cyan
+  Set-YamlImageTagInPlace -ValuesPath $OverridePath -ImageTag $ImageTag
+}
+
+Get-Content $OverridePath | ForEach-Object { "  $_" }
+
+Write-Host "Lint chart..." -ForegroundColor Cyan
+& helm lint $ChartPath
+
+Write-Host "Render + guardrails..." -ForegroundColor Cyan
+$rendered = Render-Helm -chart $ChartPath -ns $Namespace -override $OverridePath
+Guardrails -renderedYaml $rendered
+
+Write-Host "Deploy via Helm..." -ForegroundColor Cyan
+$timeout = "{0}m" -f $TimeoutMinutes
+& helm upgrade $Release $ChartPath -n $Namespace -f $OverridePath --atomic --timeout $timeout
+if ($LASTEXITCODE -ne 0) { throw "helm upgrade failed ($LASTEXITCODE)" }
+
+if (!$SkipVerify) {
+  Verify-External -baseUrl "https://css-mock.shipcom.ai"
+  Verify-Cluster -ns $Namespace -release $Release
+}
+
+Write-Host "DEPLOY OK" -ForegroundColor Green
+
+
+
+
+
+, ('#>
+' + "`n" + '  tag: "' + $ImageTag + '"'))
+    }
+  }
+
+  if (-not $raw.EndsWith("`n")) { $raw += "`n" }
+
+  # UTF-8 without BOM
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText((Resolve-Path $ValuesPath), $raw, $utf8NoBom)
+}
 
 param(
   [string]$Namespace = "css-mock",
