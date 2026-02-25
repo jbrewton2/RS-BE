@@ -96,6 +96,9 @@ class RiskModel(BaseModel):
     label: str
     category: Optional[str] = None
     severity: str
+    tier: Optional[str] = None  # TIER3_FLAG | TIER2_SECTION | TIER2_HEURISTIC | TIER1_INFERENCE
+    confidence: float = 0.0
+    confidence_label: Optional[str] = None  # HIGH | MEDIUM | LOW
     document_name: Optional[str] = None
     lines: List[int] = []
     scope: Optional[str] = None

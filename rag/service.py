@@ -303,7 +303,7 @@ def _postprocess_review_summary(text: str) -> str:
 
     # Common encoding artifacts seen in logs / copied text
     # Strip obvious mojibake markers without embedding huge literals
-    hardened = hardened.replace('Ãƒ', '').replace('Ã‚', '')
+    hardened = hardened.replace('ÃƒÆ’Ã†â€™', '').replace('ÃƒÆ’Ã¢â‚¬Å¡', '')
 
     return _collapse_blank_lines(hardened)
 
@@ -402,11 +402,66 @@ def _build_ui_risks_from_rag(*, risks: list[dict], sections: list[dict]) -> list
                 "category": category,
                 "department": dept,
                 "severity": severity,
+                "source": source or None,
                 "source_type": source or None,
                 "status": "Open",
                 "evidence": ev_out,
             }
         )
+
+
+    # --- Enforce tier/confidence/severity contract (authoritative) ---
+    _SEVERITY_ORDER = ["Informational", "Low", "Medium", "High", "Critical"]
+
+    def _severity_downshift(sev: str, steps: int) -> str:
+        s = str(sev or '').strip() or 'Informational'
+        try:
+            i = _SEVERITY_ORDER.index(s)
+        except ValueError:
+            return s
+        return _SEVERITY_ORDER[max(0, i - int(steps or 0))]
+
+    def _confidence_label(c: float) -> str:
+        try:
+            cf = float(c)
+        except Exception:
+            return 'LOW'
+        if cf >= 0.85: return 'HIGH'
+        if cf >= 0.65: return 'MEDIUM'
+        return 'LOW'
+
+    def _tier_from_source(src: str) -> str:
+        s = str(src or '').strip()
+        if s == 'autoFlag': return 'TIER3_FLAG'
+        if s == 'sectionDerived': return 'TIER2_SECTION'
+        if s == 'heuristic': return 'TIER2_HEURISTIC'
+        if s == 'ai_only': return 'TIER1_INFERENCE'
+        return 'TIER1_INFERENCE'
+
+    def _default_confidence_for_tier(tier: str) -> float:
+        t = str(tier or '').strip()
+        if t == 'TIER3_FLAG': return 0.90
+        if t.startswith('TIER2_'): return 0.75
+        return 0.50
+
+    def _normalize_risk_contract(r: dict) -> dict:
+        if not isinstance(r, dict): return r
+        tier = str(r.get('tier') or '').strip() or _tier_from_source(r.get('source') or r.get('source_type') or r.get('sourceType'))
+        r['tier'] = tier
+        try: cf = float(r.get('confidence') or 0.0)
+        except Exception: cf = 0.0
+        if cf <= 0.0: cf = float(_default_confidence_for_tier(tier))
+        r['confidence'] = cf
+        r['confidence_label'] = str(r.get('confidence_label') or '').strip() or _confidence_label(cf)
+        sev = str(r.get('severity') or 'Informational').strip() or 'Informational'
+        if tier == 'TIER1_INFERENCE' and sev in ('High','Critical'): sev = 'Medium'
+        if tier.startswith('TIER2_') and sev == 'Critical': sev = 'High'
+        if cf < 0.45: sev = _severity_downshift(sev, 2)
+        elif cf < 0.65: sev = _severity_downshift(sev, 1)
+        r['severity'] = sev
+        return r
+
+    out = [_normalize_risk_contract(x) for x in (out or [])]
 
     return out
 
@@ -427,8 +482,8 @@ def _strip_owner_tokens(s: str) -> str:
     t = _OWNER_INLINE_RE.sub("", t).strip()
 
     # Also remove trailing separators left behind
-    t = re.sub(r"\s*[-•]\s*$", "", t).strip()
-    t = t.replace("Ã", "").replace("Â", "")
+    t = re.sub(r"\s*[-Ã¢â‚¬Â¢]\s*$", "", t).strip()
+    t = t.replace("ÃƒÆ’", "").replace("Ãƒâ€š", "")
 
     return t
 
