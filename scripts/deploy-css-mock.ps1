@@ -62,7 +62,8 @@ param(
   [string]$FrontendChartPath = ".\deploy\helm\css-frontend",
   [string]$FrontendOverridePath = ".\deploy\helm\.rendered\values-css-frontend.pinned.yaml",
 
-  # --- Frontend Helm deploy (optional) ---[string]$OverridePath = ".\deploy\helm\.rendered\values-css-mock.pinned.yaml",
+    # --- Frontend Helm deploy (optional) ---
+  [string]$OverridePath = ".\deploy\helm\.rendered\values-css-mock.pinned.yaml",
   [string]$ImageTag,
   [int]$ReplicaCount = 2,
   [int]$TimeoutMinutes = 10,
@@ -317,10 +318,6 @@ if ($BuildAndPush) {
 }
 
 # Ensure override directory exists (avoid mutating tracked files; write to rendered path)
-# Guard: OverridePath must be set (pinned backend values file)
-if ([string]::IsNullOrWhiteSpace($OverridePath)) {
-  $OverridePath = ".\deploy\helm\.rendered\values-css-mock.pinned.yaml"
-}
 $ovDir = Split-Path -Parent $OverridePath
 if (![string]::IsNullOrWhiteSpace($ovDir) -and !(Test-Path $ovDir)) { New-Item -ItemType Directory -Path $ovDir | Out-Null }
 if (!(Test-Path $OverridePath)) {
