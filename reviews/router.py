@@ -436,7 +436,7 @@ def _normalize_aiRisks_tiers_confidence(item: Dict[str, Any]) -> None:
                     bullets = _ev_to_bullets(evs2, max_bullets=4, max_len=260)
                     if bullets:
                         r["findings"] = bullets
-                        r["description"] = "Findings:\\n- " + "\\n- ".join(bullets)
+                        r["description"] = "Findings:\n- " + "\n- ".join(bullets)
                         r["rationale"] = r.get("description")
         except Exception:
             pass
