@@ -74,7 +74,7 @@ def _strip_owner_tokens(s: str) -> str:
 def _normalize_bullet_text(t: str) -> str:
     s = (t or "").replace("\r", " ").strip()
     # normalize common mojibake-ish ellipsis etc.
-    s = s.replace("ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦", "...")
+    s = s.replace("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦", "...")
     return s
 
 
@@ -82,10 +82,65 @@ def _clean_findings_line(s: str) -> Optional[str]:
     t = (s or "").strip()
     if not t:
         return None
-    t = t.lstrip("-ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢*").strip()
+    t = t.lstrip("-ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢*").strip()
     t = _normalize_bullet_text(t)
     return t if t else None
 
+
+
+def _evidence_to_findings(evs: Any, *, max_bullets: int = 4, max_len: int = 260) -> List[str]:
+    """Deterministic fallback: derive findings bullets from evidence text (no LLM)."""
+    if not isinstance(evs, list) or not evs:
+        return []
+
+    def score_ev(ev: Dict[str, Any]) -> int:
+        # Prefer obligation-like language / strong modal verbs
+        t = str((ev or {}).get("text") or "").lower()
+        s = 0
+        for kw in (
+            " shall ",
+            " must ",
+            " required ",
+            " will ",
+            " shall.",
+            " must.",
+            " required.",
+            " prohibited",
+            " may not",
+            " shall not",
+            " must not",
+        ):
+            if kw in t:
+                s += 5
+        if " deadline" in t or " due " in t:
+            s += 2
+        return s
+
+    ev_all: List[Dict[str, Any]] = [e for e in evs if isinstance(e, dict) and str(e.get("text") or "").strip()]
+    if not ev_all:
+        return []
+
+    ev_all.sort(key=score_ev, reverse=True)
+
+    bullets: List[str] = []
+    seen = set()
+    for ev in ev_all:
+        txt = str(ev.get("text") or "").replace("\n", " ").strip()
+        if not txt:
+            continue
+
+        excerpt = txt[:max_len].strip()
+        excerpt = _normalize_bullet_text(excerpt)
+        k = excerpt.lower()
+        if not excerpt or k in seen:
+            continue
+
+        seen.add(k)
+        bullets.append(excerpt)
+        if len(bullets) >= int(max_bullets):
+            break
+
+    return bullets
 
 def _normalize_section_outputs(section: Dict[str, Any], *, max_findings: int = _SECTION_MAX_FINDINGS) -> None:
     if not isinstance(section, dict):
@@ -114,6 +169,29 @@ def _normalize_section_outputs(section: Dict[str, Any], *, max_findings: int = _
                 break
         section["findings"] = cleaned
 
+
+    # Deterministic fallback: evidence exists but findings are empty/useless
+    try:
+        evs = section.get("evidence") or []
+        findings = section.get("findings") or []
+        desc = str(section.get("description") or "")
+        rat = str(section.get("rationale") or "")
+
+        no_findings = (not isinstance(findings, list)) or (len(findings) == 0) or ("No findings returned" in desc) or ("No findings returned" in rat)
+
+        if no_findings and isinstance(evs, list) and len(evs) > 0:
+            bullets = _evidence_to_findings(evs, max_bullets=int(max_findings))
+            if bullets:
+                section["findings"] = bullets
+
+                # If placeholder text was used, replace with deterministic findings text
+                if "No findings returned" in desc:
+                    section["description"] = "Findings:\n- " + "\n- ".join(bullets)
+                if "No findings returned" in rat:
+                    section["rationale"] = section.get("description") or ("Findings:\n- " + "\n- ".join(bullets))
+    except Exception:
+        # Never break section normalization due to fallback heuristics
+        pass
 
 def _slug(s: str) -> str:
     raw = (s or "").strip().lower()
