@@ -212,6 +212,7 @@ class OpenSearchVectorStore(VectorStore):
         top_k: int = 10,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
+        self._ensure_index()
         if not query_embedding:
             return []
 
