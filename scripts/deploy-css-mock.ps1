@@ -282,7 +282,12 @@ Write-Host "Using ImageTag: $ImageTag"
     docker push "${repo}:$ImageTag"
     if ($LASTEXITCODE -ne 0) { throw "docker push failed (exit $LASTEXITCODE)" }
 
-    Write-Host "BuildAndPush: push complete: ${repo}:$ImageTag" -ForegroundColor Green
+    Write-Host "BuildAndPush: push complete: ${repo}:$ImageTag
+
+    if ($AutoBuildIfMissing -and -not $SkipEcrCheck) {
+      Write-Host "AutoBuildIfMissing: verifying tag now exists in ECR: $ImageTag" -ForegroundColor Cyan
+      Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $bpRegion
+    }" -ForegroundColor Green
   }
 
 # Region preference order: AWS_REGION env var -> default us-gov-east-1
