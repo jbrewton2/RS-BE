@@ -322,7 +322,6 @@ async def list_reviews():
     return items
 
 
-@router.get("/{review_id}")
 
 def _normalize_aiRisks_tiers_confidence(item: Dict[str, Any]) -> None:
     # Read-time normalization for stored aiRisks so existing reviews gain tier/confidence fields.
@@ -405,6 +404,7 @@ def _normalize_aiRisks_tiers_confidence(item: Dict[str, Any]) -> None:
             sev = sev_downshift(sev, 1)
         r["severity"] = sev
 
+@router.get("/{review_id}")
 async def get_review(review_id: str, storage: StorageDep):
     """
     Get full review detail.
