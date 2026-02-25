@@ -37,6 +37,9 @@
 .PARAMETER BuildAndPush
   Build the backend Docker image locally and push it to ECR using the computed/current ImageTag before deploying.
 
+.PARAMETER AutoBuildIfMissing
+  If the requested ImageTag does not exist in ECR, automatically build+push that tag (same as -BuildAndPush) and then deploy.
+
 .PARAMETER SkipEcrCheck
   Skip the ECR "tag exists" preflight check (not recommended)
 
@@ -57,6 +60,7 @@ param(
   [int]$TimeoutMinutes = 10,
   [switch]$SkipVerify,
   [switch]$BuildAndPush,
+  [switch]$AutoBuildIfMissing,
   [switch]$SkipEcrCheck
 )
 
@@ -286,7 +290,21 @@ $region = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION 
     $ProfileArgs = @(); if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $ProfileArgs = @("--profile",$env:AWS_PROFILE) }
 
 # ECR preflight (repo name is fixed for this env)
-Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $region
+try {
+  Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $region
+} catch {
+  if ($AutoBuildIfMissing) {
+    Write-Host "ECR check: tag missing; AutoBuildIfMissing enabled -> building/pushing $ImageTag" -ForegroundColor Yellow
+    $script:BuildAndPush = $true
+  } else {
+    throw
+  }
+}
+
+# If AutoBuildIfMissing flipped BuildAndPush on, do the build+push NOW (before Helm deploy)
+if ($BuildAndPush) {
+  Write-Host "AutoBuildIfMissing: executing BuildAndPush before Helm deploy..." -ForegroundColor Yellow
+}
 
 if (!(Test-Path $OverridePath)) {
   Write-Host "Pinned override missing; creating: $OverridePath" -ForegroundColor Yellow
