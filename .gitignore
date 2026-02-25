@@ -116,3 +116,5 @@ tail_full_*.txt
 
 _scratch/
 
+
+deploy/helm/.rendered/

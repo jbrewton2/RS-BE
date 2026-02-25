@@ -54,7 +54,7 @@ param(
   [string]$Namespace = "css-mock",
   [string]$Release   = "css-backend",
   [string]$ChartPath = ".\deploy\helm\css-backend",
-  [string]$OverridePath = ".\deploy\helm\values-css-mock.yaml",
+  [string]$OverridePath = ".\deploy\helm\.rendered\values-css-mock.pinned.yaml",
   [string]$ImageTag,
   [int]$ReplicaCount = 2,
   [int]$TimeoutMinutes = 10,
@@ -308,6 +308,9 @@ if ($BuildAndPush) {
   }
 }
 
+# Ensure override directory exists (avoid mutating tracked files; write to rendered path)
+ = Split-Path -Parent 
+if (![string]::IsNullOrWhiteSpace() -and !(Test-Path )) { New-Item -ItemType Directory -Path  | Out-Null }
 if (!(Test-Path $OverridePath)) {
   Write-Host "Pinned override missing; creating: $OverridePath" -ForegroundColor Yellow
   Write-PinnedOverride -path $OverridePath -tag $ImageTag -replicas $ReplicaCount
