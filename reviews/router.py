@@ -371,6 +371,28 @@ def _normalize_aiRisks_tiers_confidence(item: Dict[str, Any]) -> None:
             return 0.75
         return 0.50
 
+
+    def _ev_to_bullets(evs, max_bullets: int = 4, max_len: int = 260) -> list[str]:
+        if not isinstance(evs, list) or not evs:
+            return []
+        bullets = []
+        seen = set()
+        for ev in evs:
+            if not isinstance(ev, dict):
+                continue
+            txt = str(ev.get("text") or "").replace("\n", " ").strip()
+            if not txt:
+                continue
+            excerpt = txt[:max_len].strip()
+            k = excerpt.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            bullets.append(excerpt)
+            if len(bullets) >= int(max_bullets):
+                break
+        return bullets
+
     for r in risks:
         if not isinstance(r, dict):
             continue
@@ -418,30 +440,7 @@ def _normalize_aiRisks_tiers_confidence(item: Dict[str, Any]) -> None:
                         r["rationale"] = r.get("description")
         except Exception:
             pass
-
-
-    # Deterministic findings fallback for stored RAG_SECTION aiRisks
-    # If evidence exists but older stored outputs say "No findings returned.", derive bullets from evidence text.
-    def _ev_to_bullets(evs, max_bullets: int = 4, max_len: int = 260) -> list[str]:
-        if not isinstance(evs, list) or not evs:
-            return []
-        bullets = []
-        seen = set()
-        for ev in evs:
-            if not isinstance(ev, dict):
-                continue
-            txt = str(ev.get("text") or "").replace("\n", " ").strip()
-            if not txt:
-                continue
-            excerpt = txt[:max_len].strip()
-            k = excerpt.lower()
-            if k in seen:
-                continue
-            seen.add(k)
-            bullets.append(excerpt)
-            if len(bullets) >= int(max_bullets):
-                break
-        return bullets
+    # Deterministic read-time fix: if section has evidence but placeholder text, derive Findings bullets from evidence.\r
 
 
 @router.get("/{review_id}")
