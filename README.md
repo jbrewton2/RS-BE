@@ -1,6 +1,6 @@
-﻿
+
 ---
-# Contract Security Studio — Backend API
+# Contract Security Studio � Backend API
 
 This repository contains the **FastAPI backend** for Contract Security Studio (CSS).
 
@@ -14,7 +14,7 @@ It provides:
 
 ---
 
-## 🧱 Tech Stack
+## ?? Tech Stack
 
 - Python 3.11+
 - FastAPI
@@ -25,7 +25,7 @@ It provides:
 
 ---
 
-## 🔐 Authentication & Security
+## ?? Authentication & Security
 
 ### Auth Model
 - JWTs issued by Keycloak
@@ -46,13 +46,12 @@ All others, including:
 - `/questionnaires`
 - `/llm-config`
 - `/llm-pricing`
-- `/llm-status`
 
 Unauthorized access returns `401`.
 
 ---
 
-## 🧠 LLM Integration
+## ?? LLM Integration
 
 - Default provider: **Ollama**
 - Default model: `llama3.1:8b-instruct-q4_K_M`
@@ -60,28 +59,26 @@ Unauthorized access returns `401`.
 
 ### Telemetry
 - LLM usage is logged to `llm_stats.json`
-- Aggregated via `/llm-status`
 - Cost derived from pricing config
 
 ---
 
-## 📁 Repo Structure
+## ?? Repo Structure
 
 ```text
 backend/
-├── main.py
-├── auth/
-│   └── jwt.py
-├── reviews/
-├── flags/
-├── knowledge/
-├── questionnaire/
-├── llm_config/
-├── pricing/
-├── llm_status/
-└── health/
++-- main.py
++-- auth/
+�   +-- jwt.py
++-- reviews/
++-- flags/
++-- knowledge/
++-- questionnaire/
++-- llm_config/
++-- pricing/
++-- health/
 
-🚀 Running Locally
+?? Running Locally
 
 Normally run via css-infra.
 
@@ -89,13 +86,13 @@ Standalone (dev only):
 
 uvicorn backend.main:app --reload
 
-🧪 API Docs
+?? API Docs
 
 Once running:
 
 http://localhost:8000/docs
 
-📌 Design Notes
+?? Design Notes
 
 Router-level auth avoids accidental exposure
 
@@ -105,7 +102,7 @@ LLM usage is auditable and cost-aware
 
 Backend is ready for RBAC expansion
 
-🚧 Future Enhancements
+?? Future Enhancements
 
 Role-based access control (admin vs reviewer)
 
@@ -114,3 +111,4 @@ Database persistence (optional)
 External LLM providers
 
 Metrics export (Prometheus/OpenTelemetry)
+

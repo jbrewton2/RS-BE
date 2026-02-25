@@ -20,7 +20,6 @@ if ($bad.Count -gt 0) {
 
 Write-Host "[PREBUILD] python compileall..." -ForegroundColor Cyan
 $dirs = @(
-  ".\core",".\flags",".\health",".\knowledge",".\llm_config",".\llm_status",
   ".\pricing",".\providers",".\questionnaire",".\rag",".\reviews",".\test"
 )
 
