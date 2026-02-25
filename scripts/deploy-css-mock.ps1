@@ -53,7 +53,21 @@
 param(
   [string]$Namespace = "css-mock",
   [string]$Release   = "css-backend",
-  [string]$ChartPath = ".\deploy\helm\css-backend",
+      [string]$ChartPath = ".\deploy\helm\css-backend",
+
+  # --- Frontend Helm deploy (optional) ---
+  [switch]$DeployFrontend,
+  [string]$FrontendTag = "",
+  [string]$FrontendRelease = "css-frontend",
+  [string]$FrontendChartPath = ".\deploy\helm\css-frontend",
+  [string]$FrontendOverridePath = ".\deploy\helm\.rendered\values-css-frontend.pinned.yaml",
+
+  # --- Frontend Helm deploy (optional) ---
+  [switch]$DeployFrontend,
+  [string]$FrontendTag = "",
+  [string]$FrontendRelease = "css-frontend",
+  [string]$FrontendChartPath = ".\deploy\helm\css-frontend",
+  [string]$FrontendOverridePath = ".\deploy\helm\.rendered\values-css-frontend.pinned.yaml",
   [string]$OverridePath = ".\deploy\helm\.rendered\values-css-mock.pinned.yaml",
   [string]$ImageTag,
   [int]$ReplicaCount = 2,
@@ -338,6 +352,32 @@ if (!$SkipVerify) {
   Verify-Cluster -ns $Namespace -release $Release
 }
 
+# ------------------------------------------------------------
+# Optional: deploy frontend via Helm (separate release)
+# ------------------------------------------------------------
+if ($DeployFrontend) {
+  if ([string]::IsNullOrWhiteSpace($FrontendTag)) { throw "DeployFrontend set but FrontendTag is empty (expected like web-<sha>)" }
+  if (!(Test-Path $FrontendChartPath)) { throw "Missing FrontendChartPath: $FrontendChartPath" }
+  if (!(Test-Path $FrontendOverridePath)) { throw "Missing FrontendOverridePath: $FrontendOverridePath" }
+
+  Write-Host "Frontend deploy: release=$FrontendRelease tag=$FrontendTag" -ForegroundColor Cyan
+
+  # Ensure override dir exists
+  $fovDir = Split-Path -Parent $FrontendOverridePath
+  if (![string]::IsNullOrWhiteSpace($fovDir) -and !(Test-Path $fovDir)) { New-Item -ItemType Directory -Path $fovDir | Out-Null }
+
+  # Reuse existing YAML tag setter (image.tag)
+  Set-YamlImageTagInPlace -ValuesPath $FrontendOverridePath -ImageTag $FrontendTag
+
+  Write-Host "Frontend pinned override written: $FrontendOverridePath" -ForegroundColor DarkGray
+  Get-Content $FrontendOverridePath | ForEach-Object { "  $_" }
+
+  Write-Host "Deploying frontend via Helm..." -ForegroundColor Cyan
+  & helm upgrade --install $FrontendRelease $FrontendChartPath -n $Namespace -f $FrontendOverridePath --atomic --timeout $timeout
+
+  Write-Host "Waiting for frontend rollout..." -ForegroundColor Cyan
+  & kubectl -n $Namespace rollout status ("deploy/" + $FrontendRelease) --timeout=180s | Out-Host
+}
 Write-Host "DEPLOY OK" -ForegroundColor Green
 
 
