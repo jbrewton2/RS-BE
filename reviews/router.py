@@ -404,6 +404,46 @@ def _normalize_aiRisks_tiers_confidence(item: Dict[str, Any]) -> None:
             sev = sev_downshift(sev, 1)
         r["severity"] = sev
 
+        # If this is a section risk with evidence but placeholder text, synthesize findings now
+        try:
+            if str(r.get("category") or "") == "RAG_SECTION":
+                evs2 = r.get("evidence") or []
+                desc2 = str(r.get("description") or "")
+                rat2  = str(r.get("rationale") or "")
+                if isinstance(evs2, list) and len(evs2) > 0 and ("No findings returned" in desc2 or "No findings returned" in rat2):
+                    bullets = _ev_to_bullets(evs2, max_bullets=4, max_len=260)
+                    if bullets:
+                        r["findings"] = bullets
+                        r["description"] = "Findings:\\n- " + "\\n- ".join(bullets)
+                        r["rationale"] = r.get("description")
+        except Exception:
+            pass
+
+
+    # Deterministic findings fallback for stored RAG_SECTION aiRisks
+    # If evidence exists but older stored outputs say "No findings returned.", derive bullets from evidence text.
+    def _ev_to_bullets(evs, max_bullets: int = 4, max_len: int = 260) -> list[str]:
+        if not isinstance(evs, list) or not evs:
+            return []
+        bullets = []
+        seen = set()
+        for ev in evs:
+            if not isinstance(ev, dict):
+                continue
+            txt = str(ev.get("text") or "").replace("\n", " ").strip()
+            if not txt:
+                continue
+            excerpt = txt[:max_len].strip()
+            k = excerpt.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            bullets.append(excerpt)
+            if len(bullets) >= int(max_bullets):
+                break
+        return bullets
+
+
 @router.get("/{review_id}")
 async def get_review(review_id: str, storage: StorageDep):
     """
