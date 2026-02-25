@@ -309,8 +309,8 @@ if ($BuildAndPush) {
 }
 
 # Ensure override directory exists (avoid mutating tracked files; write to rendered path)
- = Split-Path -Parent 
-if (![string]::IsNullOrWhiteSpace() -and !(Test-Path )) { New-Item -ItemType Directory -Path  | Out-Null }
+$ovDir = Split-Path -Parent $OverridePath
+if (![string]::IsNullOrWhiteSpace($ovDir) -and !(Test-Path $ovDir)) { New-Item -ItemType Directory -Path $ovDir | Out-Null }
 if (!(Test-Path $OverridePath)) {
   Write-Host "Pinned override missing; creating: $OverridePath" -ForegroundColor Yellow
   Write-PinnedOverride -path $OverridePath -tag $ImageTag -replicas $ReplicaCount
