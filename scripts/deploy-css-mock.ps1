@@ -62,13 +62,7 @@ param(
   [string]$FrontendChartPath = ".\deploy\helm\css-frontend",
   [string]$FrontendOverridePath = ".\deploy\helm\.rendered\values-css-frontend.pinned.yaml",
 
-  # --- Frontend Helm deploy (optional) ---
-  [switch]$DeployFrontend,
-  [string]$FrontendTag = "",
-  [string]$FrontendRelease = "css-frontend",
-  [string]$FrontendChartPath = ".\deploy\helm\css-frontend",
-  [string]$FrontendOverridePath = ".\deploy\helm\.rendered\values-css-frontend.pinned.yaml",
-  [string]$OverridePath = ".\deploy\helm\.rendered\values-css-mock.pinned.yaml",
+  # --- Frontend Helm deploy (optional) ---[string]$OverridePath = ".\deploy\helm\.rendered\values-css-mock.pinned.yaml",
   [string]$ImageTag,
   [int]$ReplicaCount = 2,
   [int]$TimeoutMinutes = 10,
