@@ -34,6 +34,9 @@
 .PARAMETER SkipVerify
   Skip post-deploy verification checks
 
+.PARAMETER BuildAndPush
+  Build the backend Docker image locally and push it to ECR using the computed/current ImageTag before deploying.
+
 .PARAMETER SkipEcrCheck
   Skip the ECR "tag exists" preflight check (not recommended)
 
@@ -53,6 +56,7 @@ param(
   [int]$ReplicaCount = 2,
   [int]$TimeoutMinutes = 10,
   [switch]$SkipVerify,
+  [switch]$BuildAndPush,
   [switch]$SkipEcrCheck
 )
 
@@ -110,6 +114,14 @@ function Require-Cmd([string]$name) {
   }
 }
 
+function Get-AwsExePath() {
+  # Prefer AWS CLI v2 at standard install path; fall back to aws.exe on PATH.
+  $v2 = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+  if (Test-Path $v2) { return $v2 }
+  $cmd = (Get-Command aws.exe -ErrorAction SilentlyContinue)
+  if ($cmd -and $cmd.Source) { return $cmd.Source }
+  return "aws"
+}
 function Get-GitTag() {
   $sha = (git rev-parse --short=7 HEAD 2>$null).Trim()
   if (!$sha) { throw "Could not determine git sha. Are you in a git repo?" }
@@ -234,6 +246,40 @@ if (!(Test-Path $ChartPath)) { throw "ChartPath not found: $ChartPath" }
 
 if (!$ImageTag) { $ImageTag = Get-GitTag }
 Write-Host "Using ImageTag: $ImageTag"
+
+  if ($BuildAndPush) {
+    $bpRegion  = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION } else { "us-gov-east-1" }
+    $bpProfile = if (![string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { $env:AWS_PROFILE } else { "css-gov" }
+    Write-Host "BuildAndPush: AWS_PROFILE=$bpProfile AWS_REGION=$bpRegion" -ForegroundColor DarkGray
+    Write-Host "BuildAndPush: building docker image and pushing to ECR..." -ForegroundColor Cyan
+
+    # NOTE: Repo is fixed for this environment
+    $acct = "354962495083"
+    $repoName = "css/css-backend"
+    $repoHost = "$acct.dkr.ecr.$bpRegion.amazonaws.com"
+    $repo = "$repoHost/$repoName"
+
+    # ECR login
+    $awsCmd = (Get-Command aws.exe -ErrorAction SilentlyContinue)
+    $exePath = if ($awsCmd) { $awsCmd.Source } else { "aws" }
+    Write-Host "BuildAndPush: AWS_EXE=$exePath" -ForegroundColor DarkGray
+    $pw = & $exePath --profile $bpProfile --region $bpRegion ecr get-login-password
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($pw)) { throw "ECR get-login-password failed (exit $LASTEXITCODE)" }
+    $pw | docker login --username AWS --password-stdin $repoHost
+    if ($LASTEXITCODE -ne 0) { throw "ECR login failed (exit $LASTEXITCODE)" }
+
+    # Build, tag, push
+    docker build -t "css-backend:$ImageTag" .
+    if ($LASTEXITCODE -ne 0) { throw "docker build failed (exit $LASTEXITCODE)" }
+
+    docker tag "css-backend:$ImageTag" "${repo}:$ImageTag"
+    if ($LASTEXITCODE -ne 0) { throw "docker tag failed (exit $LASTEXITCODE)" }
+
+    docker push "${repo}:$ImageTag"
+    if ($LASTEXITCODE -ne 0) { throw "docker push failed (exit $LASTEXITCODE)" }
+
+    Write-Host "BuildAndPush: push complete: ${repo}:$ImageTag" -ForegroundColor Green
+  }
 
 # Region preference order: AWS_REGION env var -> default us-gov-east-1
 $region = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION } else { "us-gov-east-1" }
