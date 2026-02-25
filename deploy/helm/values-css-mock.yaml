@@ -3,7 +3,7 @@ replicaCount: 2
 
 image:
   repository: 354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend
-  tag: "aws-23ee71c"
+  tag: "aws-0f4f5e6"
   pullPolicy: Always
 
 # Ingress expects a Service. Keep enabled.

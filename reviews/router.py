@@ -323,6 +323,88 @@ async def list_reviews():
 
 
 @router.get("/{review_id}")
+
+def _normalize_aiRisks_tiers_confidence(item: Dict[str, Any]) -> None:
+    # Read-time normalization for stored aiRisks so existing reviews gain tier/confidence fields.
+    # Deterministic-only enrichment. Does NOT call LLM.
+    risks = item.get("aiRisks") or []
+    if not isinstance(risks, list) or not risks:
+        return
+
+    sev_order = ["Informational", "Low", "Medium", "High", "Critical"]
+
+    def sev_downshift(sev: str, steps: int) -> str:
+        s = str(sev or "").strip() or "Informational"
+        try:
+            i = sev_order.index(s)
+        except ValueError:
+            return s
+        return sev_order[max(0, i - int(steps or 0))]
+
+    def conf_label(c: float) -> str:
+        try:
+            cf = float(c)
+        except Exception:
+            return "LOW"
+        if cf >= 0.85:
+            return "HIGH"
+        if cf >= 0.65:
+            return "MEDIUM"
+        return "LOW"
+
+    def tier_from_source(src: str, rid: str) -> str:
+        s = str(src or "").strip()
+        if s == "autoFlag":
+            return "TIER3_FLAG"
+        if s == "sectionDerived" or str(rid or "").startswith("rag-section:"):
+            return "TIER2_SECTION"
+        if s == "heuristic":
+            return "TIER2_HEURISTIC"
+        if s == "ai_only":
+            return "TIER1_INFERENCE"
+        return "TIER1_INFERENCE"
+
+    def default_conf_for_tier(tier: str) -> float:
+        t = str(tier or "").strip()
+        if t == "TIER3_FLAG":
+            return 0.90
+        if t.startswith("TIER2_"):
+            return 0.75
+        return 0.50
+
+    for r in risks:
+        if not isinstance(r, dict):
+            continue
+        rid = str(r.get("id") or "").strip()
+        src = str(r.get("source") or r.get("source_type") or r.get("sourceType") or "").strip()
+        if src:
+            r.setdefault("source", src)
+            r.setdefault("source_type", src)
+
+        tier = str(r.get("tier") or "").strip() or tier_from_source(src, rid)
+        r["tier"] = tier
+
+        c = r.get("confidence")
+        try:
+            cf = float(c) if c is not None else 0.0
+        except Exception:
+            cf = 0.0
+        if cf <= 0.0:
+            cf = default_conf_for_tier(tier)
+        r["confidence"] = float(cf)
+        r["confidence_label"] = str(r.get("confidence_label") or "").strip() or conf_label(cf)
+
+        sev = str(r.get("severity") or "Informational").strip() or "Informational"
+        if tier == "TIER1_INFERENCE" and sev in ("High", "Critical"):
+            sev = "Medium"
+        if tier.startswith("TIER2_") and sev == "Critical":
+            sev = "High"
+        if cf < 0.45:
+            sev = sev_downshift(sev, 2)
+        elif cf < 0.65:
+            sev = sev_downshift(sev, 1)
+        r["severity"] = sev
+
 async def get_review(review_id: str, storage: StorageDep):
     """
     Get full review detail.
@@ -353,6 +435,7 @@ async def get_review(review_id: str, storage: StorageDep):
     _backfill_aiRisks_evidence(item)
 
     _backfill_aiRisks_from_sections(item)
+    _normalize_aiRisks_tiers_confidence(item)
     return _ensure_id_contract(item)
 
 @router.post("")
