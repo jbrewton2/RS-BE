@@ -283,9 +283,12 @@ Write-Host "Using ImageTag: $ImageTag"
     if ($LASTEXITCODE -ne 0) { throw "docker push failed (exit $LASTEXITCODE)" }
 
     Write-Host "BuildAndPush: push complete: ${repo}:$ImageTag
+    if ($AutoBuildIfMissing -and -not $SkipEcrCheck) {
+      Write-Host "AutoBuildIfMissing: verifying ECR tag exists: $ImageTag" -ForegroundColor Cyan
+      Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $bpRegion
+    }
 
     if ($AutoBuildIfMissing -and -not $SkipEcrCheck) {
-      Write-Host "AutoBuildIfMissing: verifying tag now exists in ECR: $ImageTag" -ForegroundColor Cyan
       Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $bpRegion
     }" -ForegroundColor Green
   }
@@ -308,7 +311,9 @@ try {
 
 # If AutoBuildIfMissing flipped BuildAndPush on, do the build+push NOW (before Helm deploy)
 if ($BuildAndPush) {
-  Write-Host "AutoBuildIfMissing: executing BuildAndPush before Helm deploy..." -ForegroundColor Yellow
+  if ($AutoBuildIfMissing -and $BuildAndPush) {
+    Write-Host "AutoBuildIfMissing: executing BuildAndPush before Helm deploy..." -ForegroundColor Yellow
+  }
 }
 
 if (!(Test-Path $OverridePath)) {
