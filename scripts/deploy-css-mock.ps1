@@ -66,8 +66,7 @@ function Set-YamlImageTagInPlace {
   Skip post-deploy verification checks
 
 .PARAMETER SkipEcrCheck
-  Skip the ECR Ã¢â‚¬Å“tag existsÃ¢â‚¬Â preflight check (not recommended)
-
+  Skip the ECR "tag exists" preflight check (not recommended)
 .EXAMPLE
   cd "C:\Users\JoshBrewton\Desktop\CSS\css-backend"
   $env:AWS_PROFILE="css-gov"
@@ -240,9 +239,14 @@ $region = if (![string]::IsNullOrWhiteSpace($env:AWS_REGION)) { $env:AWS_REGION 
 
 # ECR preflight (repo name is fixed for this env)
 Verify-EcrTagExists -RepoName "css/css-backend" -Tag $ImageTag -Region $region
+if (!(Test-Path $OverridePath)) {
+  Write-Host "Pinned override missing; creating: $OverridePath" -ForegroundColor Yellow
+  Write-PinnedOverride -path $OverridePath -tag $ImageTag -replicas $ReplicaCount
+} else {
+  Write-Host "Pinned override in use: $OverridePath" -ForegroundColor Cyan
+  Set-YamlImageTagInPlace -ValuesPath $OverridePath -ImageTag $ImageTag
+}
 
-Write-PinnedOverride -path $OverridePath -tag $ImageTag -replicas $ReplicaCount
-Write-Host "Pinned override in use: $OverridePath"
 Get-Content $OverridePath | ForEach-Object { "  $_" }
 
 Write-Host "Lint chart..." -ForegroundColor Cyan
