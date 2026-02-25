@@ -1,5 +1,8 @@
-# rag/service.py
+﻿# rag/service.py
 from __future__ import annotations
+import logging
+
+logger = logging.getLogger(__name__)
 from rag.service_helpers import _extend_questions_with_targeted, derive_section_risks
 from rag.prompts import STRICT_SUMMARY_PROMPT, RISK_TRIAGE_PROMPT, _build_review_summary_prompt
 from rag.prompt_engine import render_deterministic_signals_block as pe_render_signals
@@ -303,7 +306,7 @@ def _postprocess_review_summary(text: str) -> str:
 
     # Common encoding artifacts seen in logs / copied text
     # Strip obvious mojibake markers without embedding huge literals
-    hardened = hardened.replace('ÃƒÆ’Ã†â€™', '').replace('ÃƒÆ’Ã¢â‚¬Å¡', '')
+    hardened = hardened.replace('ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢', '').replace('ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡', '')
 
     return _collapse_blank_lines(hardened)
 
@@ -482,8 +485,8 @@ def _strip_owner_tokens(s: str) -> str:
     t = _OWNER_INLINE_RE.sub("", t).strip()
 
     # Also remove trailing separators left behind
-    t = re.sub(r"\s*[-Ã¢â‚¬Â¢]\s*$", "", t).strip()
-    t = t.replace("ÃƒÆ’", "").replace("Ãƒâ€š", "")
+    t = re.sub(r"\s*[-ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢]\s*$", "", t).strip()
+    t = t.replace("ÃƒÆ’Ã†â€™", "").replace("ÃƒÆ’Ã¢â‚¬Å¡", "")
 
     return t
 
@@ -867,6 +870,22 @@ def rag_analyze_review(
         try:
             ingest_stats = ie_ingest_review_into_vectorstore(storage=storage, llm=llm, vector=vector, docs=docs, review_id=review_id, profile=profile)
         except Exception as e:
+            try:
+                doc_ids = []
+                for d in (docs or []):
+                    if isinstance(d, dict):
+                        doc_ids.append(str(d.get("id") or d.get("doc_id") or ""))
+                doc_ids = [x for x in doc_ids if x]
+            except Exception:
+                doc_ids = []
+
+            logger.exception(
+                "RAG ingest failed (force_reingest=1) review_id=%s docs=%s doc_ids=%s",
+                review_id,
+                len(docs or []),
+                doc_ids,
+            )
+
             ingest_stats = {"error": repr(e)}
             warnings.append("ingest_failed")
 
@@ -1324,6 +1343,10 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
+
+
+
 
 
 
