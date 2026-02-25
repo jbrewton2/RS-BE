@@ -317,6 +317,10 @@ if ($BuildAndPush) {
 }
 
 # Ensure override directory exists (avoid mutating tracked files; write to rendered path)
+# Guard: OverridePath must be set (pinned backend values file)
+if ([string]::IsNullOrWhiteSpace($OverridePath)) {
+  $OverridePath = ".\deploy\helm\.rendered\values-css-mock.pinned.yaml"
+}
 $ovDir = Split-Path -Parent $OverridePath
 if (![string]::IsNullOrWhiteSpace($ovDir) -and !(Test-Path $ovDir)) { New-Item -ItemType Directory -Path $ovDir | Out-Null }
 if (!(Test-Path $OverridePath)) {
