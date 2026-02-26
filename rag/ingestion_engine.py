@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 # NOTE:
 # This module was split out of rag/service.py for maintainability.
