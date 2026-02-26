@@ -64,7 +64,7 @@ def _s3k(p: str) -> str:
     p = (p or "").lstrip("/")
     return f"{prefix}/{p}" if prefix else p
 
-def _read_extracted_text_for_doc(storage: StorageProvider, *, doc_id: str) -> str:
+def _read_extracted_text_for_doc(storage: StorageProvider, *, doc_id: str, pdf_url: str = "", token: str = "") -> str:
     doc_id = (doc_id or "").strip()
     if not doc_id:
         return ""
@@ -132,6 +132,7 @@ def _ingest_review_into_vectorstore(
     docs: List[Dict[str, Any]],
     review_id: str,
     profile: str,
+    token: str = "",
 ) -> Dict[str, Any]:
     if not isinstance(docs, list) or not docs:
         return {"ingested_docs": 0, "ingested_chunks": 0, "skipped_docs": 0, "reason": "no_docs"}
@@ -155,7 +156,8 @@ def _ingest_review_into_vectorstore(
             continue
 
         doc_name = (d.get("name") or d.get("filename") or d.get("title") or f"review:{review_id}").strip()
-        raw_text = _read_extracted_text_for_doc(storage, doc_id=doc_id)
+        pdf_url = (d.get("pdf_url") or "").strip()
+        raw_text = _read_extracted_text_for_doc(storage, doc_id=doc_id, pdf_url=pdf_url, token=token)
         if not raw_text:
             skipped_docs += 1
             continue

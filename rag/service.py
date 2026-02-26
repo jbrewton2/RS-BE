@@ -306,7 +306,7 @@ def _postprocess_review_summary(text: str) -> str:
 
     # Common encoding artifacts seen in logs / copied text
     # Strip obvious mojibake markers without embedding huge literals
-    hardened = hardened.replace('ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢', '').replace('ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡', '')
+    hardened = hardened.replace('ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢', '').replace('ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡', '')
 
     return _collapse_blank_lines(hardened)
 
@@ -485,8 +485,8 @@ def _strip_owner_tokens(s: str) -> str:
     t = _OWNER_INLINE_RE.sub("", t).strip()
 
     # Also remove trailing separators left behind
-    t = re.sub(r"\s*[-ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢]\s*$", "", t).strip()
-    t = t.replace("ÃƒÆ’Ã†â€™", "").replace("ÃƒÆ’Ã¢â‚¬Å¡", "")
+    t = re.sub(r"\s*[-ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢]\s*$", "", t).strip()
+    t = t.replace("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢", "").replace("ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡", "")
 
     return t
 
@@ -629,7 +629,8 @@ def ie_ingest_review_into_vectorstore(
             continue
 
         doc_name = (d.get("name") or d.get("filename") or d.get("title") or f"review:{review_id}").strip()
-        raw_text = _read_extracted_text_for_doc(storage, doc_id=doc_id)
+        pdf_url = (d.get("pdf_url") or "").strip()
+        raw_text = _read_extracted_text_for_doc(storage, doc_id=doc_id, pdf_url=pdf_url, token="")
         if not raw_text:
             skipped_docs += 1
             continue
