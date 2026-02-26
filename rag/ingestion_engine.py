@@ -13,8 +13,7 @@ from providers.vectorstore import VectorStore
 # Standard libs commonly used by ingestion (safe even if unused)
 import io
 import re
-
-
+import os
 def _chunk_text_windowed(text: str, *, chunk_size: int = 1400, overlap: int = 200) -> List[Dict[str, Any]]:
     t = (text or "").strip()
     if not t:
@@ -58,6 +57,11 @@ def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
         return "\n".join(texts).strip()
     except Exception:
         return ""
+
+def _s3k(p: str) -> str:
+    prefix = (os.environ.get("S3_PREFIX") or "").strip().strip("/")
+    p = (p or "").lstrip("/")
+    return f"{prefix}/{p}" if prefix else p
 
 def _read_extracted_text_for_doc(storage: StorageProvider, *, doc_id: str) -> str:
     doc_id = (doc_id or "").strip()
