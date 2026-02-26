@@ -17,7 +17,6 @@ from rag.inference_engine import generate_inference_candidates_multi_pass as ie_
 from rag.retrieval_engine import retrieve_context_local as re_retrieve_context_local, effective_top_k as re_effective_top_k, effective_context_chars as re_effective_context_chars, effective_snippet_chars as re_effective_snippet_chars
 from rag.narrative_engine import generate_summary_multi_pass as ne_generate_summary_multi_pass
 from rag.ingestion_engine import _ingest_review_into_vectorstore as ie_ingest_review_into_vectorstore, _chunk_text_windowed
-from rag.ingestion_engine import _read_extracted_text_for_doc, _chunk_text_windowed
 from rag.sections_engine import _parse_review_summary_sections as se_parse_sections, _attach_evidence_to_sections as se_attach_evidence, _backfill_sections_from_evidence as se_backfill_sections, _normalize_section_outputs as se_normalize_section, owner_for_section as se_owner_for_section
 from rag.sections_engine import _strengthen_overview_from_evidence as se_strengthen_overview_from_evidence
 import re
@@ -598,83 +597,7 @@ def _clean_findings_line(s: str) -> Optional[str]:
             overview["gaps"] = [g for g in gaps if INSUFFICIENT.lower() not in str(g or "").lower()]
     return sections
 
-def ie_ingest_review_into_vectorstore(
-    *,
-    storage: StorageProvider,
-    llm: Any,
-    vector: VectorStore,
-    docs: List[Dict[str, Any]],
-    review_id: str,
-    profile: str,
-) -> Dict[str, Any]:
-    if not isinstance(docs, list) or not docs:
-        return {"ingested_docs": 0, "ingested_chunks": 0, "skipped_docs": 0, "reason": "no_docs"}
-
-    p = (profile or "").lower()
-    chunk_size = 1400 if p == "deep" else (1000 if p == "balanced" else 900)
-    overlap = 200
-
-    ingested_docs = 0
-    ingested_chunks = 0
-    skipped_docs = 0
-
-    for d in docs:
-        if not isinstance(d, dict):
-            skipped_docs += 1
-            continue
-
-        doc_id = (d.get("doc_id") or d.get("id") or "").strip()
-        if not doc_id:
-            skipped_docs += 1
-            continue
-
-        doc_name = (d.get("name") or d.get("filename") or d.get("title") or f"review:{review_id}").strip()
-        pdf_url = (d.get("pdf_url") or "").strip()
-        raw_text = _read_extracted_text_for_doc(storage, doc_id=doc_id, pdf_url=pdf_url, token="")
-        if not raw_text:
-            skipped_docs += 1
-            continue
-
-        chunks = _chunk_text_windowed(raw_text, chunk_size=chunk_size, overlap=overlap)
-        if not chunks:
-            skipped_docs += 1
-            continue
-
-        texts = [c["chunk_text"] for c in chunks]
-        if not hasattr(llm, "embed_texts"):
-            raise RuntimeError("LLM provider does not implement embed_texts() required for vector ingest")
-        embeddings = llm.embed_texts(texts)
-
-        if not isinstance(embeddings, list) or len(embeddings) != len(chunks):
-            raise RuntimeError("embed_texts returned unexpected number of embeddings")
-
-        upsert_payload: List[Dict[str, Any]] = []
-        for c, emb in zip(chunks, embeddings):
-            meta = c.get("meta") or {}
-            meta = dict(meta) if isinstance(meta, dict) else {}
-            meta["review_id"] = str(review_id)
-            meta["doc_id"] = str(doc_id)
-            meta["doc_name"] = str(doc_name)
-            upsert_payload.append(
-                {
-                    "review_id": str(review_id),
-                    "chunk_id": str(c.get("chunk_id") or ""),
-                    "chunk_text": str(c.get("chunk_text") or ""),
-                    "doc_name": str(doc_name),
-                    "meta": meta,
-                    "embedding": emb,
-                }
-            )
-
-        vector.delete_by_document(str(doc_id))
-        vector.upsert_chunks(document_id=str(doc_id), chunks=upsert_payload, review_id=review_id)
-
-        ingested_docs += 1
-        ingested_chunks += len(upsert_payload)
-
-    return {"ingested_docs": ingested_docs, "ingested_chunks": ingested_chunks, "skipped_docs": skipped_docs}
-
-
+# NOTE: ingestion implementation lives in rag/ingestion_engine.py (_ingest_review_into_vectorstore)
 # =============================================================================
 # LLM call helper
 # =============================================================================

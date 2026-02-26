@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from auth.jwt import get_current_user
 from core.providers import providers_from_request
@@ -68,7 +68,7 @@ def _ensure_section_owners(payload: Any) -> Any:
     response_model=RagAnalyzeResponse,
     response_model_exclude_none=True,
 )
-def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
+def analyze(req: RagAnalyzeRequest, request: Request, providers=Depends(providers_from_request)):
     try:
         auth = (request.headers.get("authorization") or request.headers.get("Authorization") or "").strip()
         token = ""
@@ -80,6 +80,7 @@ def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
             vector=providers.vector,
             llm=providers.llm,
             review_id=req.review_id,
+            token=token,
             mode=req.mode,
             analysis_intent=req.analysis_intent,
             heuristic_hits=req.heuristic_hits,
