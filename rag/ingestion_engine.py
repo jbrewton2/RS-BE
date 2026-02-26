@@ -125,17 +125,45 @@ def _read_extracted_text_for_doc(
     if not doc_id:
         return ""
 
+    
+    def _key_candidates(rel: str) -> list[str]:
+        rel = (rel or "").lstrip("/")
+        out = [rel]
+        pfx = (os.environ.get("S3_PREFIX") or "").strip().strip("/")
+        if pfx:
+            out.append(f"{pfx}/{rel}")
+        return out
+# DOUBLE_PREFIX_CANDIDATES:
+    # storage_s3 applies S3_PREFIX automatically. Some writers store keys already including S3_PREFIX,
+    # producing objects under stores/stores/...
+    # We try both relative keys and prefix-included keys (which become double-prefixed via storage_s3).
+    _prefix = (os.environ.get("S3_PREFIX") or "").strip().strip("/")
+    def _dbl(k: str) -> str:
+        k = (k or '').lstrip('/')
+        return f'{_prefix}/{k}' if _prefix else ''
+
+
     # 1) raw text artifact (preferred)
-    extract_key = f"review_pdfs/extract/{doc_id}/raw_text.txt"
-    extract_key_legacy = f"extract/{doc_id}/raw_text.txt"
-    try:
-        b = storage.get_object(key=extract_key)
-        if isinstance(b, (bytes, bytearray)):
-            t = bytes(b).decode("utf-8", errors="ignore").strip()
-            if t:
-                return t
-    except Exception:
-        pass
+    # 1) raw text artifact (preferred)
+    _raw_candidates = [
+        f"review_pdfs/extract/{doc_id}/raw_text.txt",
+        f"extract/{doc_id}/raw_text.txt",
+    ]
+    _k = _dbl(_raw_candidates[0])
+    if _k: _raw_candidates.append(_k)
+    _k = _dbl(_raw_candidates[1])
+    if _k: _raw_candidates.append(_k)
+
+    for extract_key in _raw_candidates:
+        try:
+            b = storage.get_object(key=extract_key)
+            if isinstance(b, (bytes, bytearray)):
+                t = bytes(b).decode("utf-8", errors="ignore").strip()
+                if t:
+                    return t
+        except Exception:
+            pass
+
 
     # Legacy extract fallback (current S3 has raw_text here)
     try:
@@ -167,11 +195,21 @@ def _read_extracted_text_for_doc(
             print(f"pdf_url_fetch_error doc_id={doc_id} has_token={bool((token or '').strip())} err={repr(e)} url={pdf_url}")
 
     # 3) stored PDF fallback
-    pdf_key = f"review_pdfs/{doc_id}.pdf"
-    try:
-        pdf_bytes = storage.get_object(key=pdf_key)
-    except Exception:
-        pdf_bytes = None
+    pdf_bytes = None
+    _pdf_candidates = [
+        f"review_pdfs/{doc_id}.pdf",
+    ]
+    _k = _dbl(_pdf_candidates[0])
+    if _k: _pdf_candidates.append(_k)
+
+    for pdf_key in _pdf_candidates:
+        try:
+            pdf_bytes = storage.get_object(key=pdf_key)
+            if isinstance(pdf_bytes, (bytes, bytearray)) and pdf_bytes:
+                break
+        except Exception:
+            pdf_bytes = None
+
 
     if not isinstance(pdf_bytes, (bytes, bytearray)) or not pdf_bytes:
         return ""
