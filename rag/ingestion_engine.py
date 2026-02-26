@@ -13,6 +13,7 @@ from providers.vectorstore import VectorStore
 # Standard libs commonly used by ingestion (safe even if unused)
 import io
 import re
+import requests
 import os
 def _chunk_text_windowed(text: str, *, chunk_size: int = 1400, overlap: int = 200) -> List[Dict[str, Any]]:
     t = (text or "").strip()
@@ -77,6 +78,20 @@ def _read_extracted_text_for_doc(storage: StorageProvider, *, doc_id: str) -> st
                 return t
     except Exception:
         pass
+
+    # If DOCX was extracted to PDF, prefer fetching the generated PDF via pdf_url
+    if pdf_url:
+        try:
+            headers = {}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            r = requests.get(pdf_url, headers=headers, timeout=30)
+            if r.status_code == 200 and r.content:
+                t = _extract_text_from_pdf_bytes(bytes(r.content))
+                if t and t.strip():
+                    return t.strip()
+        except Exception:
+            pass
 
     pdf_key = _s3k(f"review_pdfs/{doc_id}.pdf")
     try:
