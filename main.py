@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from io import BytesIO
@@ -214,17 +214,30 @@ def _convert_docx_bytes_to_pdf_bytes(
             return None
 
 
+def _storage_key(key: str) -> str:
+    """
+    Normalize object keys for prefixed storage (S3_PREFIX=stores, etc).
+    If S3_PREFIX is empty, return key unchanged.
+    Ensures no double slashes.
+    """
+    k = (key or "").lstrip("/")
+    prefix = (os.environ.get("S3_PREFIX") or os.environ.get("DOCS_PREFIX") or "").strip().strip("/")
+    if not prefix:
+        return k
+    return f"{prefix}/{k}".replace("//", "/")
+
+
 def _pdf_key_for_doc_id(doc_id: str) -> str:
     # Canonical: do not use filename as key (avoids collision)
-    return f"review_pdfs/{doc_id}.pdf"
+    return _storage_key(f"review_pdfs/{doc_id}.pdf")
 
 
 def _extract_artifact_keys(doc_id: str) -> tuple[str, str]:
     # Canonical extract artifacts path (RAG ingest reads these)
-    return (f"extract/{doc_id}/raw_text.txt", f"extract/{doc_id}/extract.json")
-
-
-# ---------------------------------------------------------------------
+    return (
+        _storage_key(f"extract/{doc_id}/raw_text.txt"),
+        _storage_key(f"extract/{doc_id}/extract.json"),
+    )# ---------------------------------------------------------------------
 # Lifespan (seed storage)
 # ---------------------------------------------------------------------
 
