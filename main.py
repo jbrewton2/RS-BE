@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from io import BytesIO
@@ -78,24 +78,52 @@ def _safe_filename(name: str) -> str:
     return name[:180] or "upload"
 
 
-def _extract_text_from_pdf_stream(stream: BytesIO) -> str:
+def _extract_text_from_pdf_stream(stream: BytesIO) -> tuple[str, list[dict]]:
+    """
+    Extract text from a PDF stream and also return deterministic page->char span mapping.
+
+    pages = [{ "pageNumber": 1, "charStart": 0, "charEnd": 1234 }, ...]
+    charStart/charEnd are offsets into the returned concatenated text.
+    """
     if PdfReader is None:
         raise HTTPException(status_code=500, detail="PDF support not installed.")
-    try:
-        reader = PdfReader(stream)
-        texts: List[str] = []
-        for page in reader.pages:
-            try:
-                page_text = page.extract_text() or ""
-            except Exception:
-                page_text = ""
-            if page_text.strip():
-                texts.append(page_text)
-        return "\n".join(texts).strip() or "(No text extracted.)"
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read PDF: {exc}")
 
+    reader = PdfReader(stream)
 
+    chunks: list[str] = []
+    pages: list[dict] = []
+
+    cursor = 0
+    page_num = 0
+
+    for page in reader.pages:
+        page_num += 1
+        try:
+            txt = page.extract_text() or ""
+        except Exception:
+            txt = ""
+
+        # Normalize
+        txt = (txt or "").strip()
+        if not txt:
+            # still record a span (zero-width) so page count is consistent
+            pages.append({"pageNumber": page_num, "charStart": cursor, "charEnd": cursor})
+            continue
+
+        # Add separator between pages to keep offsets stable and readable
+        if chunks:
+            chunks.append("\n\n")
+            cursor += 2
+
+        start = cursor
+        chunks.append(txt)
+        cursor += len(txt)
+        end = cursor
+
+        pages.append({"pageNumber": page_num, "charStart": start, "charEnd": end})
+
+    text = "".join(chunks).strip()
+    return text, pages
 def _extract_text_from_docx_stream(stream: BytesIO) -> str:
     if docx is None:
         raise HTTPException(status_code=500, detail="DOCX support not installed.")
@@ -488,7 +516,7 @@ async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseMo
             text=text,
             type="pdf",
             pdf_url=pdf_url,
-            pages=None,
+            pages=pages,
             doc_id=doc_id,
             filename=filename,
         )
@@ -588,7 +616,7 @@ async def api_extract_by_key(req: ExtractByKeyRequest, request: Request):
         extract_json_sha256=extract_json_sha,
     )
 
-    return ExtractResponseModel(text=text, type="pdf", pdf_url=pdf_url, pages=None, doc_id=doc_id, filename=None)
+    return ExtractResponseModel(text=text, type="pdf", pdf_url=pdf_url, pages=pages, doc_id=doc_id, filename=None)
 
 
 # ---------------------------------------------------------------------

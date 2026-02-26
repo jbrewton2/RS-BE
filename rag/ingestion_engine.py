@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 # NOTE:
 # This module was split out of rag/service.py for maintainability.
@@ -33,7 +33,7 @@ def _chunk_text_windowed(text: str, *, chunk_size: int = 1400, overlap: int = 20
                 {
                     "chunk_id": f"{i}:{start}:{end}",
                     "chunk_text": chunk_text,
-                    "meta": {"char_start": start, "char_end": end, "chunk_index": i},
+                    "meta": {"char_start": start, "char_end": end, "chunk_index": i, "page_number": page_idx},
                 }
             )
             i += 1
@@ -48,7 +48,7 @@ def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     try:
         reader = PdfReader(BytesIO(pdf_bytes))
         texts: List[str] = []
-        for page in reader.pages:
+        for page_idx, page in enumerate(reader.pages, start=1):
             try:
                 page_text = page.extract_text() or ""
             except Exception:

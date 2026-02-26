@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from typing import Optional
@@ -68,6 +68,7 @@ def _extract_obligation_excerpt(text: str, max_len: int = 1200) -> str:
                 "text": _extract_obligation_excerpt(chunk_text, max_len=1200),
                 "charStart": meta.get("char_start"),
                 "charEnd": meta.get("char_end"),
+                "page_number": meta.get("page_number") or meta.get("page") or meta.get("pageNumber"),
                 "score": h.get("score"),
             }
             add_ev(sec, ev)
