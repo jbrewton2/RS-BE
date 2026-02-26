@@ -67,7 +67,7 @@ def _read_extracted_text_for_doc(storage: StorageProvider, *, doc_id: str) -> st
     doc_id = (doc_id or "").strip()
     if not doc_id:
         return ""
-    extract_key = f"extract/{doc_id}/raw_text.txt"
+    extract_key = _s3k(f"review_pdfs/extract/{doc_id}/raw_text.txt")
 
     try:
         b = storage.get_object(key=extract_key)
@@ -78,7 +78,7 @@ def _read_extracted_text_for_doc(storage: StorageProvider, *, doc_id: str) -> st
     except Exception:
         pass
 
-    pdf_key = f"review_pdfs/{doc_id}.pdf"
+    pdf_key = _s3k(f"review_pdfs/{doc_id}.pdf")
     try:
         pdf_bytes = storage.get_object(key=pdf_key)
     except Exception:
@@ -93,7 +93,7 @@ def _read_extracted_text_for_doc(storage: StorageProvider, *, doc_id: str) -> st
 
     try:
         raw_text_bytes = text.encode("utf-8", errors="ignore").strip()
-        extract_json_key = f"extract/{doc_id}/extract.json"
+        extract_json_key = _s3k(f"review_pdfs/extract/{doc_id}/extract.json")
         payload = {
             "doc_id": doc_id,
             "pdf_key": pdf_key,
