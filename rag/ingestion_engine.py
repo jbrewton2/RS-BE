@@ -14,6 +14,8 @@ from providers.vectorstore import VectorStore
 import io
 import re
 import requests
+import logging
+log = logging.getLogger(__name__)
 import os
 def _chunk_text_windowed(text: str, *, chunk_size: int = 1400, overlap: int = 200) -> List[Dict[str, Any]]:
     t = (text or "").strip()
@@ -83,14 +85,17 @@ def _read_extracted_text_for_doc(storage: StorageProvider, *, doc_id: str, pdf_u
     if pdf_url:
         try:
             headers = {}
-            if token:
+            has_token = bool(token)
+            if has_token:
                 headers["Authorization"] = f"Bearer {token}"
             r = requests.get(pdf_url, headers=headers, timeout=30)
+            log.warning("pdf_url_fetch doc_id=%s has_token=%s status=%s bytes=%s url=%s", doc_id, has_token, getattr(r, "status_code", None), len(getattr(r, "content", b"") or b""), pdf_url)
             if r.status_code == 200 and r.content:
                 t = _extract_text_from_pdf_bytes(bytes(r.content))
                 if t and t.strip():
                     return t.strip()
-        except Exception:
+        except Exception as e:
+            log.warning("pdf_url_fetch_error doc_id=%s has_token=%s err=%s url=%s", doc_id, bool(token), repr(e), pdf_url)
             pass
 
     pdf_key = _s3k(f"review_pdfs/{doc_id}.pdf")
