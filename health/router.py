@@ -1,4 +1,4 @@
-﻿# backend/health/router.py
+# backend/health/router.py
 from fastapi import APIRouter, Request
 import httpx
 
