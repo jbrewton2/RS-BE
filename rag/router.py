@@ -70,6 +70,11 @@ def _ensure_section_owners(payload: Any) -> Any:
 )
 def analyze(req: RagAnalyzeRequest, providers=Depends(providers_from_request)):
     try:
+        auth = (request.headers.get("authorization") or request.headers.get("Authorization") or "").strip()
+        token = ""
+        if auth.lower().startswith("bearer "):
+            token = auth.split(" ", 1)[1].strip()
+
         result = rag_analyze_review(
             storage=providers.storage,
             vector=providers.vector,
