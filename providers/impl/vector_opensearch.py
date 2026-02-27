@@ -87,7 +87,7 @@ class OpenSearchVectorStore(VectorStore):
 
         self.host = _parse_host(self.endpoint)
 
-        # Build client from fresh creds (IRSA) â€“ can be refreshed on auth expiry
+        # Build client from fresh creds (IRSA) Ã¢â‚¬â€œ can be refreshed on auth expiry
         self.client = self._build_client()
 
         self._ensure_index()
@@ -126,9 +126,19 @@ class OpenSearchVectorStore(VectorStore):
         # Rebuild client from fresh creds (used on auth expiry)
         self.client = self._build_client()
     def _ensure_index(self) -> None:
-# Index creation is safe/idempotent
-        if self.client.indices.exists(index=self.index):
-            return
+        # Index creation is safe/idempotent
+        try:
+            if self.client.indices.exists(index=self.index):
+                return
+        except Exception as e:
+            if _is_opensearch_expired_token_error(e):
+                logger.warning("[OpenSearch] auth expired during indices.exists; refreshing client and retrying once")
+                self._refresh_client()
+                if self.client.indices.exists(index=self.index):
+                    return
+            else:
+                raise
+
 
         body = {
             "settings": {
@@ -152,7 +162,16 @@ class OpenSearchVectorStore(VectorStore):
             },
         }
 
-        self.client.indices.create(index=self.index, body=body)
+        try:
+            self.client.indices.create(index=self.index, body=body)
+        except Exception as e:
+            if _is_opensearch_expired_token_error(e):
+                logger.warning("[OpenSearch] auth expired during indices.create; refreshing client and retrying once")
+                self._refresh_client()
+                self.client.indices.create(index=self.index, body=body)
+            else:
+                raise
+
 
     @staticmethod
     def _extract_review_id(ch: Dict[str, Any]) -> str:
@@ -338,6 +357,7 @@ class OpenSearchVectorStore(VectorStore):
             return
         body = {"query": {"term": {"document_id": document_id}}}
         self.client.delete_by_query(index=self.index, body=body, refresh=True, conflicts="proceed")
+
 
 
 
