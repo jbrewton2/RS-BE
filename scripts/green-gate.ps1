@@ -153,11 +153,6 @@ if (-not (Test-Path $deployScript)) { throw "Missing deploy script: $deployScrip
 
 & $deployScript -ImageTag $tag
 
-$deployScript = ".\scripts\deploy-css-mock.ps1"
-if (-not (Test-Path $deployScript)) { throw "Deploy script not found: $deployScript" }
-$valuesPath = ".\deploy\helm\values-css-mock.yaml"
-if (-not (Test-Path $valuesPath)) { throw "Expected helm values file missing: $valuesPath" }
-try { & $deployScript -ImageTag $tag } finally { git restore $valuesPath | Out-Null }
 
 Write-Header "GREEN GATE: Enforce single-image pods"
 
@@ -186,19 +181,6 @@ if ($bad.Count -gt 0) {
 Write-Host "OK: single-image pods and image tags verified." -ForegroundColor Green
 
 kubectl -n $Namespace rollout status "deploy/$Deployment"
-$jsonpathPods = '{range .items[*]}{.metadata.name}{"|"}{.spec.containers[0].image}{"\n"}{end}'
-$podMap = kubectl -n $Namespace get pods -l $PodSelector -o jsonpath=$jsonpathPods
-$podMapLines = ($podMap -split "`n" | Where-Object { $_.Trim().Length -gt 0 })
-$bad = @()
-foreach ($line in $podMapLines) { if ($line -notmatch [regex]::Escape(":$tag")) { $bad += $line } }
-if ($bad.Count -gt 0) {
-  foreach ($b in $bad) {
-    $name = ($b -split "\|")[0].Trim()
-    try { kubectl -n $Namespace delete pod $name | Out-Null } catch {}
-  }
-  kubectl -n $Namespace rollout status "deploy/$Deployment"
-}
-
 Write-Header "GREEN GATE: Pipeline validation (PDF/extract/ingest/retrieval)"
 
 # Ensure token is available (prefer param, fallback to env var)
