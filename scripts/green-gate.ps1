@@ -138,6 +138,21 @@ if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
 }
 
 Write-Header "GREEN GATE: Helm deploy to css-mock"
+
+# (Option B) Delegate deployment to scripts\deploy-css-mock.ps1 (single source of truth for deploy)
+Write-Host "Delegating deploy to deploy-css-mock.ps1..." -ForegroundColor Cyan
+
+if ([string]::IsNullOrWhiteSpace($ImageTagOverride)) { $tag = "aws-$sha7" } else { $tag = $ImageTagOverride.Trim() }
+Write-Host "Using ImageTag: $tag" -ForegroundColor Cyan
+
+$env:AWS_PROFILE = $AwsProfile
+$env:AWS_REGION  = $AwsRegion
+
+$deployScript = Join-Path $RepoPath "scripts\deploy-css-mock.ps1"
+if (-not (Test-Path $deployScript)) { throw "Missing deploy script: $deployScript" }
+
+& $deployScript -ImageTag $tag
+
 $deployScript = ".\scripts\deploy-css-mock.ps1"
 if (-not (Test-Path $deployScript)) { throw "Deploy script not found: $deployScript" }
 $valuesPath = ".\deploy\helm\values-css-mock.yaml"
@@ -145,6 +160,31 @@ if (-not (Test-Path $valuesPath)) { throw "Expected helm values file missing: $v
 try { & $deployScript -ImageTag $tag } finally { git restore $valuesPath | Out-Null }
 
 Write-Header "GREEN GATE: Enforce single-image pods"
+
+# V2 single-image enforcement (no kubectl jsonpath; hard fail on mismatch)
+kubectl -n $Namespace rollout status "deploy/$Deployment" --timeout=180s | Out-Null
+$podsJson = kubectl -n $Namespace get pods -l $PodSelector -o json | ConvertFrom-Json
+if (-not $podsJson.items -or $podsJson.items.Count -lt 1) { throw "No pods found for selector: $PodSelector" }
+
+$bad = @()
+foreach ($p in $podsJson.items) {
+  $containers = @($p.spec.containers)
+  if ($containers.Count -ne 1) {
+    $bad += "Pod=$($p.metadata.name) containers=$($containers.Count)"
+    continue
+  }
+  $img0 = $containers[0].image
+  if ($img0 -notlike "*:$tag") {
+    $bad += "Pod=$($p.metadata.name) image=$img0 expectedTag=$tag"
+  }
+}
+
+if ($bad.Count -gt 0) {
+  $bad | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+  throw "Single-image / expected-image enforcement failed."
+}
+Write-Host "OK: single-image pods and image tags verified." -ForegroundColor Green
+
 kubectl -n $Namespace rollout status "deploy/$Deployment"
 $jsonpathPods = '{range .items[*]}{.metadata.name}{"|"}{.spec.containers[0].image}{"\n"}{end}'
 $podMap = kubectl -n $Namespace get pods -l $PodSelector -o jsonpath=$jsonpathPods
@@ -157,6 +197,61 @@ if ($bad.Count -gt 0) {
     try { kubectl -n $Namespace delete pod $name | Out-Null } catch {}
   }
   kubectl -n $Namespace rollout status "deploy/$Deployment"
+}
+
+Write-Header "GREEN GATE: Pipeline validation (PDF/extract/ingest/retrieval)"
+
+# Ensure token is available (prefer param, fallback to env var)
+if ([string]::IsNullOrWhiteSpace($Token)) { $Token = [Environment]::GetEnvironmentVariable($TokenEnvVar) }
+$hdr = @{}
+if (-not [string]::IsNullOrWhiteSpace($Token)) { $hdr["Authorization"] = "Bearer $Token" }
+
+function Invoke-Analyze([bool]$force) {
+  $body = @{
+    review_id       = $ReviewId
+    mode            = "review_summary"
+    analysis_intent = $AnalysisIntent
+    context_profile = $ContextProfile
+    top_k           = $TopK
+    force_reingest  = $force
+    debug           = $true
+  } | ConvertTo-Json -Depth 10
+
+  Invoke-RestMethod -Method POST -Uri "$BaseUrl/api/rag/analyze" -Headers $hdr -ContentType "application/json" -Body $body
+}
+
+$r = Invoke-Analyze $ForceReingest.IsPresent
+$warn = @()
+if ($r.stats -and $r.stats.warnings) { $warn = @($r.stats.warnings) }
+if ($warn -contains "ingest_failed") { throw "RAG ingest_failed detected." }
+
+$retrCounts = 0
+$evidenceItems = 0
+try { $retrCounts = [int]$r.stats.retrieved_counts_total } catch {}
+try { $evidenceItems = [int]$r.stats.totalEvidenceItems } catch {}
+
+Write-Host "retrieved_counts_total=$retrCounts" -ForegroundColor Cyan
+Write-Host "totalEvidenceItems=$evidenceItems (min required=$MinEvidenceItems)" -ForegroundColor Cyan
+
+if ($retrCounts -eq 0) {
+  Write-Host "retrieval==0 -> retry with force_reingest=true" -ForegroundColor Yellow
+  $r2 = Invoke-Analyze $true
+  $warn2 = @()
+  if ($r2.stats -and $r2.stats.warnings) { $warn2 = @($r2.stats.warnings) }
+  if ($warn2 -contains "ingest_failed") { throw "RAG ingest_failed on retry." }
+
+  $retrCounts2 = 0
+  $evidenceItems2 = 0
+  try { $retrCounts2 = [int]$r2.stats.retrieved_counts_total } catch {}
+  try { $evidenceItems2 = [int]$r2.stats.totalEvidenceItems } catch {}
+
+  Write-Host "retry retrieved_counts_total=$retrCounts2" -ForegroundColor Cyan
+  Write-Host "retry totalEvidenceItems=$evidenceItems2" -ForegroundColor Cyan
+
+  if ($retrCounts2 -eq 0) { throw "Retrieval still zero after force reingest." }
+  if ($evidenceItems2 -lt $MinEvidenceItems) { throw "Evidence items below threshold after retry." }
+} else {
+  if ($evidenceItems -lt $MinEvidenceItems) { throw "Evidence items below threshold." }
 }
 
 Write-Header "GREEN GATE: Live /api/rag/analyze validation"
