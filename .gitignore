@@ -118,3 +118,7 @@ _scratch/
 
 
 deploy/helm/.rendered/
+
+# green-gate artifacts
+artifacts/
+
