@@ -525,6 +525,8 @@ async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseMo
         except Exception:
             pass
 
+        # Ensure pages is always defined for PDF responses (avoid NameError)
+        pages = pages if "pages" in locals() else ([text] if text else [])
         return ExtractResponseModel(
             text=text,
             type="pdf",
@@ -722,6 +724,7 @@ async def root():
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
 
 
 
