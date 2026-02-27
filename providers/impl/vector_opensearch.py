@@ -15,6 +15,20 @@ from providers.vectorstore import VectorStore
 logger = logging.getLogger(__name__)
 
 
+def _is_opensearch_expired_token_error(e: Exception) -> bool:
+    """
+    Detect auth-expired / SigV4 failures that require client refresh.
+    We match by message because opensearch-py may wrap errors differently.
+    """
+    msg = (str(e) or "").lower()
+    if "security token included in the request is expired" in msg:
+        return True
+    if "authorizationexception" in msg and "403" in msg:
+        return True
+    if "the security token included in the request is expired" in msg:
+        return True
+    return False
+
 def _env(name: str, default: str = "") -> str:
     return (os.environ.get(name) or default).strip()
 
@@ -67,13 +81,23 @@ class OpenSearchVectorStore(VectorStore):
         self.endpoint = _env("OPENSEARCH_ENDPOINT")
         self.index = "css_doc_chunks_1024"
         self.dim = _env_int("OPENSEARCH_VECTOR_DIM", 1024)
-
-        region = _env("AWS_REGION") or _env("AWS_DEFAULT_REGION")
-        if not region:
+        self.region = _env("AWS_REGION") or _env("AWS_DEFAULT_REGION")
+        if not self.region:
             raise RuntimeError("AWS_REGION/AWS_DEFAULT_REGION is missing for OpenSearch SigV4")
 
-        # IRSA creds should be discoverable via boto3 default chain
-        sess = boto3.Session(region_name=region)
+        self.host = _parse_host(self.endpoint)
+
+        # Build client from fresh creds (IRSA) â€“ can be refreshed on auth expiry
+        self.client = self._build_client()
+
+        self._ensure_index()
+
+    def _build_client(self) -> OpenSearch:
+        """
+        Create a SigV4-signed OpenSearch client using *fresh* boto3 credentials.
+        This is critical for long-lived pods where IRSA session tokens rotate.
+        """
+        sess = boto3.Session(region_name=self.region)
         creds = sess.get_credentials()
         if creds is None:
             raise RuntimeError("Failed to obtain AWS credentials for SigV4 (IRSA)")
@@ -82,15 +106,13 @@ class OpenSearchVectorStore(VectorStore):
         awsauth = AWS4Auth(
             frozen.access_key,
             frozen.secret_key,
-            region,
+            self.region,
             "es",
             session_token=frozen.token,
         )
 
-        host = _parse_host(self.endpoint)
-
-        self.client = OpenSearch(
-            hosts=[{"host": host, "port": 443}],
+        return OpenSearch(
+            hosts=[{"host": self.host, "port": 443}],
             http_auth=awsauth,
             use_ssl=True,
             verify_certs=True,
@@ -100,10 +122,11 @@ class OpenSearchVectorStore(VectorStore):
             retry_on_timeout=True,
         )
 
-        self._ensure_index()
-
+    def _refresh_client(self) -> None:
+        # Rebuild client from fresh creds (used on auth expiry)
+        self.client = self._build_client()
     def _ensure_index(self) -> None:
-        # Index creation is safe/idempotent
+# Index creation is safe/idempotent
         if self.client.indices.exists(index=self.index):
             return
 
@@ -204,7 +227,15 @@ class OpenSearchVectorStore(VectorStore):
             pass
 
         # Perform bulk write
-        bulk(self.client, actions, refresh=True)
+        try:
+            bulk(self.client, actions, refresh=True)
+        except Exception as e:
+            if _is_opensearch_expired_token_error(e):
+                logger.warning("[OpenSearch] auth expired during bulk; refreshing client and retrying once")
+                self._refresh_client()
+                bulk(self.client, actions, refresh=True)
+            else:
+                raise
 
     def query(
         self,
@@ -263,7 +294,15 @@ class OpenSearchVectorStore(VectorStore):
         }
 
         try:
-            resp = self.client.search(index=self.index, body=body)
+            try:
+                resp = self.client.search(index=self.index, body=body)
+            except Exception as e:
+                if _is_opensearch_expired_token_error(e):
+                    logger.warning("[OpenSearch] auth expired during search; refreshing client and retrying once")
+                    self._refresh_client()
+                    resp = self.client.search(index=self.index, body=body)
+                else:
+                    raise
         except Exception as exc:
             # Do not silently return 0; this is a critical signal.
             logger.exception("[OpenSearch] search failed index=%s filters=%s", self.index, term_filters)
@@ -299,3 +338,9 @@ class OpenSearchVectorStore(VectorStore):
             return
         body = {"query": {"term": {"document_id": document_id}}}
         self.client.delete_by_query(index=self.index, body=body, refresh=True, conflicts="proceed")
+
+
+
+
+
+
