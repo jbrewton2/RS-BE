@@ -1,4 +1,4 @@
-# scripts/green-gate.ps1
+﻿# scripts/green-gate.ps1
 # Green Gate (PS5.1-safe, parser-safe):
 #  - Truth Gate (compile/tests/guards)
 #  - Build+push ECR image from HEAD (or validate ImageTagOverride exists)
@@ -8,7 +8,7 @@
 
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory=$true)][string]$RepoPath,
+  [string]$RepoPath,
   [Parameter(Mandatory=$true)][string]$AwsProfile,
   [Parameter(Mandatory=$true)][string]$AwsRegion,
   [Parameter(Mandatory=$true)][string]$EcrRepo,
@@ -35,7 +35,9 @@ param(
 )
 
 $ErrorActionPreference="Stop"
-
+if ([string]::IsNullOrWhiteSpace($RepoPath)) {
+  $RepoPath = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+}
 function Assert-Command([string]$Name) {
   $cmd = Get-Command $Name -ErrorAction SilentlyContinue
   if (-not $cmd) { throw "Required command not found on PATH: $Name" }
