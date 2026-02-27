@@ -90,6 +90,63 @@ def analyze(req: RagAnalyzeRequest, request: Request, providers=Depends(provider
             debug=req.debug,
         )
 
+
+        # Auto-heal: if retrieval returns ZERO evidence but docs exist, reingest once and retry
+        try:
+            _tmp = result
+            if not isinstance(_tmp, dict):
+                try:
+                    _tmp = _tmp.model_dump()
+                except Exception:
+                    _tmp = dict(_tmp)
+            rt0 = int((_tmp.get("stats") or {}).get("retrieved_total") or 0)
+        except Exception:
+            rt0 = 0
+
+        if (not req.force_reingest) and rt0 == 0:
+            has_docs = True
+            try:
+                rev0 = providers.reviews.get_review_by_id(str(req.review_id))
+                docs0 = getattr(rev0, "docs", None) or (rev0.get("docs") if isinstance(rev0, dict) else None) or []
+                has_docs = (len(list(docs0)) > 0)
+            except Exception:
+                has_docs = True
+
+            if has_docs:
+                logger.warning("[RAG] retrieved_total=0; auto reingest + retry")
+                result = rag_analyze_review(
+                    storage=providers.storage,
+                    vector=providers.vector,
+                    llm=providers.llm,
+                    review_id=req.review_id,
+                    token=token,
+                    mode=req.mode,
+                    analysis_intent=req.analysis_intent,
+                    heuristic_hits=req.heuristic_hits,
+                    context_profile=req.context_profile,
+                    top_k=req.top_k,
+                    force_reingest=True,
+                    debug=True,
+                )
+
+                # Stamp stats so clients can see the auto-heal happened
+                try:
+                    if not isinstance(result, dict):
+                        try:
+                            result = result.model_dump()
+                        except Exception:
+                            result = dict(result)
+                    stats = result.get("stats") or {}
+                    if not isinstance(stats, dict):
+                        try:
+                            stats = stats.model_dump()
+                        except Exception:
+                            stats = dict(stats)
+                    stats["auto_reingest_used"] = True
+                    result["stats"] = stats
+                except Exception:
+                    pass
+
         if result is None:
             logger.error(
                 "rag_analyze_review returned None (review_id=%s mode=%s intent=%s profile=%s top_k=%s reingest=%s)",
