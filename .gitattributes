@@ -1,11 +1,25 @@
-﻿# Normalize text files to LF in repo (Windows working copies may still be CRLF depending on tools)
-* text=auto eol=lf
+﻿# Normalize text
+* text=auto
 
-# PowerShell scripts: keep as text, normalize to LF in repo
-*.ps1 text eol=lf
-*.psm1 text eol=lf
-*.psd1 text eol=lf
+# Python + YAML etc: LF
+*.py     text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.txt    text eol=lf
+*.sh     text eol=lf
 
-# YAML
-*.yml text eol=lf
-*.yaml text eol=lf
+# PowerShell: CRLF (dev ergonomics on Windows)
+*.ps1    text eol=crlf
+*.psm1   text eol=crlf
+
+# Binaries
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.pdf    binary
+*.zip    binary
+*.exe    binary
+*.dll    binary
