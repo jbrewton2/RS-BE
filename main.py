@@ -510,8 +510,7 @@ async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseMo
             raise HTTPException(status_code=500, detail=f"Failed to store PDF: {exc}")
 
         pdf_url = f"/files/{pdf_key}"
-        text = _extract_text_from_pdf_stream(BytesIO(contents))
-
+        text, pages = _extract_text_from_pdf_stream(BytesIO(contents))
         # Always write extract artifacts for RAG
         try:
             await _write_extract_artifacts(
@@ -526,7 +525,6 @@ async def _extract_impl(request: Request, file: UploadFile) -> ExtractResponseMo
             pass
 
         # Ensure pages is always defined for PDF responses (avoid NameError)
-        pages = pages if "pages" in locals() else ([text] if text else [])
         return ExtractResponseModel(
             text=text,
             type="pdf",
@@ -604,8 +602,7 @@ async def api_extract_by_key(req: ExtractByKeyRequest, request: Request):
     doc_id = review_id
     pdf_url = f"/files/{pdf_key}"
 
-    text = _extract_text_from_pdf_stream(BytesIO(pdf_bytes))
-
+    text, pages = _extract_text_from_pdf_stream(BytesIO(pdf_bytes))
     try:
         extract_text_key, extract_text_sha, extract_json_key, extract_json_sha = await _write_extract_artifacts(
             storage=storage,
@@ -630,8 +627,6 @@ async def api_extract_by_key(req: ExtractByKeyRequest, request: Request):
         extract_json_key=extract_json_key,
         extract_json_sha256=extract_json_sha,
     )
-
-    pages = [text] if text else []
     return ExtractResponseModel(text=text, type="pdf", pdf_url=pdf_url, pages=pages, doc_id=doc_id, filename=None)
 
 
@@ -724,6 +719,8 @@ async def root():
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+
 
 
 
