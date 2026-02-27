@@ -43,6 +43,30 @@ function Assert-Command([string]$Name) {
   if (-not $cmd) { throw "Required command not found on PATH: $Name" }
 }
 
+
+function Resolve-Token([string]$TokenValue, [string]$EnvVarName) {
+  if ([string]::IsNullOrWhiteSpace($TokenValue)) {
+    $TokenValue = [Environment]::GetEnvironmentVariable($EnvVarName)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($TokenValue)) {
+    $TokenValue = ($TokenValue -replace '\s+','')
+  }
+  return $TokenValue
+}
+
+function Get-AuthHeader([string]$TokenValue, [string]$EnvVarName, [switch]$AllowEmpty) {
+  $t = Resolve-Token $TokenValue $EnvVarName
+  if (-not $AllowEmpty -and [string]::IsNullOrWhiteSpace($t)) {
+    throw "Missing bearer token. Pass -Token or set env:$EnvVarName."
+  }
+  if (-not $AllowEmpty -and $t -notmatch '^eyJ') {
+    throw "Bearer token does not look like a JWT (expected to start with eyJ). Pass -Token or set env:$EnvVarName."
+  }
+  $hdr = @{}
+  if (-not [string]::IsNullOrWhiteSpace($t)) { $hdr["Authorization"] = "Bearer $t" }
+  return $hdr
+}
+
 function Write-Header([string]$Msg) {
   $bar = ("=" * 88)
   Write-Host ""
@@ -84,9 +108,6 @@ if (-not (Test-Path $RepoPath)) { throw "RepoPath not found: $RepoPath" }
 if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = Join-Path $RepoPath "artifacts\green-gate" }
 Ensure-Dir $OutDir
 
-if ([string]::IsNullOrWhiteSpace($Token)) { $Token = [Environment]::GetEnvironmentVariable($TokenEnvVar) }
-if (-not [string]::IsNullOrWhiteSpace($Token)) { $Token = ($Token -replace '\s+','') }
-if ([string]::IsNullOrWhiteSpace($Token)) { if (-not $LocalOnly) { throw "Missing bearer token for pipeline validation. Set -Token or env:$TokenEnvVar." } }
 if (-not $LocalOnly -and [string]::IsNullOrWhiteSpace($Token)) { throw "Token required. Pass -Token or set env:$TokenEnvVar." }
 
 Write-Header "GREEN GATE: Repo sanity"
@@ -197,11 +218,9 @@ if ($LocalOnly) { Write-Host "LocalOnly set -> skipping pipeline validation" -Fo
 Write-Header "GREEN GATE: Pipeline validation (PDF/extract/ingest/retrieval)"
 
 # Ensure token is available (prefer param, fallback to env var)
-if ([string]::IsNullOrWhiteSpace($Token)) { $Token = [Environment]::GetEnvironmentVariable($TokenEnvVar) }
 if (-not [string]::IsNullOrWhiteSpace($Token)) { $Token = ($Token -replace '\s+','') }
-if ([string]::IsNullOrWhiteSpace($Token)) { if (-not $LocalOnly) { throw "Missing bearer token for pipeline validation. Set -Token or env:$TokenEnvVar." } }
-$hdr = @{}
-if (-not [string]::IsNullOrWhiteSpace($Token)) { $hdr["Authorization"] = "Bearer $Token" }
+$hdr = Get-AuthHeader $Token $TokenEnvVar -AllowEmpty:$LocalOnly
+
 
 function Invoke-Analyze([bool]$force) {
   $body = @{
