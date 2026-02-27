@@ -85,6 +85,8 @@ if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = Join-Path $RepoPath "arti
 Ensure-Dir $OutDir
 
 if ([string]::IsNullOrWhiteSpace($Token)) { $Token = [Environment]::GetEnvironmentVariable($TokenEnvVar) }
+if (-not [string]::IsNullOrWhiteSpace($Token)) { $Token = ($Token -replace '\s+','') }
+if ([string]::IsNullOrWhiteSpace($Token)) { throw "Missing bearer token for pipeline validation. Set -Token or env:$TokenEnvVar." }
 if (-not $LocalOnly -and [string]::IsNullOrWhiteSpace($Token)) { throw "Token required. Pass -Token or set env:$TokenEnvVar." }
 
 Write-Header "GREEN GATE: Repo sanity"
@@ -185,6 +187,8 @@ Write-Header "GREEN GATE: Pipeline validation (PDF/extract/ingest/retrieval)"
 
 # Ensure token is available (prefer param, fallback to env var)
 if ([string]::IsNullOrWhiteSpace($Token)) { $Token = [Environment]::GetEnvironmentVariable($TokenEnvVar) }
+if (-not [string]::IsNullOrWhiteSpace($Token)) { $Token = ($Token -replace '\s+','') }
+if ([string]::IsNullOrWhiteSpace($Token)) { throw "Missing bearer token for pipeline validation. Set -Token or env:$TokenEnvVar." }
 $hdr = @{}
 if (-not [string]::IsNullOrWhiteSpace($Token)) { $hdr["Authorization"] = "Bearer $Token" }
 
@@ -294,3 +298,4 @@ catch {
   Dump-K8sDiagnostics -Ns $Namespace -Dep $Deployment -Selector $PodSelector -OutDir $OutDir
   throw
 }
+
