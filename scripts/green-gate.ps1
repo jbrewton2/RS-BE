@@ -134,7 +134,6 @@ python -m pytest -q .\tests\test_rag_risk_materialization.py
 
 if ($LocalOnly) { Write-Host "LocalOnly set -> stopping"; exit 0 }
 
-Write-Header "GREEN GATE: Build + push image"
 $env:AWS_PROFILE = $AwsProfile
 $env:AWS_REGION  = $AwsRegion
 $acct = (aws sts get-caller-identity --query Account --output text).Trim()
@@ -237,12 +236,20 @@ if (-not $LocalOnly) {
   
   $r = Invoke-Analyze $ForceReingest.IsPresent
   
-  # Ingest stats
+# Ingest stats (print only when present)
+$hasIngest = $false
+try { if ($null -ne $r.stats.ingest) { $hasIngest = $true } } catch {}
+if ($hasIngest) {
   $ingDocs = 0; $ingChunks = 0; $skipped = 0
   try { $ingDocs = [int]$r.stats.ingest.ingested_docs } catch {}
   try { $ingChunks = [int]$r.stats.ingest.ingested_chunks } catch {}
   try { $skipped = [int]$r.stats.ingest.skipped_docs } catch {}
-  
+  Write-Host "ingested_docs=$ingDocs ingested_chunks=$ingChunks skipped_docs=$skipped" -ForegroundColor Cyan
+  if ($ingDocs -gt 0 -and $ingChunks -eq 0) { throw "Ingest produced 0 chunks (extract/chunk failure)." }
+} else {
+  Write-Host "ingest stats: not present (likely warm index / no ingest run)" -ForegroundColor DarkYellow
+}
+
   # Retrieval stats
   $retrTotal = 0; $topEff = 0
   try { $retrTotal = [int]$r.stats.retrieved_total } catch {}
