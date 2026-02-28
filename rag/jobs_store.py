@@ -51,30 +51,47 @@ class RagJobStore:
     def update(self, job_id: str, *, status: Optional[str] = None, progress_pct: Optional[int] = None,
                message: Optional[str] = None, error: Optional[str] = None) -> None:
         now = _utc_iso()
-        expr = ["updated_at = :u"]
+
+        expr_parts = ["#ua = :u"]
         vals: Dict[str, Any] = {":u": now}
+        names: Dict[str, str] = {"#ua": "updated_at"}
 
         if status is not None:
-            expr.append("status = :s"); vals[":s"] = status
+            expr_parts.append("#st = :s")
+            vals[":s"] = status
+            names["#st"] = "status"
         if progress_pct is not None:
-            expr.append("progress_pct = :p"); vals[":p"] = int(progress_pct)
+            expr_parts.append("#pp = :p")
+            vals[":p"] = int(progress_pct)
+            names["#pp"] = "progress_pct"
         if message is not None:
-            expr.append("message = :m"); vals[":m"] = message
+            expr_parts.append("#msg = :m")
+            vals[":m"] = message
+            names["#msg"] = "message"
         if error is not None:
-            expr.append("error = :e"); vals[":e"] = error
+            expr_parts.append("#err = :e")
+            vals[":e"] = error
+            names["#err"] = "error"
 
         self._table.update_item(
             Key={"job_id": job_id},
-            UpdateExpression="SET " + ", ".join(expr),
+            UpdateExpression="SET " + ", ".join(expr_parts),
             ExpressionAttributeValues=vals,
+            ExpressionAttributeNames=names,
         )
 
     def put_result(self, job_id: str, result_obj: Dict[str, Any]) -> None:
         now = _utc_iso()
         self._table.update_item(
             Key={"job_id": job_id},
-            UpdateExpression="SET #r = :r, status = :s, progress_pct = :p, message = :m, updated_at = :u",
-            ExpressionAttributeNames={"#r": "result"},
+            UpdateExpression="SET #res = :r, #st = :s, #pp = :p, #msg = :m, #ua = :u",
+            ExpressionAttributeNames={
+                "#res": "result",
+                "#st": "status",
+                "#pp": "progress_pct",
+                "#msg": "message",
+                "#ua": "updated_at",
+            },
             ExpressionAttributeValues={
                 ":r": json.dumps(result_obj),
                 ":s": "succeeded",
@@ -90,3 +107,4 @@ class RagJobStore:
         if not item:
             raise KeyError(job_id)
         return item
+
