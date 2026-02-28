@@ -217,63 +217,69 @@ if ($LocalOnly) { Write-Host "LocalOnly set -> skipping pipeline validation" -Fo
 
 Write-Header "GREEN GATE: Pipeline validation (PDF/extract/ingest/retrieval)"
 
-if ($LocalOnly) { Write-Host "LocalOnly set -> skipping pipeline validation" -ForegroundColor Yellow; goto AFTER_PIPELINE_VALIDATION }
-
-$hdr = Get-AuthHeader $Token $TokenEnvVar -AllowEmpty:$false
-
-function Invoke-Analyze([bool]$force) {
-  $body = @{
-    review_id       = $ReviewId
-    mode            = "review_summary"
-    analysis_intent = $AnalysisIntent
-    context_profile = $ContextProfile
-    top_k           = $TopK
-    force_reingest  = $force
-    debug           = $true
-  } | ConvertTo-Json -Depth 10
-
-  Invoke-RestMethod -Method POST -Uri "$BaseUrl/api/rag/analyze" -Headers $hdr -ContentType "application/json" -Body $body
+if (-not $LocalOnly) {
+  
+  if ($LocalOnly) { Write-Host "LocalOnly set -> skipping pipeline validation" -ForegroundColor Yellow; goto AFTER_PIPELINE_VALIDATION }
+  
+  $hdr = Get-AuthHeader $Token $TokenEnvVar -AllowEmpty:$false
+  
+  function Invoke-Analyze([bool]$force) {
+    $body = @{
+      review_id       = $ReviewId
+      mode            = "review_summary"
+      analysis_intent = $AnalysisIntent
+      context_profile = $ContextProfile
+      top_k           = $TopK
+      force_reingest  = $force
+      debug           = $true
+    } | ConvertTo-Json -Depth 10
+  
+    Invoke-RestMethod -Method POST -Uri "$BaseUrl/api/rag/analyze" -Headers $hdr -ContentType "application/json" -Body $body
+  }
+  
+  $r = Invoke-Analyze $ForceReingest.IsPresent
+  
+  # Ingest stats
+  $ingDocs = 0; $ingChunks = 0; $skipped = 0
+  try { $ingDocs = [int]$r.stats.ingest.ingested_docs } catch {}
+  try { $ingChunks = [int]$r.stats.ingest.ingested_chunks } catch {}
+  try { $skipped = [int]$r.stats.ingest.skipped_docs } catch {}
+  
+  # Retrieval stats
+  $retrTotal = 0; $topEff = 0
+  try { $retrTotal = [int]$r.stats.retrieved_total } catch {}
+  try { $topEff = [int]$r.stats.top_k_effective } catch {}
+  
+  Write-Host "ingested_docs=$ingDocs ingested_chunks=$ingChunks skipped_docs=$skipped" -ForegroundColor Cyan
+  Write-Host "retrieved_total=$retrTotal top_k_effective=$topEff" -ForegroundColor Cyan
+  
+  if ($ingDocs -gt 0 -and $ingChunks -eq 0) { throw "Ingest produced 0 chunks (extract/chunk failure)." }
+  
+  if ($retrTotal -eq 0) {
+    Write-Host "retrieved_total==0 -> retry with force_reingest=true" -ForegroundColor Yellow
+    $r2 = Invoke-Analyze $true
+  
+    $ingDocs2 = 0; $ingChunks2 = 0; $skipped2 = 0
+    try { $ingDocs2 = [int]$r2.stats.ingest.ingested_docs } catch {}
+    try { $ingChunks2 = [int]$r2.stats.ingest.ingested_chunks } catch {}
+    try { $skipped2 = [int]$r2.stats.ingest.skipped_docs } catch {}
+  
+    $retrTotal2 = 0; $topEff2 = 0
+    try { $retrTotal2 = [int]$r2.stats.retrieved_total } catch {}
+    try { $topEff2 = [int]$r2.stats.top_k_effective } catch {}
+  
+    Write-Host "retry ingested_docs=$ingDocs2 ingested_chunks=$ingChunks2 skipped_docs=$skipped2" -ForegroundColor Cyan
+    Write-Host "retry retrieved_total=$retrTotal2 top_k_effective=$topEff2" -ForegroundColor Cyan
+  
+    if ($ingDocs2 -gt 0 -and $ingChunks2 -eq 0) { throw "Retry ingest produced 0 chunks." }
+    if ($retrTotal2 -eq 0) { throw "Retrieval still zero after force reingest." }
+  }
+  
+  :AFTER_PIPELINE_VALIDATION
+  
+} else {
+  Write-Host "LocalOnly set -> skipping pipeline validation" -ForegroundColor Yellow
 }
-
-$r = Invoke-Analyze $ForceReingest.IsPresent
-
-# Ingest stats
-$ingDocs = 0; $ingChunks = 0; $skipped = 0
-try { $ingDocs = [int]$r.stats.ingest.ingested_docs } catch {}
-try { $ingChunks = [int]$r.stats.ingest.ingested_chunks } catch {}
-try { $skipped = [int]$r.stats.ingest.skipped_docs } catch {}
-
-# Retrieval stats
-$retrTotal = 0; $topEff = 0
-try { $retrTotal = [int]$r.stats.retrieved_total } catch {}
-try { $topEff = [int]$r.stats.top_k_effective } catch {}
-
-Write-Host "ingested_docs=$ingDocs ingested_chunks=$ingChunks skipped_docs=$skipped" -ForegroundColor Cyan
-Write-Host "retrieved_total=$retrTotal top_k_effective=$topEff" -ForegroundColor Cyan
-
-if ($ingDocs -gt 0 -and $ingChunks -eq 0) { throw "Ingest produced 0 chunks (extract/chunk failure)." }
-
-if ($retrTotal -eq 0) {
-  Write-Host "retrieved_total==0 -> retry with force_reingest=true" -ForegroundColor Yellow
-  $r2 = Invoke-Analyze $true
-
-  $ingDocs2 = 0; $ingChunks2 = 0; $skipped2 = 0
-  try { $ingDocs2 = [int]$r2.stats.ingest.ingested_docs } catch {}
-  try { $ingChunks2 = [int]$r2.stats.ingest.ingested_chunks } catch {}
-  try { $skipped2 = [int]$r2.stats.ingest.skipped_docs } catch {}
-
-  $retrTotal2 = 0; $topEff2 = 0
-  try { $retrTotal2 = [int]$r2.stats.retrieved_total } catch {}
-  try { $topEff2 = [int]$r2.stats.top_k_effective } catch {}
-
-  Write-Host "retry ingested_docs=$ingDocs2 ingested_chunks=$ingChunks2 skipped_docs=$skipped2" -ForegroundColor Cyan
-  Write-Host "retry retrieved_total=$retrTotal2 top_k_effective=$topEff2" -ForegroundColor Cyan
-
-  if ($ingDocs2 -gt 0 -and $ingChunks2 -eq 0) { throw "Retry ingest produced 0 chunks." }
-  if ($retrTotal2 -eq 0) { throw "Retrieval still zero after force reingest." }
-}
-
-:AFTER_PIPELINE_VALIDATION
 
 Write-Header "GREEN GATE: Live /api/rag/analyze validation"
 try {
