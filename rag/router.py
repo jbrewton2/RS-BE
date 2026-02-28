@@ -128,6 +128,7 @@ def analyze(req: RagAnalyzeRequest, request: Request, providers=Depends(provider
             force_reingest=req.force_reingest,
             debug=req.debug,
         )
+        _job_store().update(job_id, progress_pct=70, message="analysis complete")
 
 
         # Auto-heal: if retrieval returns ZERO evidence but docs exist, reingest once and retry
@@ -259,7 +260,7 @@ def analyze_async(req: RagAnalyzeRequest, request: Request, background: Backgrou
 
     def _run() -> None:
         try:
-            _job_store().update(job_id, status="running", progress_pct=1, message="running")
+            _job_store().update(job_id, status="running", progress_pct=5, message="running")
             result = rag_analyze_review(
                 storage=providers.storage,
                 vector=providers.vector,
@@ -296,6 +297,8 @@ def analyze_async(req: RagAnalyzeRequest, request: Request, background: Backgrou
             elif not isinstance(summary_val, str):
                 result["summary"] = str(summary_val)
 
+            _job_store().update(job_id, progress_pct=90, message="persisting result")
+            result = _strip_debug_fields(result)
             _job_store().put_result(job_id, result)
 
         except Exception as e:
