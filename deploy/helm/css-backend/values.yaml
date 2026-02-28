@@ -1,4 +1,4 @@
-replicaCount: 2
+﻿replicaCount: 2
 
 image:
   repository: 354962495083.dkr.ecr.us-gov-east-1.amazonaws.com/css/css-backend
@@ -23,6 +23,7 @@ configMap:
     BEDROCK_MODEL_ID: "meta.llama3-70b-instruct-v1:0"
     BEDROCK_REGION: "us-gov-west-1"
     DYNAMODB_TABLE: "css-mock-metadata"
+    RAG_JOBS_TABLE: "css-rag-jobs"
     LLM_PROVIDER: "bedrock"
     METADATA_STORE: "dynamodb"
     OIDC_AUDIENCE_ALLOWLIST: "nqbekjhbk3gugpsfuc1tfhihf"
