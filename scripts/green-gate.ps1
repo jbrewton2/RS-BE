@@ -159,7 +159,7 @@ if (-not [string]::IsNullOrWhiteSpace($ImageTagOverride)) {
   if ($LASTEXITCODE -ne 0) { throw "Docker push failed (exit=$LASTEXITCODE). See: $pushLog" }
 }
 
-Write-Header "GREEN GATE: Helm deploy to css-mock"
+Write-Header "GREEN GATE: Deploy (via deploy-css-mock.ps1)"
 
 # (Option B) Delegate deployment to scripts\deploy-css-mock.ps1 (single source of truth for deploy)
 Write-Host "Delegating deploy to deploy-css-mock.ps1..." -ForegroundColor Cyan
@@ -340,5 +340,6 @@ catch {
   Dump-K8sDiagnostics -Ns $Namespace -Dep $Deployment -Selector $PodSelector -OutDir $OutDir
   throw
 }
+
 
 
