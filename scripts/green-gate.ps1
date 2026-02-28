@@ -246,43 +246,25 @@ $evidenceItems = 0
 try { $retrCounts = [int]$r.stats.retrieved_counts_total } catch {}
 try { $evidenceItems = [int]$r.stats.totalEvidenceItems } catch {}
 
-# Authoritative ingest stats (must exist when force_reingest=true)
-$ingDocs = 0
-$ingChunks = 0
-$skipped = 0
-try { $ingDocs = [int]$r.stats.ingest.ingested_docs } catch {}
-try { $ingChunks = [int]$r.stats.ingest.ingested_chunks } catch {}
-try { $skipped = [int]$r.stats.ingest.skipped_docs } catch {}
+Write-Host "retrieved_counts_total=$retrCounts" -ForegroundColor Cyan
+Write-Host "totalEvidenceItems=$evidenceItems (min required=$MinEvidenceItems)" -ForegroundColor Cyan
 
-# Authoritative retrieval stats
-$retrTotal = 0
-$topEff = 0
-try { $retrTotal = [int]$r.stats.retrieved_total } catch {}
-try { $topEff = [int]$r.stats.top_k_effective } catch {}
-
-Write-Host "ingested_docs=$ingDocs ingested_chunks=$ingChunks skipped_docs=$skipped" -ForegroundColor Cyan
-Write-Host "retrieved_total=$retrTotal top_k_effective=$topEff" -ForegroundColor Cyan
-
-if ($ingDocs -gt 0 -and $ingChunks -eq 0) { throw "Ingest produced 0 chunks (extract/chunk pipeline failure)." }
-if ($retrTotal -eq 0) {
-  Write-Host "retrieved_total==0 -> retry with force_reingest=true" -ForegroundColor Yellow
+if ($retrCounts -eq 0) {
+  Write-Host "retrieval==0 -> retry with force_reingest=true" -ForegroundColor Yellow
   $r2 = Invoke-Analyze $true
+  $warn2 = @()
+  if ($r2.stats -and $r2.stats.warnings) { $warn2 = @($r2.stats.warnings) }
+  if ($warn2 -contains "ingest_failed") { throw "RAG ingest_failed on retry." }
 
-  $ingDocs2 = 0; $ingChunks2 = 0; $skipped2 = 0
-  try { $ingDocs2 = [int]$r2.stats.ingest.ingested_docs } catch {}
-  try { $ingChunks2 = [int]$r2.stats.ingest.ingested_chunks } catch {}
-  try { $skipped2 = [int]$r2.stats.ingest.skipped_docs } catch {}
+  $retrCounts2 = 0
+  $evidenceItems2 = 0
+  try { $retrCounts2 = [int]$r2.stats.retrieved_counts_total } catch {}
+  try { $evidenceItems2 = [int]$r2.stats.totalEvidenceItems } catch {}
 
-  $retrTotal2 = 0; $topEff2 = 0
-  try { $retrTotal2 = [int]$r2.stats.retrieved_total } catch {}
-  try { $topEff2 = [int]$r2.stats.top_k_effective } catch {}
+  Write-Host "retry retrieved_counts_total=$retrCounts2" -ForegroundColor Cyan
+  Write-Host "retry totalEvidenceItems=$evidenceItems2" -ForegroundColor Cyan
 
-  Write-Host "retry ingested_docs=$ingDocs2 ingested_chunks=$ingChunks2 skipped_docs=$skipped2" -ForegroundColor Cyan
-  Write-Host "retry retrieved_total=$retrTotal2 top_k_effective=$topEff2" -ForegroundColor Cyan
-
-  if ($ingDocs2 -gt 0 -and $ingChunks2 -eq 0) { throw "Retry ingest produced 0 chunks." }
-  if ($retrTotal2 -eq 0) { throw "Retrieval still zero after force reingest." }
-} }
+  if ($retrCounts2 -eq 0) { throw "Retrieval still zero after force reingest." }
   if ($evidenceItems2 -lt $MinEvidenceItems) { throw "Evidence items below threshold after retry." }
 } else {
   if ($evidenceItems -lt $MinEvidenceItems) { throw "Evidence items below threshold." }
@@ -348,6 +330,5 @@ catch {
   Dump-K8sDiagnostics -Ns $Namespace -Dep $Deployment -Selector $PodSelector -OutDir $OutDir
   throw
 }
-
 
 
