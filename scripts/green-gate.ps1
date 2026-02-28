@@ -165,7 +165,6 @@ Write-Header "GREEN GATE: Helm deploy to css-mock"
 Write-Host "Delegating deploy to deploy-css-mock.ps1..." -ForegroundColor Cyan
 
 if ([string]::IsNullOrWhiteSpace($ImageTagOverride)) { $tag = "aws-$sha7" } else { $tag = $ImageTagOverride.Trim() }
-Write-Host "Using ImageTag: $tag" -ForegroundColor Cyan
 
 $env:AWS_PROFILE = $AwsProfile
 $env:AWS_REGION  = $AwsRegion
@@ -244,7 +243,6 @@ if ($hasIngest) {
   try { $ingDocs = [int]$r.stats.ingest.ingested_docs } catch {}
   try { $ingChunks = [int]$r.stats.ingest.ingested_chunks } catch {}
   try { $skipped = [int]$r.stats.ingest.skipped_docs } catch {}
-  Write-Host "ingested_docs=$ingDocs ingested_chunks=$ingChunks skipped_docs=$skipped" -ForegroundColor Cyan
   if ($ingDocs -gt 0 -and $ingChunks -eq 0) { throw "Ingest produced 0 chunks (extract/chunk failure)." }
 } else {
   Write-Host "ingest stats: not present (likely warm index / no ingest run)" -ForegroundColor DarkYellow
@@ -255,7 +253,6 @@ if ($hasIngest) {
   try { $retrTotal = [int]$r.stats.retrieved_total } catch {}
   try { $topEff = [int]$r.stats.top_k_effective } catch {}
   
-  Write-Host "ingested_docs=$ingDocs ingested_chunks=$ingChunks skipped_docs=$skipped" -ForegroundColor Cyan
   Write-Host "retrieved_total=$retrTotal top_k_effective=$topEff" -ForegroundColor Cyan
   
   if ($ingDocs -gt 0 -and $ingChunks -eq 0) { throw "Ingest produced 0 chunks (extract/chunk failure)." }
