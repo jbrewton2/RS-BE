@@ -213,13 +213,11 @@ Write-Host "OK: single-image pods and image tags verified." -ForegroundColor Gre
 
 
 kubectl -n $Namespace rollout status "deploy/$Deployment"
-if ($LocalOnly) { Write-Host "LocalOnly set -> skipping pipeline validation" -ForegroundColor Yellow; goto AFTER_PIPELINE_VALIDATION }
 
 Write-Header "GREEN GATE: Pipeline validation (PDF/extract/ingest/retrieval)"
 
 if (-not $LocalOnly) {
   
-  if ($LocalOnly) { Write-Host "LocalOnly set -> skipping pipeline validation" -ForegroundColor Yellow; goto AFTER_PIPELINE_VALIDATION }
   
   $hdr = Get-AuthHeader $Token $TokenEnvVar -AllowEmpty:$false
   
@@ -275,7 +273,6 @@ if (-not $LocalOnly) {
     if ($retrTotal2 -eq 0) { throw "Retrieval still zero after force reingest." }
   }
   
-  :AFTER_PIPELINE_VALIDATION
   
 } else {
   Write-Host "LocalOnly set -> skipping pipeline validation" -ForegroundColor Yellow
