@@ -76,6 +76,32 @@ def _ensure_section_owners(payload: Any) -> Any:
         return payload
 
 
+def _strip_debug_fields(d: dict) -> dict:
+    """
+    DynamoDB item max is 400KB. Strip large debug fields before persisting results.
+    Always remove debug_context, retrieval_debug and any debug_* keys.
+    """
+    try:
+        if not isinstance(d, dict):
+            return d
+        # explicit known-large keys
+        for k in [
+            "debug_context",
+            "retrieval_debug",
+            "debug_prompt_prefix",
+            "debug_llm_raw_prefix",
+            "debug_llm_text_preview",
+            "debug_llm_smoke_prompt_2000_preview",
+            "debug_llm_smoke_prompt_6000_preview",
+        ]:
+            d.pop(k, None)
+        # remove any debug_* keys
+        for k in list(d.keys()):
+            if isinstance(k, str) and k.startswith("debug_"):
+                d.pop(k, None)
+        return d
+    except Exception:
+        return d
 @router.post(
     "/analyze",
     response_model=RagAnalyzeResponse,
@@ -325,3 +351,4 @@ def analyze_result(job_id: str):
         return RagAnalyzeResponse.model_validate(raw_obj)
     except KeyError:
         raise HTTPException(status_code=404, detail="job_id not found")
+
