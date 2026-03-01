@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 
 from auth.jwt import get_current_user
 from core.providers import providers_from_request
-from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse, RagAnalyzeJobResponse, RagAnalyzeJobStatusResponse
+from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse
 from rag.service import rag_analyze_review, _owner_for_section  # noqa: F401
 from rag.jobs_store import RagJobStore
 
@@ -143,7 +143,7 @@ def analyze(req: RagAnalyzeRequest, request: Request, providers=Depends(provider
         except Exception:
             rt0 = 0
 
-        if (not req.force_reingest) and rt0 == 0:
+        if (not req.force_reingest) and (rt0 == 0 or int(((_tmp.get("stats") or {}).get("context_used_chars") or 0)) == 0):
             has_docs = True
             try:
                 rev0 = providers.reviews.get_review_by_id(str(req.review_id))
@@ -201,7 +201,6 @@ def analyze(req: RagAnalyzeRequest, request: Request, providers=Depends(provider
 
         result = _ensure_section_owners(result)
 
-        _job_store().update(job_id, progress_pct=70, message="shaping response")
         # Normalize to dict for response model validation
         if not isinstance(result, dict):
             try:
@@ -238,7 +237,7 @@ def analyze(req: RagAnalyzeRequest, request: Request, providers=Depends(provider
 
 
 
-@router.post("/analyze_async", response_model=RagAnalyzeJobResponse)
+@router.post("/analyze_async")
 def analyze_async(req: RagAnalyzeRequest, request: Request, background: BackgroundTasks, providers=Depends(providers_from_request)):
     """
     Async wrapper for /analyze to avoid ALB ~60s timeouts.
@@ -262,7 +261,6 @@ def analyze_async(req: RagAnalyzeRequest, request: Request, background: Backgrou
     def _run() -> None:
         try:
             _job_store().update(job_id, status="running", progress_pct=5, message="running")
-            _job_store().update(job_id, progress_pct=15, message="starting analysis")
             result = rag_analyze_review(
                 storage=providers.storage,
                 vector=providers.vector,
@@ -278,9 +276,11 @@ def analyze_async(req: RagAnalyzeRequest, request: Request, background: Backgrou
                 debug=req.debug,
             )
 
+            _job_store().update(job_id, progress_pct=40, message="analysis complete")
+
             # keep same boundary behavior as /analyze
             result = _ensure_section_owners(result)
-            _job_store().update(job_id, progress_pct=70, message="shaping response")
+
             if not isinstance(result, dict):
                 try:
                     result = result.model_dump()
@@ -311,7 +311,7 @@ def analyze_async(req: RagAnalyzeRequest, request: Request, background: Backgrou
     return {"job_id": job_id, "status": "queued"}
 
 
-@router.get("/analyze_status", response_model=RagAnalyzeJobStatusResponse)
+@router.get("/analyze_status")
 def analyze_status(job_id: str):
     """
     Returns job status and progress for async analyze jobs.
