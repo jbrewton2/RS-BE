@@ -150,6 +150,19 @@ class RagAnalyzeStats(BaseModel):
 # =============================================================================
 # Response
 # =============================================================================
+class RagAnalyzeJobResponse(BaseModel):
+    job_id: str = Field(..., description="Async job id for /api/rag/analyze_async.")
+    status: str = Field(..., description="Initial job status (usually queued).")
+
+
+class RagAnalyzeJobStatusResponse(BaseModel):
+    job_id: str = Field(..., description="Async job id.")
+    status: str = Field(..., description="queued|running|succeeded|failed")
+    progress_pct: int = Field(0, ge=0, le=100, description="Progress percent (0-100).")
+    message: str = Field("", description="Human readable status message.")
+    error: Optional[str] = Field(None, description="Error message when status=failed.")
+    review_id: Optional[str] = Field(None, description="Review id associated with the job (if known).")
+
 class RagAnalyzeResponse(BaseModel):
     """
     Response for POST /api/rag/analyze

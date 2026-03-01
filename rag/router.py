@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 
 from auth.jwt import get_current_user
 from core.providers import providers_from_request
-from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse
+from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse, RagAnalyzeJobResponse, RagAnalyzeJobStatusResponse
 from rag.service import rag_analyze_review, _owner_for_section  # noqa: F401
 from rag.jobs_store import RagJobStore
 
@@ -237,7 +237,7 @@ def analyze(req: RagAnalyzeRequest, request: Request, providers=Depends(provider
 
 
 
-@router.post("/analyze_async")
+@router.post("/analyze_async", response_model=RagAnalyzeJobResponse)
 def analyze_async(req: RagAnalyzeRequest, request: Request, background: BackgroundTasks, providers=Depends(providers_from_request)):
     """
     Async wrapper for /analyze to avoid ALB ~60s timeouts.
@@ -309,7 +309,7 @@ def analyze_async(req: RagAnalyzeRequest, request: Request, background: Backgrou
     return {"job_id": job_id, "status": "queued"}
 
 
-@router.get("/analyze_status")
+@router.get("/analyze_status", response_model=RagAnalyzeJobStatusResponse)
 def analyze_status(job_id: str):
     """
     Returns job status and progress for async analyze jobs.
