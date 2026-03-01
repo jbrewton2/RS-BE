@@ -156,7 +156,7 @@ class RagAnalyzeResponse(BaseModel):
 
     IMPORTANT:
     - model_config.extra="allow" so adding new keys in backend won't break response validation.
-    - Many fields are Optional to prevent â€œfield missing -> validation failure -> dropped payloadâ€.
+    - Many fields are Optional to prevent field missing -> validation failure -> dropped payloadâ€.
     """
 
     model_config = ConfigDict(extra="allow")
