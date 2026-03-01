@@ -201,6 +201,7 @@ def analyze(req: RagAnalyzeRequest, request: Request, providers=Depends(provider
 
         result = _ensure_section_owners(result)
 
+        _job_store().update(job_id, progress_pct=70, message="shaping response")
         # Normalize to dict for response model validation
         if not isinstance(result, dict):
             try:
@@ -261,6 +262,7 @@ def analyze_async(req: RagAnalyzeRequest, request: Request, background: Backgrou
     def _run() -> None:
         try:
             _job_store().update(job_id, status="running", progress_pct=5, message="running")
+            _job_store().update(job_id, progress_pct=15, message="starting analysis")
             result = rag_analyze_review(
                 storage=providers.storage,
                 vector=providers.vector,
@@ -278,7 +280,7 @@ def analyze_async(req: RagAnalyzeRequest, request: Request, background: Backgrou
 
             # keep same boundary behavior as /analyze
             result = _ensure_section_owners(result)
-
+            _job_store().update(job_id, progress_pct=70, message="shaping response")
             if not isinstance(result, dict):
                 try:
                     result = result.model_dump()
