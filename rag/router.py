@@ -105,8 +105,8 @@ def _strip_debug_fields(d: dict) -> dict:
 @router.post("/analyze_async", response_model=RagAnalyzeJobResponse)
 def analyze_async(req: RagAnalyzeRequest, request: Request, background: BackgroundTasks, providers=Depends(providers_from_request)):
     """
-    Async wrapper for /analyze to avoid ALB ~60s timeouts.
-    Request contract is identical to /analyze (RagAnalyzeRequest).
+    Async wrapper to avoid ALB ~60s timeouts.
+    Request contract uses RagAnalyzeRequest.
     """
     auth = (request.headers.get("authorization") or request.headers.get("Authorization") or "").strip()
     token = ""
