@@ -18,7 +18,7 @@ ContextProfile = Literal["fast", "balanced", "deep"]
 # =============================================================================
 class RagAnalyzeRequest(BaseModel):
     """
-    Request body for POST /api/rag/analyze
+    Request body for POST /api/rag/analyze_async
     """
 
     model_config = ConfigDict(extra="allow")
@@ -165,7 +165,7 @@ class RagAnalyzeJobStatusResponse(BaseModel):
 
 class RagAnalyzeResponse(BaseModel):
     """
-    Response for POST /api/rag/analyze
+    Response for GET /api/rag/analyze_result (async-only)
 
     IMPORTANT:
     - model_config.extra="allow" so adding new keys in backend won't break response validation.
