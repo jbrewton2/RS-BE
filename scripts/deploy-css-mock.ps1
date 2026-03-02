@@ -72,6 +72,41 @@ param(
   [switch]$AutoBuildIfMissing,
   [switch]$SkipEcrCheck
 )
+function Assert-AuthProviderSafe {
+  param(
+    [Parameter(Mandatory=$true)][string]$ValuesPath,
+    [string]$Context = ""
+  )
+
+  if (!(Test-Path $ValuesPath)) {
+    throw "AUTH GUARD: missing values file: $ValuesPath (context=$Context)"
+  }
+
+  $raw = Get-Content $ValuesPath -Raw
+
+  # Accept:
+  #   AUTH_PROVIDER: "oidc"
+  #   AUTH_PROVIDER: oidc
+  # Ignore commented lines by anchoring at line start.
+  $m = [regex]::Match($raw, '(?m)^\s*AUTH_PROVIDER:\s*("?)(?<v>[A-Za-z0-9_\-]+)\1\s*$')
+  if (-not $m.Success) {
+    throw "AUTH GUARD: AUTH_PROVIDER not found in $ValuesPath (context=$Context). Refusing deploy."
+  }
+  $v = ((($m.Groups["v"].Value) + "")).Trim().ToLowerInvariant()
+  if ($v -eq "disabled") {
+    throw "AUTH GUARD: AUTH_PROVIDER=disabled in $ValuesPath (context=$Context). Refusing deploy."
+  }
+
+  Write-Host "AUTH GUARD OK: AUTH_PROVIDER=$v (context=$Context)" -ForegroundColor Green
+}
+
+function Assert-LocalAuthNotDisabled {
+  param([string]$Context = "")
+  $v = ($env:AUTH_PROVIDER).Trim().ToLowerInvariant()
+  if ($v -eq "disabled") {
+    throw "AUTH GUARD: Your shell has AUTH_PROVIDER=disabled (context=$Context). Refusing deploy. Clear it: Remove-Item Env:\AUTH_PROVIDER"
+  }
+}
 
 
 
@@ -328,6 +363,8 @@ if (!(Test-Path $OverridePath)) {
   Set-YamlImageTagInPlace -ValuesPath $OverridePath -ImageTag $ImageTag
 }
 Write-Host "Pinned override written: $OverridePath"
+Assert-LocalAuthNotDisabled -Context "deploy-css-mock (backend)"
+Assert-AuthProviderSafe -ValuesPath $OverridePath -Context "deploy-css-mock (backend pinned override)"
 Get-Content $OverridePath | ForEach-Object { "  $_" }
 
 Write-Host "Lint chart..." -ForegroundColor Cyan
@@ -363,8 +400,9 @@ if ($DeployFrontend) {
 
   # Reuse existing YAML tag setter (image.tag)
   Set-YamlImageTagInPlace -ValuesPath $FrontendOverridePath -ImageTag $FrontendTag
-
-  Write-Host "Frontend pinned override written: $FrontendOverridePath" -ForegroundColor DarkGray
+Write-Host "Frontend pinned override written: $FrontendOverridePath" -ForegroundColor DarkGray
+Assert-LocalAuthNotDisabled -Context "deploy-css-mock (frontend)"
+Assert-AuthProviderSafe -ValuesPath $FrontendOverridePath -Context "deploy-css-mock (frontend pinned override)"
   Get-Content $FrontendOverridePath | ForEach-Object { "  $_" }
 
   Write-Host "Deploying frontend via Helm..." -ForegroundColor Cyan
@@ -374,6 +412,8 @@ if ($DeployFrontend) {
   & kubectl -n $Namespace rollout status ("deploy/" + $FrontendRelease) --timeout=180s | Out-Host
 }
 Write-Host "DEPLOY OK" -ForegroundColor Green
+
+
 
 
 
