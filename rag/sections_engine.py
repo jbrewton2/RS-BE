@@ -21,6 +21,13 @@ def _canon_header_line(raw: str) -> str:
 
 def _is_section_header_line(raw: str) -> Optional[str]:
     cand = _canon_header_line(raw)
+    # Hard reject known non-section artifacts that the model may emit as standalone lines.
+    # These are CONTENT, not section headers.
+    if cand == "INSUFFICIENT EVIDENCE":
+        return None
+    if cand.startswith("HERE IS A SHORT NARRATIVE"):
+        return None
+
     if not cand:
         return None
 
@@ -75,7 +82,7 @@ def _normalize_bullet_text(t: str) -> str:
     s = (t or "").replace("\r", " ").strip()
     # normalize common mojibake-ish ellipsis etc.
     # Strip classic mojibake markers without embedding huge literals
-    for _m in ("Ã", "Â", "â€", "ï»¿"):
+    for _m in ("Ãƒ", "Ã‚", "Ã¢â‚¬", "Ã¯Â»Â¿"):
         if _m in s:
             s = s.replace(_m, "")
     return s
@@ -86,11 +93,11 @@ def _clean_findings_line(s: str) -> Optional[str]:
     if not t:
         return None
     # Strip classic mojibake markers without embedding huge literals
-    for _m in ("Ã", "Â", "â€", "ï»¿"):
+    for _m in ("Ãƒ", "Ã‚", "Ã¢â‚¬", "Ã¯Â»Â¿"):
         if _m in t:
             t = t.replace(_m, "")
     # Trim common leading bullet/dash artifacts after cleanup
-    t = t.lstrip("-•* \t").strip()
+    t = t.lstrip("-â€¢* \t").strip()
     t = _normalize_bullet_text(t)
     return t if t else None
 
