@@ -82,7 +82,7 @@ def _normalize_bullet_text(t: str) -> str:
     s = (t or "").replace("\r", " ").strip()
     # normalize common mojibake-ish ellipsis etc.
     # Strip classic mojibake markers without embedding huge literals
-    for _m in ("ÃƒÆ’", "Ãƒâ€š", "ÃƒÂ¢Ã¢â€šÂ¬", "ÃƒÂ¯Ã‚Â»Ã‚Â¿"):
+    for _m in ("ÃƒÆ’Ã†â€™", "ÃƒÆ’Ã¢â‚¬Å¡", "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬", "ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Â¿"):
         if _m in s:
             s = s.replace(_m, "")
     return s
@@ -93,11 +93,11 @@ def _clean_findings_line(s: str) -> Optional[str]:
     if not t:
         return None
     # Strip classic mojibake markers without embedding huge literals
-    for _m in ("ÃƒÆ’", "Ãƒâ€š", "ÃƒÂ¢Ã¢â€šÂ¬", "ÃƒÂ¯Ã‚Â»Ã‚Â¿"):
+    for _m in ("ÃƒÆ’Ã†â€™", "ÃƒÆ’Ã¢â‚¬Å¡", "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬", "ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Â¿"):
         if _m in t:
             t = t.replace(_m, "")
     # Trim common leading bullet/dash artifacts after cleanup
-    t = t.lstrip("-Ã¢â‚¬Â¢* \t").strip()
+    t = t.lstrip("-ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢* \t").strip()
     t = _normalize_bullet_text(t)
     return t if t else None
 
@@ -542,7 +542,7 @@ def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str
         if not txt and ev:
             s["text"] = "Evidence retrieved. Review evidence items for obligations and constraints."
 
-        if not txt and not ev:
+        if not ev:
             s["text"] = "No contract evidence was retrieved for this section. CSS will not infer details without cited contract text. Next steps: confirm the relevant source documents are included (e.g., Section L/M, CDRLs/DRLs, delivery schedule), then rerun ingestion or increase retrieval depth if appropriate."
 
         # If no evidence, add deterministic gaps/actions
@@ -575,6 +575,7 @@ def owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
 
 
 
