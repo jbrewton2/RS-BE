@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 
 from auth.jwt import get_current_user
 from core.providers import providers_from_request
-from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse
+from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse, RagAnalyzeJobResponse, RagAnalyzeJobStatusResponse
 from rag.service import rag_analyze_review, _owner_for_section  # noqa: F401
 from rag.jobs_store import RagJobStore
 
@@ -102,142 +102,7 @@ def _strip_debug_fields(d: dict) -> dict:
         return d
     except Exception:
         return d
-@router.post(
-    "/analyze",
-    response_model=RagAnalyzeResponse,
-    response_model_exclude_none=True,
-)
-def analyze(req: RagAnalyzeRequest, request: Request, providers=Depends(providers_from_request)):
-    try:
-        auth = (request.headers.get("authorization") or request.headers.get("Authorization") or "").strip()
-        token = ""
-        if auth.lower().startswith("bearer "):
-            token = auth.split(" ", 1)[1].strip()
-
-        result = rag_analyze_review(
-            storage=providers.storage,
-            vector=providers.vector,
-            llm=providers.llm,
-            review_id=req.review_id,
-            token=token,
-            mode=req.mode,
-            analysis_intent=req.analysis_intent,
-            heuristic_hits=req.heuristic_hits,
-            context_profile=req.context_profile,
-            top_k=req.top_k,
-            force_reingest=req.force_reingest,
-            debug=req.debug,
-        )
-        _job_store().update(job_id, progress_pct=70, message="analysis complete")
-
-
-        # Auto-heal: if retrieval returns ZERO evidence but docs exist, reingest once and retry
-        try:
-            _tmp = result
-            if not isinstance(_tmp, dict):
-                try:
-                    _tmp = _tmp.model_dump()
-                except Exception:
-                    _tmp = dict(_tmp)
-            rt0 = int((_tmp.get("stats") or {}).get("retrieved_total") or 0)
-        except Exception:
-            rt0 = 0
-
-        if (not req.force_reingest) and (rt0 == 0 or int(((_tmp.get("stats") or {}).get("context_used_chars") or 0)) == 0):
-            has_docs = True
-            try:
-                rev0 = providers.reviews.get_review_by_id(str(req.review_id))
-                docs0 = getattr(rev0, "docs", None) or (rev0.get("docs") if isinstance(rev0, dict) else None) or []
-                has_docs = (len(list(docs0)) > 0)
-            except Exception:
-                has_docs = True
-
-            if has_docs:
-                logger.warning("[RAG] retrieved_total=0; auto reingest + retry")
-                result = rag_analyze_review(
-                    storage=providers.storage,
-                    vector=providers.vector,
-                    llm=providers.llm,
-                    review_id=req.review_id,
-                    token=token,
-                    mode=req.mode,
-                    analysis_intent=req.analysis_intent,
-                    heuristic_hits=req.heuristic_hits,
-                    context_profile=req.context_profile,
-                    top_k=req.top_k,
-                    force_reingest=True,
-                    debug=True,
-                )
-
-                # Stamp stats so clients can see the auto-heal happened
-                try:
-                    if not isinstance(result, dict):
-                        try:
-                            result = result.model_dump()
-                        except Exception:
-                            result = dict(result)
-                    stats = result.get("stats") or {}
-                    if not isinstance(stats, dict):
-                        try:
-                            stats = stats.model_dump()
-                        except Exception:
-                            stats = dict(stats)
-                    stats["auto_reingest_used"] = True
-                    result["stats"] = stats
-                except Exception:
-                    pass
-
-        if result is None:
-            logger.error(
-                "rag_analyze_review returned None (review_id=%s mode=%s intent=%s profile=%s top_k=%s reingest=%s)",
-                req.review_id,
-                req.mode,
-                req.analysis_intent,
-                req.context_profile,
-                req.top_k,
-                req.force_reingest,
-            )
-            raise HTTPException(status_code=500, detail="RAG analyze failed: service returned no result")
-
-        result = _ensure_section_owners(result)
-
-        # Normalize to dict for response model validation
-        if not isinstance(result, dict):
-            try:
-                result = result.model_dump()
-            except Exception:
-                result = dict(result)
-
-        # Boundary defaults
-        result.setdefault("review_id", req.review_id)
-        result.setdefault("mode", req.mode)
-        result.setdefault("top_k", req.top_k)
-        result.setdefault("analysis_intent", req.analysis_intent)
-        result.setdefault("context_profile", req.context_profile)
-
-        # summary required
-        summary_val = result.get("summary")
-        if summary_val is None:
-            result["summary"] = ""
-        elif not isinstance(summary_val, str):
-            result["summary"] = str(summary_val)
-
-        return RagAnalyzeResponse.model_validate(result)
-
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except HTTPException:
-        # Do not wrap FastAPI errors
-        raise
-    except Exception as e:
-        logger.exception("RAG analyze failed")
-        raise HTTPException(status_code=500, detail=f"RAG analyze failed: {type(e).__name__}") from e
-
-
-
-@router.post("/analyze_async")
+@router.post("/analyze_async", response_model=RagAnalyzeJobResponse)
 def analyze_async(req: RagAnalyzeRequest, request: Request, background: BackgroundTasks, providers=Depends(providers_from_request)):
     """
     Async wrapper for /analyze to avoid ALB ~60s timeouts.
@@ -311,7 +176,7 @@ def analyze_async(req: RagAnalyzeRequest, request: Request, background: Backgrou
     return {"job_id": job_id, "status": "queued"}
 
 
-@router.get("/analyze_status")
+@router.get("/analyze_status", response_model=RagAnalyzeJobStatusResponse)
 def analyze_status(job_id: str):
     """
     Returns job status and progress for async analyze jobs.
