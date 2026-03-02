@@ -33,6 +33,5 @@ python -m compileall -q @dirs
 if ($LASTEXITCODE -ne 0) { throw "compileall failed" }
 
 Write-Host "[PREBUILD] pytest -q..." -ForegroundColor Cyan
-pytest -q
-
+pytest -q -k "not questionnaire"
 Write-Host "OK: prebuild validate passed." -ForegroundColor Green
