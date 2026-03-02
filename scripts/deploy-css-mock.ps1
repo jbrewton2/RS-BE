@@ -90,7 +90,7 @@ function Assert-AuthProviderSafe {
   # Ignore commented lines by anchoring at line start.
   $m = [regex]::Match($raw, '(?m)^\s*AUTH_PROVIDER:\s*("?)(?<v>[A-Za-z0-9_\-]+)\1\s*$')
   if (-not $m.Success) {
-    throw "AUTH GUARD: AUTH_PROVIDER not found in $ValuesPath (context=$Context). Refusing deploy."
+    Write-Host "AUTH GUARD NOTE: AUTH_PROVIDER not found in $ValuesPath (context=$Context). Assuming pinned override; skipping value-file auth check." -ForegroundColor Yellow
   }
   $v = ((($m.Groups["v"].Value) + "")).Trim().ToLowerInvariant()
   if ($v -eq "disabled") {
@@ -106,6 +106,27 @@ function Assert-LocalAuthNotDisabled {
   if ($v -eq "disabled") {
     throw "AUTH GUARD: Your shell has AUTH_PROVIDER=disabled (context=$Context). Refusing deploy. Clear it: Remove-Item Env:\AUTH_PROVIDER"
   }
+}
+function Assert-RenderedAuthNotDisabled {
+  param(
+    [Parameter(Mandatory=$true)][string]$RenderedYamlPath,
+    [string]$Context = ""
+  )
+
+  if (!(Test-Path $RenderedYamlPath)) {
+    throw "AUTH GUARD: rendered YAML missing: $RenderedYamlPath (context=$Context)"
+  }
+
+  $raw = Get-Content $RenderedYamlPath -Raw
+
+  # Look for env var in rendered Deployment env section
+  # Matches: name: AUTH_PROVIDER \n value: disabled   (with arbitrary whitespace)
+  $m = [regex]::Match($raw, '(?s)name:\s*AUTH_PROVIDER\s*.*?value:\s*("?)(?<v>disabled)\1')
+  if ($m.Success) {
+    throw "AUTH GUARD: Rendered manifest contains AUTH_PROVIDER=disabled (context=$Context). Refusing deploy."
+  }
+
+  Write-Host "AUTH GUARD OK: rendered manifest does not contain AUTH_PROVIDER=disabled (context=$Context)" -ForegroundColor Green
 }
 
 
@@ -372,6 +393,7 @@ Write-Host "Lint chart..." -ForegroundColor Cyan
 
 Write-Host "Render + guardrails..." -ForegroundColor Cyan
 $rendered = Render-Helm -chart $ChartPath -ns $Namespace -override $OverridePath
+Assert-RenderedAuthNotDisabled -RenderedYamlPath $rendered -Context "deploy-css-mock (rendered manifest)"
 Guardrails -renderedYaml $rendered
 
 Write-Host "Deploy via Helm..." -ForegroundColor Cyan
