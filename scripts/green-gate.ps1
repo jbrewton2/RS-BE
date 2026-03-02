@@ -1,10 +1,10 @@
-﻿# scripts/green-gate.ps1
+# scripts/green-gate.ps1
 # Green Gate (PS5.1-safe, parser-safe):
 #  - Truth Gate (compile/tests/guards)
 #  - Build+push ECR image from HEAD (or validate ImageTagOverride exists)
 #  - Helm deploy to css-mock
 #  - Enforce single-image pods
-#  - Live /api/rag/analyze validation (curl exit codes enforced; no pipeline masking)
+#  - Live /api/rag/analyze_async validation (curl exit codes enforced; no pipeline masking)
 
 [CmdletBinding()]
 param(
@@ -229,8 +229,25 @@ if (-not $LocalOnly) {
       force_reingest  = $force
       debug           = $true
     } | ConvertTo-Json -Depth 10
-  
-    Invoke-RestMethod -Method POST -Uri "$BaseUrl/api/rag/analyze" -Headers $hdr -ContentType "application/json" -Body $body
+    # Async-only RAG validation (prevents ALB timeout / 504)
+    $job = Invoke-RestMethod -Method POST -Uri "$BaseUrl/api/rag/analyze_async" -Headers $hdr -ContentType "application/json" -Body $body
+    $jobId = $job.job_id
+    if (-not $jobId) { throw "GREEN GATE: analyze_async did not return job_id" }
+
+    $seen=@{}
+    do {
+      Start-Sleep -Milliseconds 500
+      $st = Invoke-RestMethod -Method GET -Uri "$BaseUrl/api/rag/analyze_status?job_id=$jobId" -Headers $hdr
+      $k="$($st.status)|$($st.progress_pct)|$($st.message)"
+      if (-not $seen.ContainsKey($k)) { $seen[$k]=$true; Write-Host ("RAG status=" + $st.status + " pct=" + $st.progress_pct + " msg=" + $st.message) -ForegroundColor DarkCyan }
+    } while ($st.status -in @("queued","running"))
+
+    if ($st.status -ne "succeeded") { throw ("GREEN GATE: async analyze failed: " + ($st.error | Out-String)) }
+
+    $res = Invoke-RestMethod -Method GET -Uri "$BaseUrl/api/rag/analyze_result?job_id=$jobId" -Headers $hdr
+    if (-not $res.summary) { throw "GREEN GATE: missing summary in analyze_result" }
+    if (-not $res.sections) { throw "GREEN GATE: missing sections in analyze_result" }
+    if ($null -eq $res.stats) { throw "GREEN GATE: missing stats in analyze_result" }
   }
   
   $r = Invoke-Analyze $ForceReingest.IsPresent
@@ -282,7 +299,7 @@ if ($hasIngest) {
   Write-Host "LocalOnly set -> skipping pipeline validation" -ForegroundColor Yellow
 }
 
-Write-Header "GREEN GATE: Live /api/rag/analyze validation"
+Write-Header "GREEN GATE: Live /api/rag/analyze_async validation"
 try {
   $payload = @{
     review_id       = $ReviewId
@@ -297,7 +314,7 @@ try {
   $respPath    = Join-Path $OutDir "rag_last.json"
   To-JsonFile $payload $payloadPath
 
-  $url = "$BaseUrl/api/rag/analyze"
+  $url = "$BaseUrl/api/rag/analyze_async"
   $cmd = 'curl.exe -sS --fail-with-body -X POST "' + $url + '" ' +
          '-H "Authorization: Bearer ' + $Token + '" ' +
          '-H "Content-Type: application/json" ' +
