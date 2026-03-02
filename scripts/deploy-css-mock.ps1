@@ -102,7 +102,7 @@ function Assert-AuthProviderSafe {
 
 function Assert-LocalAuthNotDisabled {
   param([string]$Context = "")
-  $v = ($env:AUTH_PROVIDER).Trim().ToLowerInvariant()
+  $v = ((($env:AUTH_PROVIDER) + "")).Trim().ToLowerInvariant()
   if ($v -eq "disabled") {
     throw "AUTH GUARD: Your shell has AUTH_PROVIDER=disabled (context=$Context). Refusing deploy. Clear it: Remove-Item Env:\AUTH_PROVIDER"
   }
