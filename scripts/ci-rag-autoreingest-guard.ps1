@@ -1,7 +1,7 @@
-﻿$ErrorActionPreference="Stop"
+$ErrorActionPreference="Stop"
 cd "C:\Users\JoshBrewton\Desktop\CSS\css-backend"
 
-$f = ".\rag\router.py"
+$f = ".\rag\service.py"
 if (!(Test-Path $f)) { throw "Missing: $f" }
 
 # Hard guard: must not be a PowerShell file
@@ -11,7 +11,7 @@ if (($head -join "`n") -match 'Set-StrictMode|PowerShell') {
 }
 
 $need = @(
-  "[RAG] retrieved_total=0; auto reingest + retry",
+  "retrieval_or_context_empty",
   "auto_reingest_used"
 )
 
