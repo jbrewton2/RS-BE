@@ -82,7 +82,7 @@ def _normalize_bullet_text(t: str) -> str:
     s = (t or "").replace("\r", " ").strip()
     # normalize common mojibake-ish ellipsis etc.
     # Strip classic mojibake markers without embedding huge literals
-    for _m in ("ÃƒÆ’Ã†â€™", "ÃƒÆ’Ã¢â‚¬Å¡", "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬", "ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Â¿"):
+    for _m in ("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢", "ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡", "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬", "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿"):
         if _m in s:
             s = s.replace(_m, "")
     return s
@@ -93,11 +93,11 @@ def _clean_findings_line(s: str) -> Optional[str]:
     if not t:
         return None
     # Strip classic mojibake markers without embedding huge literals
-    for _m in ("ÃƒÆ’Ã†â€™", "ÃƒÆ’Ã¢â‚¬Å¡", "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬", "ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Â¿"):
+    for _m in ("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢", "ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡", "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬", "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿"):
         if _m in t:
             t = t.replace(_m, "")
     # Trim common leading bullet/dash artifacts after cleanup
-    t = t.lstrip("-ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢* \t").strip()
+    t = t.lstrip("-ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢* \t").strip()
     t = _normalize_bullet_text(t)
     return t if t else None
 
@@ -524,6 +524,46 @@ def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str
       - If section has evidence and empty findings, don't hallucinate findings (overview strengthening handles overview).
       - If section has no evidence, add at least one gap and one recommended action.
     """
+    # Deterministic, section-specific "no evidence" guidance (no hallucinations).
+    NO_EVIDENCE_TEXT_BY_SECTION = {
+        "submission-instructions-deadlines": (
+            "No contract evidence was retrieved for SUBMISSION INSTRUCTIONS & DEADLINES. "
+            "CSS will not infer submission rules without cited contract text. "
+            "This usually means the solicitation sections that define submissions were not included (often Section L/M), "
+            "or the current review only contains technical addenda that do not specify proposal/deliverable submission. "
+            "Next steps: attach Section L/M (or equivalent), any CDRL/DRL list, and a delivery schedule/submission portal/address; "
+            "then rerun ingestion or increase retrieval depth if appropriate."
+        ),
+        "contradictions-inconsistencies": (
+            "No contract evidence was retrieved for CONTRADICTIONS & INCONSISTENCIES. "
+            "CSS cannot assert contradictions without at least two cited obligations that conflict. "
+            "Next steps: ensure all governing documents are included (base contract + task order + addenda + referenced policies), "
+            "including any order-of-precedence language; then rerun analysis."
+        ),
+        "gaps-questions-for-the-government": (
+            "No contract evidence was retrieved for GAPS / QUESTIONS FOR THE GOVERNMENT. "
+            "Without the full solicitation/task order, CSS cannot tie gaps to specific clauses. "
+            "Next steps: include the base SOO/PWS, Section L/M, CDRLs/DRLs, and referenced standards/attachments; then rerun analysis."
+        ),
+    }
+
+    DEFAULT_NO_EVIDENCE_TEXT = (
+        "No contract evidence was retrieved for this section. "
+        "CSS will not infer details without cited contract text. "
+        "Next steps: confirm the relevant source documents are included, then rerun ingestion or increase retrieval depth if appropriate."
+    )
+
+    NO_EVIDENCE_GAP_BY_SECTION = {
+        "submission-instructions-deadlines": "Missing submission artifacts (likely Section L/M, CDRL/DRL list, delivery schedule, or submission portal/address).",
+        "contradictions-inconsistencies": "Missing multi-document context required to detect conflicts (need full contract/task order + addenda + order of precedence).",
+        "gaps-questions-for-the-government": "Missing source sections required to raise Government clarification questions (need SOO/PWS + referenced attachments/standards).",
+    }
+
+    NO_EVIDENCE_ACTION_BY_SECTION = {
+        "submission-instructions-deadlines": "Action: attach Section L/M (or equivalent), CDRLs/DRLs, and delivery schedule; then rerun ingestion and analysis.",
+        "contradictions-inconsistencies": "Action: attach all governing docs (contract + task order + addenda) including order of precedence; then rerun analysis.",
+        "gaps-questions-for-the-government": "Action: attach SOO/PWS plus referenced attachments/standards; then rerun ingestion and analysis.",
+    }
     for s in (sections or []):
         if not isinstance(s, dict):
             continue
@@ -543,12 +583,13 @@ def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str
             s["text"] = "Evidence retrieved. Review evidence items for obligations and constraints."
 
         if not ev:
-            s["text"] = "No contract evidence was retrieved for this section. CSS will not infer details without cited contract text. Next steps: confirm the relevant source documents are included (e.g., Section L/M, CDRLs/DRLs, delivery schedule), then rerun ingestion or increase retrieval depth if appropriate."
+            sid = (s.get("id") or "").strip().lower()
+            s["text"] = NO_EVIDENCE_TEXT_BY_SECTION.get(sid, DEFAULT_NO_EVIDENCE_TEXT)
 
         # If no evidence, add deterministic gaps/actions
         if not ev:
-            gap_msg = "No contract evidence retrieved for this section (retrieval starvation or mapping gap)."
-            act_msg = "Action: verify ingestion/indexing for this review and consider increasing top_k or reingesting documents."
+            gap_msg = NO_EVIDENCE_GAP_BY_SECTION.get(sid, "No contract evidence retrieved for this section (retrieval starvation or mapping gap).")
+            act_msg = NO_EVIDENCE_ACTION_BY_SECTION.get(sid, "Action: verify ingestion/indexing for this review and consider increasing top_k or reingesting documents.")
 
             if gap_msg not in s["gaps"]:
                 s["gaps"].append(gap_msg)
@@ -575,6 +616,8 @@ def owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
+
 
 
 
