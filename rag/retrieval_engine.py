@@ -96,6 +96,26 @@ def retrieve_context_local(
     retrieved_counts: Dict[str, int] = {}
     retrieval_debug: List[Dict[str, Any]] = []
 
+
+    # Option 1: fallback query packs for sections that frequently return 0 hits due to wording mismatch.
+    # These only execute when the primary question returns no hits.
+    FALLBACK_QUERY_PACKS: Dict[str, List[str]] = {
+        "Identify ambiguous/undefined terms and contradictions that require clarification.": [
+            "ambiguity ambiguous undefined term conflict contradiction inconsistency precedence order of precedence",
+            "in the event of conflict contract controls precedence hierarchy"
+        ],
+        "What are submission instructions and deadlines, including required formats and delivery method?": [
+            "submission instructions deadline due date delivery method format volume",
+            "submit proposal deliverable format word pdf email portal"
+        ],
+        "What gaps require clarification from the Government?": [
+            "to be determined TBD government will provide clarification",
+            "missing information not specified requires clarification"
+        ],
+    }
+
+
+
     if not questions:
         return {}, "", {}, []
 
@@ -116,6 +136,28 @@ def retrieve_context_local(
             hits = []
             if debug:
                 retrieval_debug.append({"q": q, "error": repr(e)})
+
+        # Fallback: if no hits for this question, try alternate queries (bounded).
+        if not hits:
+            used_fallback = False
+            for fq in (FALLBACK_QUERY_PACKS.get(q) or []):
+                try:
+                    emb2s = llm.embed_texts([str(fq)])
+                    emb2 = emb2s[0] if isinstance(emb2s, list) and emb2s else None
+                    if emb2 is None:
+                        continue
+                    h2 = vector.query(emb2, top_k=min(effective_top_k, 4), filters={"review_id": str(review_id)})
+                    for _h in (h2 or []):
+                        _attach_evidence_id_to_hit(_h)
+                    if h2:
+                        hits = h2
+                        used_fallback = True
+                        break
+                except Exception as _e2:
+                    if debug:
+                        retrieval_debug.append({"q": q, "fallback_q": fq, "fallback_error": repr(_e2)})
+            if debug and used_fallback:
+                retrieval_debug.append({"q": q, "fallback_used": True, "fallback_hits": int(len(hits or []))})
 
         retrieved[q] = hits or []
         retrieved_counts[q] = len(hits or [])
