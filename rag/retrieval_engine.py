@@ -105,8 +105,8 @@ def retrieve_context_local(
             "in the event of conflict contract controls precedence hierarchy"
         ],
         "What are submission instructions and deadlines, including required formats and delivery method?": [
-            "submission instructions deadline due date delivery method format volume",
-            "submit proposal deliverable format word pdf email portal"
+            "CDRL DID deliverable submission due date no later than within days government approval format template",
+            "submit deliverables electronic copy government acceptance review comments resubmit"
         ],
         "What gaps require clarification from the Government?": [
             "to be determined TBD government will provide clarification",
@@ -222,3 +222,4 @@ def retrieve_context_local(
 
     context = "".join(ctx_parts).strip()
     return retrieved, context, retrieved_counts, retrieval_debug
+
