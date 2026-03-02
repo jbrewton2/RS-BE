@@ -117,6 +117,14 @@ function Assert-RenderedAuthNotDisabled {
        = 
     }
 
+    # --- FIX: ensure rendered manifest is written to a real file path (some hosts may capture YAML into the path var) ---
+    if ( -and ( -match '^\s*---\s*#\s*Source:')) {
+       = Join-Path  '..\deploy\helm\css-backend.rendered.yaml'
+       = (Resolve-Path ).Path
+      Set-Content -Path  -Value  -Encoding utf8
+       = 
+    }
+
     [Parameter(Mandatory=$true)][string]$RenderedYamlPath,
     [string]$Context = ""
   )
