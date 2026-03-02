@@ -109,25 +109,17 @@ function Assert-LocalAuthNotDisabled {
 }
 function Assert-RenderedAuthNotDisabled {
   param(
-    # --- FIX: ensure rendered manifest is written to a real file path (some hosts may capture YAML into the path var) ---
-    if ( -and ( -match '^\s*---\s*#\s*Source:')) {
-       = Join-Path  '..\deploy\helm\css-backend.rendered.yaml'
-       = (Resolve-Path ).Path
-      Set-Content -Path  -Value  -Encoding utf8
-       = 
-    }
-
-    # --- FIX: ensure rendered manifest is written to a real file path (some hosts may capture YAML into the path var) ---
-    if ( -and ( -match '^\s*---\s*#\s*Source:')) {
-       = Join-Path  '..\deploy\helm\css-backend.rendered.yaml'
-       = (Resolve-Path ).Path
-      Set-Content -Path  -Value  -Encoding utf8
-       = 
-    }
-
     [Parameter(Mandatory=$true)][string]$RenderedYamlPath,
     [string]$Context = ""
   )
+
+  # --- FIX: if rendered YAML content is accidentally passed instead of a file path ---
+  if ($RenderedYamlPath -and ($RenderedYamlPath -match '^\s*---\s*#\s*Source:')) {
+    $tmp = Join-Path $PSScriptRoot '..\deploy\helm\css-backend.rendered.yaml'
+    $tmp = (Resolve-Path $tmp).Path
+    Set-Content -Path $tmp -Value $RenderedYamlPath -Encoding utf8
+    $RenderedYamlPath = $tmp
+  }
 
   if (!(Test-Path $RenderedYamlPath)) {
     throw "AUTH GUARD: rendered YAML missing: $RenderedYamlPath (context=$Context)"
