@@ -223,3 +223,4 @@ def retrieve_context_local(
     context = "".join(ctx_parts).strip()
     return retrieved, context, retrieved_counts, retrieval_debug
 
+
