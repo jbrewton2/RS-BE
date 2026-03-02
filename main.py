@@ -704,13 +704,9 @@ app.include_router(health_router)
 
 # Sessions at root + /api (backwards compat)
 # Questionnaires sessions routes: bypass auth in pytest for deterministic TestClient tests
-if _is_pytest():
-else:
-    app.include_router(questionnaire_sessions_router, dependencies=[Depends(require_admin)])
+app.include_router(questionnaire_sessions_router, dependencies=[Depends(require_admin)])
 # Questionnaires sessions routes (/api): bypass auth in pytest for deterministic TestClient tests
-if _is_pytest():
-else:
-    app.include_router(questionnaire_sessions_router, prefix="/api", dependencies=[Depends(require_admin)])
+app.include_router(questionnaire_sessions_router, prefix="/api", dependencies=[Depends(require_admin)])
 # Functional routers under /api
 app.include_router(flags_router, prefix="/api", dependencies=[Depends(require_admin)])
 app.include_router(reviews_router, prefix="/api", dependencies=[Depends(require_reviews_user_or_admin)])
