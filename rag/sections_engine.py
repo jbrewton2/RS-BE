@@ -82,7 +82,7 @@ def _normalize_bullet_text(t: str) -> str:
     s = (t or "").replace("\r", " ").strip()
     # normalize common mojibake-ish ellipsis etc.
     # Strip classic mojibake markers without embedding huge literals
-    for _m in ("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢", "ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡", "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬", "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿"):
+    for _m in ("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢", "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡", "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬", "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿"):
         if _m in s:
             s = s.replace(_m, "")
     return s
@@ -93,11 +93,11 @@ def _clean_findings_line(s: str) -> Optional[str]:
     if not t:
         return None
     # Strip classic mojibake markers without embedding huge literals
-    for _m in ("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢", "ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡", "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬", "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿"):
+    for _m in ("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢", "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡", "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬", "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿"):
         if _m in t:
             t = t.replace(_m, "")
     # Trim common leading bullet/dash artifacts after cleanup
-    t = t.lstrip("-ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢* \t").strip()
+    t = t.lstrip("-ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢* \t").strip()
     t = _normalize_bullet_text(t)
     return t if t else None
 
@@ -545,6 +545,32 @@ def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str
             "Without the full solicitation/task order, CSS cannot tie gaps to specific clauses. "
             "Next steps: include the base SOO/PWS, Section L/M, CDRLs/DRLs, and referenced standards/attachments; then rerun analysis."
         ),
+        "deliverables-timelines": (
+            "No contract evidence was retrieved for DELIVERABLES & TIMELINES. "
+            "This typically means the review is missing the delivery schedule, CDRL/DRL list, milestone table, or acceptance criteria/QA language. "
+            "CSS will not infer dates/cadences without cited text. "
+            "Next steps: attach the delivery schedule (IMS/milestones), CDRLs/DRLs, acceptance criteria (QASP/QA), and any reporting cadence requirements; then rerun ingestion/analysis."
+        ),
+        "security-compliance-hosting-constraints": (
+            "No contract evidence was retrieved for SECURITY, COMPLIANCE & HOSTING CONSTRAINTS. "
+            "This typically means the cybersecurity/RMF/ATO/IL hosting requirements are in a separate attachment or referenced policy not included in this review. "
+            "Next steps: attach the SRG/IL requirements, RMF/ATO clauses, encryption/logging/incident reporting requirements, and any security addenda; then rerun ingestion/analysis."
+        ),
+        "eligibility-personnel-constraints": (
+            "No contract evidence was retrieved for ELIGIBILITY & PERSONNEL CONSTRAINTS. "
+            "This typically means staffing/clearance/citizenship/training constraints are in labor categories, security clauses, or a staffing plan attachment not included here. "
+            "Next steps: attach staffing requirements (labor categories), clearance/citizenship requirements, onboarding timelines, and any facility/access constraints; then rerun."
+        ),
+        "legal-data-rights-risks": (
+            "No contract evidence was retrieved for LEGAL & DATA RIGHTS RISKS. "
+            "This typically means IP/data-rights, audit, flowdown, disclosure/marking, or GFI/GFM terms are in base contract clauses or attachments not included. "
+            "Next steps: attach applicable FAR/DFARS clauses, data rights/IP terms, audit rights, flowdowns, and any NDAs or special provisions; then rerun."
+        ),
+        "financial-risks": (
+            "No contract evidence was retrieved for FINANCIAL RISKS. "
+            "This typically means pricing/invoicing/ceilings/CLIN structure/options/period of performance are in Section B, pricing schedule, or invoicing clauses not included here. "
+            "Next steps: attach pricing schedule (CLINs), invoicing/payment terms, ceilings/overrun rules, and PoP/options; then rerun."
+        ),
     }
 
     DEFAULT_NO_EVIDENCE_TEXT = (
@@ -557,12 +583,22 @@ def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str
         "submission-instructions-deadlines": "Missing submission artifacts (likely Section L/M, CDRL/DRL list, delivery schedule, or submission portal/address).",
         "contradictions-inconsistencies": "Missing multi-document context required to detect conflicts (need full contract/task order + addenda + order of precedence).",
         "gaps-questions-for-the-government": "Missing source sections required to raise Government clarification questions (need SOO/PWS + referenced attachments/standards).",
+        "deliverables-timelines": "Missing delivery artifacts (IMS/milestones, CDRLs/DRLs, acceptance criteria, reporting cadence).",
+        "security-compliance-hosting-constraints": "Missing security/hosting artifacts (IL/SRG, RMF/ATO clauses, logging/encryption/IR requirements, security addenda).",
+        "eligibility-personnel-constraints": "Missing staffing/eligibility artifacts (labor categories, clearance/citizenship, onboarding timelines, facility/access).",
+        "legal-data-rights-risks": "Missing legal artifacts (FAR/DFARS, data rights/IP, audit rights, flowdowns, disclosure/marking terms).",
+        "financial-risks": "Missing financial artifacts (pricing/CLINs, invoicing/payment terms, ceilings/overrun rules, PoP/options).",
     }
 
     NO_EVIDENCE_ACTION_BY_SECTION = {
         "submission-instructions-deadlines": "Action: attach Section L/M (or equivalent), CDRLs/DRLs, and delivery schedule; then rerun ingestion and analysis.",
         "contradictions-inconsistencies": "Action: attach all governing docs (contract + task order + addenda) including order of precedence; then rerun analysis.",
         "gaps-questions-for-the-government": "Action: attach SOO/PWS plus referenced attachments/standards; then rerun ingestion and analysis.",
+        "deliverables-timelines": "Action: attach IMS/milestones plus CDRLs/DRLs and acceptance criteria; rerun ingestion and analysis.",
+        "security-compliance-hosting-constraints": "Action: attach IL/SRG + RMF/ATO/security clauses and security addenda; rerun ingestion and analysis.",
+        "eligibility-personnel-constraints": "Action: attach labor categories plus clearance/citizenship/onboarding requirements; rerun ingestion and analysis.",
+        "legal-data-rights-risks": "Action: attach FAR/DFARS + data rights/IP + audit/flowdowns; rerun ingestion and analysis.",
+        "financial-risks": "Action: attach Section B/pricing schedule + invoicing/payment terms + ceilings/PoP/options; rerun ingestion and analysis.",
     }
     for s in (sections or []):
         if not isinstance(s, dict):
@@ -616,6 +652,7 @@ def owner_for_section(section_id: str) -> str:
         "recommended-internal-actions": "Program/PM",
     }
     return m.get(sid, "Program/PM")
+
 
 
 
