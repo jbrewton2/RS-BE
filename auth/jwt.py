@@ -148,6 +148,20 @@ def _pick_key(jwks: Dict[str, Any], kid: str) -> Optional[Dict[str, Any]]:
 async def get_current_user(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
 ) -> Dict[str, Any]:
+    # Auth bypass (explicit): when AUTH_PROVIDER=disabled, allow unit tests/local tools to call routes
+    # without requiring a bearer token. This must execute BEFORE the creds check.
+    try:
+        s = get_settings()
+        prov = (getattr(getattr(s, "auth", None), "provider", None) or "keycloak").strip().lower()
+        if prov == "disabled":
+            return {
+                "sub": "auth-disabled",
+                "iss": "auth-disabled",
+                "token_use": "access",
+                "cognito:groups": ["css-admin"],
+            }
+    except Exception:
+        pass
     if not creds or not creds.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -230,3 +244,45 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail=f"Auth error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Auth error: {str(e)}")
+
+# =========================
+# RBAC (Cognito groups)
+# =========================
+CSS_ADMIN_GROUP = "css-admin"
+CSS_USER_GROUP  = "css-user"
+
+def _groups_from_claims(claims: dict) -> list[str]:
+    """
+    Cognito emits groups in access tokens under 'cognito:groups' when the user is in groups.
+    Normalize to list[str].
+    """
+    if not isinstance(claims, dict):
+        return []
+    g = claims.get("cognito:groups") or claims.get("groups") or []
+    if isinstance(g, str):
+        g = [g]
+    if isinstance(g, list):
+        return [str(x).strip() for x in g if str(x).strip()]
+    return []
+
+def require_admin(user=Depends(get_current_user)):
+    claims = user if isinstance(user, dict) else {}
+    groups = _groups_from_claims(claims)
+    if CSS_ADMIN_GROUP not in groups:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: admin access required",
+        )
+    return claims
+
+def require_reviews_user_or_admin(user=Depends(get_current_user)):
+    claims = user if isinstance(user, dict) else {}
+    groups = _groups_from_claims(claims)
+    if (CSS_ADMIN_GROUP not in groups) and (CSS_USER_GROUP not in groups):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: reviews access required",
+        )
+    return claims
+
+
