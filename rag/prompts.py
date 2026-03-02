@@ -74,6 +74,21 @@ For each section below:
 - Start with 1 sentence summary.
 - Then bullets. Risk/constraint/action bullets include Owner tag at end.
 
+SECTION GUIDANCE (mini-prompts)
+- OVERVIEW: Focus on top 3 contract-driving obligations/constraints. Prefer explicit 'shall/must/prohibited' language when present.
+- MISSION & OBJECTIVE: State the stated mission/outcomes; if not explicit, write INSUFFICIENT EVIDENCE.
+- SCOPE OF WORK: Extract required tasks and scope boundaries; include any 'shall provide/perform' obligations.
+- DELIVERABLES & TIMELINES: Extract any dates, windows, cadences, and acceptance gates. If none, write INSUFFICIENT EVIDENCE.
+- SECURITY, COMPLIANCE & HOSTING CONSTRAINTS: Extract IL/RMF/ATO/logging/encryption/vuln mgmt constraints; treat prohibited actions as constraints (Owner: Security/ISSO).
+- ELIGIBILITY & PERSONNEL CONSTRAINTS: Extract citizenship/clearance/background checks/staffing constraints (Owner: Program/PM).
+- LEGAL & DATA RIGHTS RISKS: Extract IP/data rights/audit/access/flowdowns/disclosure penalties (Owner: Legal/Contracts).
+- FINANCIAL RISKS: Extract pricing/payment/invoicing/ceilings/options/period of performance risks (Owner: Finance).
+- SUBMISSION INSTRUCTIONS & DEADLINES: If evidence exists, extract submission channel (portal/email), formats (PDF/Word), volumes/structure, due dates. If no evidence exists, write INSUFFICIENT EVIDENCE and add 2-4 bullets requesting the missing artifacts (e.g., Section L/M, CDRL list, DRLs, delivery schedule). Owner: Program/PM.
+- CONTRADICTIONS & INCONSISTENCIES: Only list a contradiction if you can cite two conflicting obligations from evidence. If none can be supported, write INSUFFICIENT EVIDENCE.
+- GAPS / QUESTIONS FOR THE GOVERNMENT: Always provide questions. If evidence is missing, questions must explicitly request the missing document/section and why it matters.
+- RECOMMENDED INTERNAL ACTIONS: Convert obligations into internal actions with clear owners. If evidence is insufficient, recommend validation steps (re-ingest, request missing docs, increase top_k).
+
+
 SECTIONS (exact order)
 {headers}
 
