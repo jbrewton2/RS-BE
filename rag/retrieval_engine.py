@@ -224,3 +224,143 @@ def retrieve_context_local(
     return retrieved, context, retrieved_counts, retrieval_debug
 
 
+def retrieve_context_local_by_section(
+    *,
+    vector: Any,
+    llm: Any,
+    section_query_packs: Dict[str, List[str]],
+    review_id: str,
+    effective_top_k: int,
+    snippet_cap: int,
+    context_cap: int,
+    debug: bool,
+) -> Tuple[Dict[str, List[Dict[str, Any]]], str, Dict[str, int], List[Dict[str, Any]]]:
+    """
+    Section-scoped retrieval helper:
+      - run 2-4 query variants per section
+      - union hits per section
+      - dedupe by evidenceId
+      - return context grouped by section_id
+    """
+    retrieved_by_section: Dict[str, List[Dict[str, Any]]] = {}
+    retrieved_counts: Dict[str, int] = {}
+    retrieval_debug: List[Dict[str, Any]] = []
+
+    if not section_query_packs:
+        return {}, "", {}, []
+
+    if not hasattr(llm, "embed_texts"):
+        raise RuntimeError("LLM provider does not implement embed_texts() required for retrieval")
+
+    # Per-section caps: keep bounded to avoid prompt blow-ups.
+    per_section_cap = int(max(2, min(max(effective_top_k, 4), 8)))
+
+    for sid, qpack in (section_query_packs or {}).items():
+        if not isinstance(qpack, list) or not qpack:
+            retrieved_by_section[sid] = []
+            retrieved_counts[sid] = 0
+            continue
+
+        # Embed all queries for this section at once
+        embs = llm.embed_texts([str(q) for q in qpack])
+        if not isinstance(embs, list) or len(embs) != len(qpack):
+            raise RuntimeError("embed_texts returned unexpected embeddings count (section mode)")
+
+        best_by_eid: Dict[str, Dict[str, Any]] = {}
+
+        for q, emb in zip(qpack, embs):
+            hits: List[Dict[str, Any]] = []
+            try:
+                hits = vector.query(emb, top_k=effective_top_k, filters={"review_id": str(review_id)}) or []
+                for _h in hits:
+                    _attach_evidence_id_to_hit(_h)
+            except Exception as e:
+                if debug:
+                    retrieval_debug.append({"section": sid, "q": q, "error": repr(e)})
+                hits = []
+
+            # Dedup by evidenceId, keep highest score
+            for h in hits:
+                eid = str(h.get("evidenceId") or h.get("evidence_id") or "").strip()
+                if not eid:
+                    continue
+                prev = best_by_eid.get(eid)
+                if prev is None:
+                    best_by_eid[eid] = h
+                else:
+                    try:
+                        if (h.get("score") or 0) > (prev.get("score") or 0):
+                            best_by_eid[eid] = h
+                    except Exception:
+                        # if score missing, keep first
+                        pass
+
+            if debug:
+                retrieval_debug.append(
+                    {
+                        "section": sid,
+                        "q": q,
+                        "hits": int(len(hits)),
+                        "top": [
+                            {
+                                "doc_name": (hh.get("doc_name") or ""),
+                                "chunk_id": (hh.get("chunk_id") or ""),
+                                "evidenceId": (hh.get("evidenceId") or hh.get("evidence_id") or ""),
+                                "score": hh.get("score"),
+                            }
+                            for hh in hits[:3]
+                        ],
+                    }
+                )
+
+        # Final hits for section: score desc, cap
+        final_hits = list(best_by_eid.values())
+        final_hits.sort(key=lambda x: (x.get("score") or 0), reverse=True)
+        final_hits = final_hits[:per_section_cap]
+
+        retrieved_by_section[sid] = final_hits
+        retrieved_counts[sid] = int(len(final_hits))
+
+        if debug:
+            retrieval_debug.append({"section": sid, "union_hits": int(len(best_by_eid)), "final_hits": int(len(final_hits))})
+
+    # Assemble context by section
+    ctx_parts: List[str] = []
+    used = 0
+
+    for sid, hits in retrieved_by_section.items():
+        if not hits:
+            continue
+
+        hdr = f"SECTION: {sid}\n"
+        if used + len(hdr) > context_cap:
+            break
+        ctx_parts.append(hdr)
+        used += len(hdr)
+
+        for h in hits:
+            txt = (h.get("chunk_text") or "").strip()
+            if not txt:
+                continue
+            if snippet_cap > 0 and len(txt) > snippet_cap:
+                txt = txt[:snippet_cap].rstrip() + "..."
+
+            meta = h.get("meta") or {}
+            doc = meta.get("doc_name") or h.get("doc_name") or meta.get("doc_id") or h.get("document_id") or "doc"
+            cid = h.get("chunk_id") or ""
+            eid = h.get("evidenceId") or h.get("evidence_id") or ""
+
+            line = f"- ({doc} / {cid} / {eid}) {txt}\n"
+            if used + len(line) > context_cap:
+                break
+            ctx_parts.append(line)
+            used += len(line)
+
+        ctx_parts.append("\n")
+        used += 1
+        if used >= context_cap:
+            break
+
+    context = "".join(ctx_parts).strip()
+    return retrieved_by_section, context, retrieved_counts, retrieval_debug
+
