@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 logger = logging.getLogger(__name__)
-from rag.service_helpers import _extend_questions_with_targeted, derive_section_risks
+from rag.service_helpers import _extend_questions_with_targeted, derive_section_risks, render_contract_evidence_by_section
 from rag.prompts import STRICT_SUMMARY_PROMPT, RISK_TRIAGE_PROMPT, _build_review_summary_prompt
 from rag.prompt_engine import render_deterministic_signals_block as pe_render_signals
 from rag.questions import _question_section_map
@@ -854,6 +854,19 @@ def rag_analyze_review(
             context_cap=context_cap,
             debug=debug,
         )
+        # sectioned_contract_evidence: group by section to reduce bleed
+        try:
+            context = render_contract_evidence_by_section(
+                retrieved_by_question=retrieved,
+                section_question_map=section_question_map or [],
+                section_headers=RAG_REVIEW_SUMMARY_SECTIONS,
+                snippet_cap=snippet_cap,
+                context_cap=context_cap,
+                per_question=int(effective_top_k),
+                per_section=12,
+            )
+        except Exception:
+            pass
     except Exception as e:
         retrieved, context, retrieved_counts, retrieval_debug = {}, "", {}, [{"error": repr(e)}]
         warnings.append("retrieval_failed")

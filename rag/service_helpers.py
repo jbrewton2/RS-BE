@@ -500,5 +500,118 @@ def _extend_questions_with_targeted(
 
     return out
 
+# SECTIONED_CONTRACT_EVIDENCE_HELPER
+# -----------------------------------------------------------------------------
+# CONTRACT EVIDENCE RENDERING (section-grouped; reduces cross-section bleed)
+# -----------------------------------------------------------------------------
+import re
+from typing import Any, Dict, List, Tuple
 
 
+def _slug_section_header(s: str) -> str:
+    t = (s or "").strip().lower()
+    t = t.replace("&", "and")
+    t = re.sub(r"[^a-z0-9]+", "-", t)
+    t = re.sub(r"-{2,}", "-", t).strip("-")
+    return t
+
+
+def render_contract_evidence_by_section(
+    *,
+    retrieved_by_question: Dict[str, List[Dict[str, Any]]],
+    section_question_map: List[Tuple[str, str]],
+    section_headers: List[str],
+    snippet_cap: int,
+    context_cap: int,
+    per_question: int = 4,
+    per_section: int = 10,
+) -> str:
+    """
+    Convert baseline retrieval output (hits by question) into a section-grouped
+    CONTRACT EVIDENCE block. This reduces evidence bleed across sections while
+    preserving the baseline pipeline (single LLM call + same prompt template).
+    """
+    if not isinstance(retrieved_by_question, dict) or not retrieved_by_question:
+        return ""
+
+    # Map section_id -> exact header string from RAG_REVIEW_SUMMARY_SECTIONS
+    hdr_map: Dict[str, str] = {}
+    for h in (section_headers or []):
+        sid = _slug_section_header(h)
+        if sid:
+            hdr_map[sid] = str(h)
+
+    parts: List[str] = []
+    used = 0
+
+    # Dedupe stable IDs across the whole context
+    seen_eids: set[str] = set()
+
+    current_sid: str = ""
+    section_lines: int = 0
+
+    def _flush_section():
+        nonlocal used, section_lines
+        if section_lines > 0:
+            parts.append("\n")
+            used += 1
+        section_lines = 0
+
+    for sid_raw, q in (section_question_map or []):
+        sid = str(sid_raw or "").strip().lower()
+        if not sid or not q:
+            continue
+
+        if sid != current_sid:
+            _flush_section()
+            current_sid = sid
+            header = hdr_map.get(sid) or hdr_map.get(_slug_section_header(sid)) or sid.upper()
+            hdr = f"SECTION: {header}\n"
+            if used + len(hdr) > context_cap:
+                break
+            parts.append(hdr)
+            used += len(hdr)
+            section_lines = 0
+
+        hits = retrieved_by_question.get(q) or []
+        if not hits:
+            continue
+
+        if section_lines >= int(per_section):
+            continue
+
+        for h in hits[: int(per_question)]:
+            if section_lines >= int(per_section):
+                break
+            if not isinstance(h, dict):
+                continue
+
+            txt = (h.get("chunk_text") or "").strip()
+            if not txt:
+                continue
+            if snippet_cap > 0 and len(txt) > snippet_cap:
+                txt = txt[:snippet_cap].rstrip() + "..."
+
+            meta = h.get("meta") or {}
+            doc = meta.get("doc_name") or h.get("doc_name") or meta.get("doc_id") or h.get("document_id") or "doc"
+            cid = h.get("chunk_id") or ""
+            eid = str(h.get("evidenceId") or h.get("evidence_id") or "").strip()
+
+            if eid and eid in seen_eids:
+                continue
+            if eid:
+                seen_eids.add(eid)
+
+            line = f"- ({doc} / {cid}) {txt}\n"
+            if used + len(line) > context_cap:
+                break
+
+            parts.append(line)
+            used += len(line)
+            section_lines += 1
+
+        if used >= context_cap:
+            break
+
+    ctx = "".join(parts).strip()
+    return ctx
