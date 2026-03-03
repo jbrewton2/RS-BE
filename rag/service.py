@@ -312,7 +312,7 @@ def _postprocess_review_summary(text: str) -> str:
     # Common encoding artifacts seen in logs / copied text
     # Strip obvious mojibake markers without embedding huge literals
     # NOTE: Do not try to strip all unicode; only remove classic mojibake markers.
-    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢, ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡, ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ prefixes
+    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢, ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡, ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ prefixes
     for _m in _mojibake_markers:
         if _m and (_m in hardened):
             hardened = hardened.replace(_m, "")
@@ -1583,6 +1583,12 @@ def rag_analyze_review(
                         _bul.append(_et)
                     if _bul:
                         _s["findings"] = _bul
+                        # force_text_from_findings: ensure section text is contract-specific (first evidence bullet)
+                        try:
+                            if str(_s.get("text") or "").strip() in ("", "Evidence retrieved.", "Evidence retrieved"):
+                                _s["text"] = _bul[0]
+                        except Exception:
+                            pass
         except Exception:
             pass
 
