@@ -312,7 +312,7 @@ def _postprocess_review_summary(text: str) -> str:
     # Common encoding artifacts seen in logs / copied text
     # Strip obvious mojibake markers without embedding huge literals
     # NOTE: Do not try to strip all unicode; only remove classic mojibake markers.
-    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # Ãƒ, Ã‚, Ã¢ prefixes
+    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # ÃƒÆ’, Ãƒâ€š, ÃƒÂ¢ prefixes
     for _m in _mojibake_markers:
         if _m and (_m in hardened):
             hardened = hardened.replace(_m, "")
@@ -1581,6 +1581,23 @@ def rag_analyze_review(
         sid = str(s.get("id") or "").strip().lower()
         if not (s.get("owner") or "").strip():
             s["owner"] = se_owner_for_section(sid)
+
+
+    # Keep summary string consistent with section text after deterministic enforcement.
+    # (The UI consumes both summary and sections; without this, summary may still show LLM 'INSUFFICIENT EVIDENCE'.)
+    try:
+        _parts = []
+        for _s in (sections or []):
+            _t = str(_s.get("title") or _s.get("id") or "").strip()
+            _txt = str(_s.get("text") or "").strip()
+            if _t:
+                _parts.append(_t)
+                _parts.append(_txt if _txt else "INSUFFICIENT EVIDENCE")
+                _parts.append("")
+        summary = "\\n".join(_parts).strip() + "\\n"
+        warnings.append("summary_rebuilt_from_sections")
+    except Exception:
+        pass
 
     # Deterministic risks (Tier 3 flags + Tier 2 heuristics + Tier 2 section-derived + Tier 1 inference REQUIRED)
     t1_max_total = int((_env("RAG_TIER1_MAX_CANDIDATES_TOTAL", "20") or "20").strip() or "20")
