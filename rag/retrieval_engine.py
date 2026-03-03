@@ -331,6 +331,39 @@ def retrieve_context_local_by_section(
         final_hits.sort(key=lambda x: (x.get("score") or 0), reverse=True)
         final_hits = final_hits[:per_section_cap]
 
+        # section_relevance_filter: reduce cross-section evidence bleed
+        try:
+            _sid = str(sid or '').strip().lower()
+            _ban = []
+            # Keep SECURITY unconstrained; it should include IL5/RMF/prohibited/logging/etc.
+            if _sid in ('mission-objective','scope-of-work','deliverables-timelines'):
+                _ban = ['prohibited actions','il5','rmf','ato','cmmc','dfars','encryption','logging','audit']
+            elif _sid in ('financial-risks',):
+                _ban = ['prohibited actions','il5','rmf','ato','cmmc','dfars','encryption','logging','audit','unlimited rights','data rights']
+            elif _sid in ('eligibility-personnel-constraints',):
+                _ban = ['unlimited rights','data rights','dfars 252.227','license','qasp','surveillance']
+            elif _sid in ('legal-data-rights-risks',):
+                _ban = ['prohibited actions','il5','rmf','ato','cmmc','logging','encryption','qasp','surveillance']
+            elif _sid in ('submission-instructions-deadlines',):
+                _ban = ['prohibited actions','il5','rmf','ato','cmmc','logging','encryption','unlimited rights','data rights']
+            elif _sid in ('contradictions-inconsistencies',):
+                _ban = ['prohibited actions','il5','rmf','ato','cmmc','logging','encryption']
+
+            if _ban and isinstance(final_hits, list) and final_hits:
+                _kept = []
+                for _h in final_hits:
+                    try:
+                        _t = str(_h.get('chunk_text') or _h.get('snippet') or _h.get('text') or '').lower()
+                        if any(b in _t for b in _ban):
+                            continue
+                    except Exception:
+                        pass
+                    _kept.append(_h)
+                if _kept:
+                    final_hits = _kept
+        except Exception:
+            pass
+
         retrieved_by_section[sid] = final_hits
         retrieved_counts[sid] = int(len(final_hits))
 
