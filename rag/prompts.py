@@ -54,6 +54,8 @@ You may use the DETERMINISTIC SIGNALS block as prioritization hints, but it is N
 HARD RULES
 - Plain text only. No markdown.
 - Do NOT fabricate facts. If you cannot support a claim from CONTRACT EVIDENCE, write: INSUFFICIENT EVIDENCE.
+- IMPORTANT: If a section has ANY CONTRACT EVIDENCE lines, you MUST write what IS supported by that evidence (at least 1 sentence summary + bullets). Do NOT output 'INSUFFICIENT EVIDENCE' as the entire section unless there are zero evidence lines for that section.
+- If evidence is partial, state the supported facts, then add bullets requesting the missing artifact/section.
 - CONTRACT EVIDENCE is citable; DETERMINISTIC SIGNALS are NOT citable as contract text.
 - Do NOT quote deterministic signals as if they came from the contract.
 - Prefer short, high-signal bullets.
