@@ -21,6 +21,7 @@ from rag.retrieval_engine import retrieve_context_local_by_section
 from rag.narrative_engine import generate_summary_multi_pass as ne_generate_summary_multi_pass
 from rag.ingestion_engine import _ingest_review_into_vectorstore as ie_ingest_review_into_vectorstore, _chunk_text_windowed
 from rag.sections_engine import _parse_review_summary_sections as se_parse_sections, _attach_evidence_to_sections as se_attach_evidence, _backfill_sections_from_evidence as se_backfill_sections, _normalize_section_outputs as se_normalize_section, owner_for_section as se_owner_for_section
+from rag.render_engine import render_text_summary_from_sections
 from rag.sections_engine import _strengthen_overview_from_evidence as se_strengthen_overview_from_evidence
 import re
 
@@ -312,7 +313,7 @@ def _postprocess_review_summary(text: str) -> str:
     # Common encoding artifacts seen in logs / copied text
     # Strip obvious mojibake markers without embedding huge literals
     # NOTE: Do not try to strip all unicode; only remove classic mojibake markers.
-    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢, ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡, ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ prefixes
+    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢, ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡, ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ prefixes
     for _m in _mojibake_markers:
         if _m and (_m in hardened):
             hardened = hardened.replace(_m, "")
@@ -1614,7 +1615,7 @@ def rag_analyze_review(
                 _parts.append(_t)
                 _parts.append(_txt if _txt else "INSUFFICIENT EVIDENCE")
                 _parts.append("")
-        summary = "\n".join(_parts).strip() + "\n"
+        summary = render_text_summary_from_sections(sections, include_top_risks=True)
         warnings.append("summary_rebuilt_from_sections")
     except Exception:
         pass
@@ -1779,6 +1780,7 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
 
 
 
