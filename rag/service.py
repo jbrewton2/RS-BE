@@ -312,7 +312,7 @@ def _postprocess_review_summary(text: str) -> str:
     # Common encoding artifacts seen in logs / copied text
     # Strip obvious mojibake markers without embedding huge literals
     # NOTE: Do not try to strip all unicode; only remove classic mojibake markers.
-    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # ÃƒÆ’, Ãƒâ€š, ÃƒÂ¢ prefixes
+    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # ÃƒÆ’Ã†â€™, ÃƒÆ’Ã¢â‚¬Å¡, ÃƒÆ’Ã‚Â¢ prefixes
     for _m in _mojibake_markers:
         if _m and (_m in hardened):
             hardened = hardened.replace(_m, "")
@@ -1568,7 +1568,21 @@ def rag_analyze_review(
             _txt = str(_s.get("text") or "").strip()
             if isinstance(_ev, list) and len(_ev) > 0 and _txt.upper() == "INSUFFICIENT EVIDENCE":
                 _s["text"] = "Evidence retrieved. Review evidence items for obligations and constraints."
-                warnings.append(f"section_ie_overridden:{str(_s.get('id') or _s.get('title') or 'unknown')}" )
+                # ie_fallback_findings: deterministic bullets from attached evidence (no LLM)
+                if not isinstance(_s.get("findings"), list) or len(_s.get("findings") or []) == 0:
+                    _bul = []
+                    for _e in (_ev or [])[:4]:
+                        if not isinstance(_e, dict):
+                            continue
+                        _et = str(_e.get("text") or _e.get("chunk_text") or "").strip()
+                        if not _et:
+                            continue
+                        _et = " ".join(_et.split())
+                        if len(_et) > 220:
+                            _et = _et[:220].rstrip() + "..."
+                        _bul.append(_et)
+                    if _bul:
+                        _s["findings"] = _bul
         except Exception:
             pass
 
@@ -1594,7 +1608,7 @@ def rag_analyze_review(
                 _parts.append(_t)
                 _parts.append(_txt if _txt else "INSUFFICIENT EVIDENCE")
                 _parts.append("")
-        summary = "\\n".join(_parts).strip() + "\\n"
+        summary = "\n".join(_parts).strip() + "\n"
         warnings.append("summary_rebuilt_from_sections")
     except Exception:
         pass
@@ -1759,6 +1773,7 @@ def _strengthen_overview_from_evidence(sections: List[Dict[str, Any]]) -> List[D
 def _backfill_sections_from_evidence(sections: List[Dict[str, Any]], intent: str = "strict_summary") -> List[Dict[str, Any]]:
     # Back-compat wrapper for tests/imports
     return se_backfill_sections(sections, intent=intent)
+
 
 
 
