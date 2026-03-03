@@ -312,7 +312,7 @@ def _postprocess_review_summary(text: str) -> str:
     # Common encoding artifacts seen in logs / copied text
     # Strip obvious mojibake markers without embedding huge literals
     # NOTE: Do not try to strip all unicode; only remove classic mojibake markers.
-    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # ÃƒÆ’Ã†â€™, ÃƒÆ’Ã¢â‚¬Å¡, ÃƒÆ’Ã‚Â¢ prefixes
+    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢, ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡, ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ prefixes
     for _m in _mojibake_markers:
         if _m and (_m in hardened):
             hardened = hardened.replace(_m, "")
@@ -1567,7 +1567,7 @@ def rag_analyze_review(
             _ev = _s.get("evidence")
             _txt = str(_s.get("text") or "").strip()
             if isinstance(_ev, list) and len(_ev) > 0 and _txt.upper() == "INSUFFICIENT EVIDENCE":
-                _s["text"] = "Evidence retrieved. Review evidence items for obligations and constraints."
+                _s["text"] = "Evidence retrieved."  # overwritten below if we derive bullets
                 # ie_fallback_findings: deterministic bullets from attached evidence (no LLM)
                 if not isinstance(_s.get("findings"), list) or len(_s.get("findings") or []) == 0:
                     _bul = []
