@@ -312,7 +312,7 @@ def _postprocess_review_summary(text: str) -> str:
     # Common encoding artifacts seen in logs / copied text
     # Strip obvious mojibake markers without embedding huge literals
     # NOTE: Do not try to strip all unicode; only remove classic mojibake markers.
-    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # Ã, Â, â prefixes
+    _mojibake_markers = ("\u00c3", "\u00c2", "\u00e2")  # Ãƒ, Ã‚, Ã¢ prefixes
     for _m in _mojibake_markers:
         if _m and (_m in hardened):
             hardened = hardened.replace(_m, "")
@@ -1557,6 +1557,21 @@ def rag_analyze_review(
     # Section-scoped evidence attachment (no cross-section bleed).
     sections = attach_section_scoped_evidence(sections, retrieved_by_section)
     sections = se_backfill_sections(sections, intent=intent)
+
+    # Deterministic enforcement: if evidence exists for a section, do NOT allow whole-section 'INSUFFICIENT EVIDENCE'.
+    # This prevents multipass/single-pass LLM bail-out from producing empty sections when evidence is attached.
+    for _s in (sections or []):
+        try:
+            if not isinstance(_s, dict):
+                continue
+            _ev = _s.get("evidence")
+            _txt = str(_s.get("text") or "").strip()
+            if isinstance(_ev, list) and len(_ev) > 0 and _txt.upper() == "INSUFFICIENT EVIDENCE":
+                _s["text"] = "Evidence retrieved. Review evidence items for obligations and constraints."
+                warnings.append(f"section_ie_overridden:{str(_s.get('id') or _s.get('title') or 'unknown')}" )
+        except Exception:
+            pass
+
 
     # Normalize per-section content (dedupe, drop owner tokens, cap lists)
     for s in sections:
