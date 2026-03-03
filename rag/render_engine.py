@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any, Dict, List
 
@@ -51,6 +51,11 @@ def render_text_summary_from_sections(
         if isinstance(findings, list) and findings:
             for b in findings[: int(max_findings)]:
                 bb = _clean_line(b, max_len=220)
+                # dedupe_summary_vs_bullets: do not repeat the summary sentence as the first bullet
+                if summary and (bb == summary or bb.startswith(summary[:60])):
+                    continue
+                if summary and (bb == summary or bb.startswith(summary[:60])):
+                    continue
                 if bb:
                     parts.append(f"- {bb}")
 
