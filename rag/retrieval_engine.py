@@ -274,6 +274,19 @@ def retrieve_context_local_by_section(
                 hits = vector.query(emb, top_k=effective_top_k, filters={"review_id": str(review_id)}) or []
                 for _h in hits:
                     _attach_evidence_id_to_hit(_h)
+
+                    # NORMALIZE_HIT_TEXT_FIELDS_FOR_MULTIPASS
+                    # Ensure downstream (multipass + evidence attach) can always read evidence text.
+                    try:
+                        if isinstance(_h, dict):
+                            t = (_h.get("chunk_text") or _h.get("snippet") or _h.get("text") or _h.get("content") or _h.get("passage") or "")
+                            if isinstance(t, str) and t.strip():
+                                if not (_h.get("chunk_text") or "").strip():
+                                    _h["chunk_text"] = t
+                                if not (_h.get("snippet") or "").strip():
+                                    _h["snippet"] = t
+                    except Exception:
+                        pass
             except Exception as e:
                 if debug:
                     retrieval_debug.append({"section": sid, "q": q, "error": repr(e)})
@@ -363,4 +376,5 @@ def retrieve_context_local_by_section(
 
     context = "".join(ctx_parts).strip()
     return retrieved_by_section, context, retrieved_counts, retrieval_debug
+
 
