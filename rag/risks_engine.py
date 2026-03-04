@@ -56,7 +56,17 @@ def build_risks_and_tier_counts(
                     continue
                 rid = str(h.get("hit_key") or h.get("key") or h.get("id") or f"autoflag:{lbl}:{i}").strip()
                 sev = norm_sev_fn(str(h.get("severity") or "Low"))
-                risks.append({"id": rid, "label": lbl, "severity": sev, "source": "autoFlag"})
+                risks.append(
+                    {
+                        "id": rid,
+                        "label": lbl,
+                        "severity": sev,
+                        "source": "autoFlag",
+                        "category": (h.get("category") or None),
+                        "sectionId": (h.get("sectionId") or h.get("section_id") or None),
+                        "sectionTitle": (h.get("sectionTitle") or h.get("section_title") or None),
+                    }
+                )
     except Exception:
         pass
 

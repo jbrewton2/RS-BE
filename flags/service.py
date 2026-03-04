@@ -71,6 +71,7 @@ def sanitize_patterns(patterns: List[str]) -> List[str]:
 def scan_text_for_flags(
     text: str,
     record_usage: bool = True,
+    storage: object | None = None,
 ) -> Dict[str, object]:
     """
     Canonical flag-scanning function used by /flags/test and (optionally)
@@ -82,7 +83,7 @@ def scan_text_for_flags(
     - If record_usage=True, increments usage for each unique flag id that fired.
     """
     text = (text or "").strip()
-    flags_payload: FlagsPayload = load_flags()
+    flags_payload: FlagsPayload = load_flags(storage)
 
     hits: List[dict] = []
 

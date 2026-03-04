@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from rag.risks_engine import build_risks_and_tier_counts
+from flags.service import scan_text_for_flags
 from rag.inference_engine import generate_inference_candidates_multi_pass as ie_generate_inference_candidates
 from rag.retrieval_engine import retrieve_context_local as re_retrieve_context_local, effective_top_k as re_effective_top_k, effective_context_chars as re_effective_context_chars, effective_snippet_chars as re_effective_snippet_chars
 from rag.narrative_engine import generate_summary_multi_pass as ne_generate_summary_multi_pass
@@ -1196,6 +1197,48 @@ def rag_analyze_review(
     except Exception:
         pass
 
+    # --- Tier3 flags: attach autoFlags into review for this analysis path (authoritative) ---
+    try:
+        af = (review or {}).get('autoFlags') or {}
+        existing_hits = af.get('hits') or []
+        if not (isinstance(existing_hits, list) and existing_hits):
+            per_hits = []
+            full_parts = []
+
+            for sec in (sections or []):
+                if not isinstance(sec, dict):
+                    continue
+                sid = str(sec.get('id') or '').strip()
+                stitle = str(sec.get('title') or sid or '').strip()
+                txt_s = str(sec.get('text') or sec.get('content') or sec.get('body') or '').strip()
+                if not txt_s:
+                    continue
+
+                # Keep literal newlines out of string literals in source code
+                full_parts.append(stitle + '\n' + txt_s)
+
+                sr = scan_text_for_flags(txt_s, record_usage=False, storage=storage)
+                for h in (sr.get('hits') or []):
+                    if not isinstance(h, dict):
+                        continue
+                    hh = dict(h)
+                    hh['sectionId'] = sid
+                    hh['sectionTitle'] = stitle
+                    per_hits.append(hh)
+
+            summary_af = None
+            full_text = '\n\n'.join(full_parts).strip()
+            if full_text:
+                combined = scan_text_for_flags(full_text, record_usage=True, storage=storage)
+                summary_af = combined.get('summary')
+
+            (review or {})['autoFlags'] = {
+                'hits': per_hits,
+                'summary': summary_af,
+                'explainReady': bool(summary_af),
+            }
+    except Exception:
+        pass
     risks, tier_counts = build_risks_and_tier_counts(
         intent=intent,
         review=(review or {}),
