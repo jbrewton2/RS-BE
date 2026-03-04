@@ -213,6 +213,8 @@ def derive_section_risks(
                             "label": f"Ambiguous obligation language in section: {title}",
                             "severity": "Medium",
                             "source": "sectionDerived",
+                            "sectionId": str(sec.get("id") or "").strip(),
+                            "sectionTitle": title,
                             "category": "project_level",
                             "why": f"Found ambiguity term '{term}' in section text (deterministic rule).",
                         }
@@ -231,6 +233,8 @@ def derive_section_risks(
                         "label": f"No contract evidence attached for section: {title}",
                         "severity": "Low",
                         "source": "sectionDerived",
+                        "sectionId": str(sec.get("id") or "").strip(),
+                        "sectionTitle": title,
                         "category": "project_level",
                         "why": "Section has zero attached evidence items; may indicate retrieval starvation or mapping gap.",
                     }
