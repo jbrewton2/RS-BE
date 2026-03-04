@@ -1198,50 +1198,91 @@ def rag_analyze_review(
         pass
 
     # --- Tier3 flags: attach autoFlags into review for this analysis path (authoritative) ---
+    # UI goal: each Tier3 flag maps to ONE canonical stakeholder section (no cross-section duplication).
     try:
         af = (review or {}).get('autoFlags') or {}
         existing_hits = af.get('hits') or []
         if not (isinstance(existing_hits, list) and existing_hits):
-            per_hits = []
-            full_parts = []
-
+            # Collect deterministic, citable text: evidence snippets across all sections.
+            ev_texts = []
             for sec in (sections or []):
                 if not isinstance(sec, dict):
                     continue
-                sid = str(sec.get('id') or '').strip()
-                stitle = str(sec.get('title') or sid or '').strip()
-                # Prefer contract evidence text (deterministic, citable) over LLM section summaries
                 evs = sec.get('evidence') or []
-                ev_texts = []
-                if isinstance(evs, list):
-                    for ev in evs:
-                        if not isinstance(ev, dict):
-                            continue
-                        t = ev.get('text') or ev.get('snippet') or ev.get('text_snippet') or ev.get('excerpt') or ''
-                        t = str(t or '').strip()
-                        if t:
-                            ev_texts.append(t)
-                txt_s = '\n'.join(ev_texts).strip() if ev_texts else str(sec.get('text') or sec.get('content') or sec.get('body') or '').strip()
-                if not txt_s:
+                if not isinstance(evs, list):
+                    continue
+                for ev in evs:
+                    if not isinstance(ev, dict):
+                        continue
+                    t = ev.get('text') or ev.get('snippet') or ev.get('text_snippet') or ev.get('excerpt') or ''
+                    t = str(t or '').strip()
+                    if t:
+                        ev_texts.append(t)
+
+            corpus = '\n'.join(ev_texts).strip()
+            per_hits = []
+            summary_af = None
+
+            # Deterministic section routing for Tier3 hits.
+            def _map_flag_to_section(hit: dict) -> tuple[str, str]:
+                fid = str(hit.get('id') or '').strip()
+                cat = str(hit.get('category') or '').strip().upper()
+                lbl = str(hit.get('label') or '').strip().upper()
+
+                # Hard rule: DFARS 7012 ONLY under Security/Compliance/Hosting
+                if fid == 'cyber_dfars_7012' or 'DFARS' in lbl or cat == 'CYBER_DFARS':
+                    return ('security-compliance-hosting-constraints', 'SECURITY, COMPLIANCE & HOSTING CONSTRAINTS')
+
+                if cat in ('NIST_800_171', 'INCIDENT_RESPONSE') or fid in ('cyber_nist_800_171','cyber_incident_reporting','cyber_logging_siem','cyber_rmf_ato'):
+                    return ('security-compliance-hosting-constraints', 'SECURITY, COMPLIANCE & HOSTING CONSTRAINTS')
+
+                if cat in ('AUDIT',) or fid.startswith('legal_') or 'DATA RIGHTS' in lbl or 'IP' in lbl:
+                    return ('legal-data-rights-risks', 'LEGAL & DATA RIGHTS RISKS')
+
+                if fid.startswith('prog_') or 'MILESTONE' in lbl or 'SCHEDULE' in lbl:
+                    return ('deliverables-timelines', 'DELIVERABLES & TIMELINES')
+
+                # Default: keep stakeholders focused; route unknowns to Overview
+                return ('overview', 'OVERVIEW')
+
+            # Deduplicate by (flag_id, mapped_sectionId) keeping max severity.
+            _sev_rank = {'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4}
+
+            def _sev_score(s: str) -> int:
+                return _sev_rank.get(str(s or '').strip().upper(), 0)
+
+            if corpus:
+                combined = scan_text_for_flags(corpus, record_usage=True, storage=storage)
+                summary_af = combined.get('summary')
+                raw_hits = combined.get('hits') or []
+            else:
+                raw_hits = []
+
+            best: dict[tuple[str, str], dict] = {}
+            for h in raw_hits:
+                if not isinstance(h, dict):
+                    continue
+                fid = str(h.get('id') or '').strip()
+                if not fid:
                     continue
 
-                # Keep literal newlines out of string literals in source code
-                full_parts.append(stitle + '\n' + txt_s)
+                sid, stitle = _map_flag_to_section(h)
 
-                sr = scan_text_for_flags(txt_s, record_usage=False, storage=storage)
-                for h in (sr.get('hits') or []):
-                    if not isinstance(h, dict):
-                        continue
-                    hh = dict(h)
-                    hh['sectionId'] = sid
-                    hh['sectionTitle'] = stitle
-                    per_hits.append(hh)
+                hh = dict(h)
+                hh['sectionId'] = sid
+                hh['sectionTitle'] = stitle
 
-            summary_af = None
-            full_text = '\n\n'.join(full_parts).strip()
-            if full_text:
-                combined = scan_text_for_flags(full_text, record_usage=True, storage=storage)
-                summary_af = combined.get('summary')
+                # Stable hit_key for deterministic risk IDs
+                line = int(h.get('line') or 0)
+                match = str(h.get('match') or '').strip()[:120]
+                hh['hit_key'] = f"{fid}|{sid}|{line}|{match}"
+
+                k = (fid, sid)
+                cur = best.get(k)
+                if cur is None or _sev_score(h.get('severity')) > _sev_score(cur.get('severity')):
+                    best[k] = hh
+
+            per_hits = list(best.values())
 
             (review or {})['autoFlags'] = {
                 'hits': per_hits,
