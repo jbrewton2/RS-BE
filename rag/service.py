@@ -373,10 +373,14 @@ def _build_ui_risks_from_rag(*, risks: list[dict], sections: list[dict]) -> list
         ev_out: list[dict] = []
 
         if source == "sectionDerived":
-            sec_id = ""
-            parts = rid.split("_")
-            if len(parts) >= 4:
-                sec_id = parts[-1].strip().lower()
+            # Prefer explicit sectionId stamped at risk creation time (authoritative)
+            sec_id = str(r.get("sectionId") or r.get("section_id") or "").strip().lower()
+
+            # Back-compat fallback: try to infer from legacy ids (best-effort only)
+            if not sec_id:
+                parts = rid.split("_")
+                if len(parts) >= 4:
+                    sec_id = parts[-1].strip().lower()
 
             sec = sec_by_id.get(sec_id)
             if isinstance(sec, dict):
@@ -410,6 +414,8 @@ def _build_ui_risks_from_rag(*, risks: list[dict], sections: list[dict]) -> list
                 "source": source or None,
                 "source_type": source or None,
                 "status": "Open",
+                "sectionId": (str(r.get("sectionId") or r.get("section_id") or "").strip() or None),
+                "sectionTitle": (str(r.get("sectionTitle") or r.get("section_title") or "").strip() or None),
                 "evidence": ev_out,
             }
         )
@@ -487,7 +493,7 @@ def _strip_owner_tokens(s: str) -> str:
     t = _OWNER_INLINE_RE.sub("", t).strip()
 
     # Also remove trailing separators left behind
-    t = re.sub(r"\s*[\|\-â€“â€”:]+\s*$", "", t).strip()
+    t = re.sub(r"\s*[\|\-Ã¢â‚¬â€œÃ¢â‚¬â€:]+\s*$", "", t).strip()
 
     return t
 
