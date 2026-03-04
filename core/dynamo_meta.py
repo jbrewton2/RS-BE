@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.types import TypeDeserializer
 
 
 def _now_iso() -> str:
@@ -37,6 +38,29 @@ def _dynamo_safe(value):
         return [_dynamo_safe(v) for v in value]
     return value
 
+
+_deser = TypeDeserializer()
+
+def _ddb_deserialize_item(item: Any) -> Any:
+    """
+    Convert DynamoDB AttributeValue JSON (M/S/N/L/BOOL/NULL) into plain Python values.
+    If item is already plain (typical boto3.resource), it returns it unchanged.
+    """
+    if not isinstance(item, dict):
+        return item
+
+    # Heuristic: if values look like AttributeValue wrappers, deserialize them.
+    out: Dict[str, Any] = {}
+    for k, v in item.items():
+        try:
+            # AttributeValue wrapper is usually a dict with a single key: S/N/M/L/BOOL/NULL/B/BS/SS/NS
+            if isinstance(v, dict) and len(v) == 1:
+                out[k] = _deser.deserialize(v)
+            else:
+                out[k] = v
+        except Exception:
+            out[k] = v
+    return out
 
 class DynamoMeta:
     """
@@ -520,7 +544,8 @@ class DynamoMeta:
         if not review_id:
             return None
         resp = self.table.get_item(Key={"pk": self._pk(review_id), "sk": "META"})
-        return resp.get("Item")
+        item = resp.get("Item")
+        return _ddb_deserialize_item(item) if item else None
 
     def put_rag_run(
         self,
