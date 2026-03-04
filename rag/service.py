@@ -1210,7 +1210,18 @@ def rag_analyze_review(
                     continue
                 sid = str(sec.get('id') or '').strip()
                 stitle = str(sec.get('title') or sid or '').strip()
-                txt_s = str(sec.get('text') or sec.get('content') or sec.get('body') or '').strip()
+                # Prefer contract evidence text (deterministic, citable) over LLM section summaries
+                evs = sec.get('evidence') or []
+                ev_texts = []
+                if isinstance(evs, list):
+                    for ev in evs:
+                        if not isinstance(ev, dict):
+                            continue
+                        t = ev.get('text') or ev.get('snippet') or ev.get('text_snippet') or ev.get('excerpt') or ''
+                        t = str(t or '').strip()
+                        if t:
+                            ev_texts.append(t)
+                txt_s = '\n'.join(ev_texts).strip() if ev_texts else str(sec.get('text') or sec.get('content') or sec.get('body') or '').strip()
                 if not txt_s:
                     continue
 
