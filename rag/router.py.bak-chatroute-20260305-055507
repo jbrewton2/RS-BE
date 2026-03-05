@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 
 from auth.jwt import get_current_user
 from core.providers import providers_from_request
-from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse, RagChatRequest, RagChatResponse
-from rag.service import rag_analyze_review, rag_chat_review, _owner_for_section  # noqa: F401
+from rag.contracts import RagAnalyzeRequest, RagAnalyzeResponse
+from rag.service import rag_analyze_review, _owner_for_section  # noqa: F401
 from rag.jobs_store import RagJobStore
 
 logger = logging.getLogger(__name__)
@@ -356,52 +356,4 @@ def analyze_result(job_id: str):
         return RagAnalyzeResponse.model_validate(raw_obj)
     except KeyError:
         raise HTTPException(status_code=404, detail="job_id not found")
-
-
-@router.post(
-    "/chat",
-    response_model=RagChatResponse,
-    response_model_exclude_none=True,
-)
-def chat(req: RagChatRequest, request: Request, providers=Depends(providers_from_request)):
-    """
-    Interactive review chat endpoint.
-    Uses deterministic retrieval scoped to review_id, then answers via LLM.
-    """
-    try:
-        auth = (request.headers.get("authorization") or request.headers.get("Authorization") or "").strip()
-        token = ""
-        if auth.lower().startswith("bearer "):
-            token = auth.split(" ", 1)[1].strip()
-
-        result = rag_chat_review(
-            storage=providers.storage,
-            vector=providers.vector,
-            llm=providers.llm,
-            review_id=req.review_id,
-            token=token,
-            message=req.message,
-            top_k=req.top_k,
-            max_context_chars=req.max_context_chars,
-            include_evidence=req.include_evidence,
-        )
-
-        if not isinstance(result, dict):
-            try:
-                result = result.model_dump()
-            except Exception:
-                result = dict(result)
-
-        result.setdefault("review_id", req.review_id)
-        result.setdefault("answer", "")
-
-        return RagChatResponse.model_validate(result)
-
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("RAG chat failed")
-        raise HTTPException(status_code=500, detail=f"RAG chat failed: {type(e).__name__}") from e
 
