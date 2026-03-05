@@ -307,7 +307,7 @@ def _postprocess_review_summary(text: str) -> str:
     # Common encoding artifacts seen in logs / copied text
     # Strip obvious mojibake markers without embedding huge literals
     # NOTE: Do not try to strip all unicode; only remove classic mojibake markers.
-    for _m in ("Ãƒ", "Ã‚", "Ã¢â‚¬", "Ã¯Â»Â¿"):
+    for _m in ("ÃƒÆ’", "Ãƒâ€š", "ÃƒÂ¢Ã¢â€šÂ¬", "ÃƒÂ¯Ã‚Â»Ã‚Â¿"):
         if _m in hardened:
             hardened = hardened.replace(_m, "")
 
@@ -494,7 +494,7 @@ def _strip_owner_tokens(s: str) -> str:
     t = _OWNER_INLINE_RE.sub("", t).strip()
 
     # Also remove trailing separators left behind
-    t = re.sub(r"\s*[\|\-Ã¢â‚¬â€œÃ¢â‚¬â€:]+\s*$", "", t).strip()
+    t = re.sub(r"\s*[\|\-ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â:]+\s*$", "", t).strip()
 
     return t
 
@@ -1504,15 +1504,23 @@ def rag_chat_review(
     from rag.service_helpers import retrieve_context  # local import to avoid cyclic risk
 
     # Retrieve evidence for the user question (single-question retrieval)
+    # Retrieve evidence for the user question (single-question retrieval)
+    from rag.service_helpers import retrieve_context  # local import to avoid cycles
+    from core.config import env_get
+
     retrieved_by_q, context_str, max_used, signals = retrieve_context(
-        llm=llm,
         vector=vector,
-        review_id=rid,
+        llm=llm,
         questions=[q],
-        max_context_chars=int(max_context_chars or 9000),
-        per_question=int(top_k or 8),
-        # no explicit query fn override; retrieve_context resolves vector.query/ query_review
+        effective_top_k=int(top_k or 8),
+        filters={"review_id": rid},
+        snippet_cap=800,
+        intent="chat",
+        profile="deep",
         query_review_fn=None,
+        env_get_fn=env_get,
+        effective_context_chars_fn=(lambda _prof: int(max_context_chars or 9000)),
+        heuristic_hits=None,
     )
 
     hits = (retrieved_by_q or {}).get(q) or []
@@ -1591,4 +1599,3 @@ def rag_chat_review(
             "retrieved_total": int(len(hits)),
         },
     }
-
