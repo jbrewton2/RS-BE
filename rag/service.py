@@ -307,7 +307,7 @@ def _postprocess_review_summary(text: str) -> str:
     # Common encoding artifacts seen in logs / copied text
     # Strip obvious mojibake markers without embedding huge literals
     # NOTE: Do not try to strip all unicode; only remove classic mojibake markers.
-    for _m in ("ÃƒÆ’", "Ãƒâ€š", "ÃƒÂ¢Ã¢â€šÂ¬", "ÃƒÂ¯Ã‚Â»Ã‚Â¿"):
+    for _m in ("ÃƒÆ’Ã†â€™", "ÃƒÆ’Ã¢â‚¬Å¡", "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬", "ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Â¿"):
         if _m in hardened:
             hardened = hardened.replace(_m, "")
 
@@ -494,7 +494,7 @@ def _strip_owner_tokens(s: str) -> str:
     t = _OWNER_INLINE_RE.sub("", t).strip()
 
     # Also remove trailing separators left behind
-    t = re.sub(r"\s*[\|\-ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â:]+\s*$", "", t).strip()
+    t = re.sub(r"\s*[\|\-ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â:]+\s*$", "", t).strip()
 
     return t
 
@@ -1506,7 +1506,7 @@ def rag_chat_review(
     # Retrieve evidence for the user question (single-question retrieval)
     # Retrieve evidence for the user question (single-question retrieval)
     from rag.service_helpers import retrieve_context  # local import to avoid cycles
-    from core.config import env_get
+    from core.env import env_get
 
     retrieved_by_q, context_str, max_used, signals = retrieve_context(
         vector=vector,
@@ -1518,7 +1518,7 @@ def rag_chat_review(
         intent="chat",
         profile="deep",
         query_review_fn=None,
-        env_get_fn=env_get,
+        env_get_fn=(lambda k, d="": os.environ.get(k, d)),
         effective_context_chars_fn=(lambda _prof: int(max_context_chars or 9000)),
         heuristic_hits=None,
     )
